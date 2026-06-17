@@ -1,0 +1,10 @@
+--TEST--
+returning a string from an i32 function is a type error
+--FILE--
+pub fn main(): i32 {
+  return "x";
+}
+--EXPECTERR--
+zup: error: cannot return i8[] from function returning i32 [2:3]
+--EXIT--
+1

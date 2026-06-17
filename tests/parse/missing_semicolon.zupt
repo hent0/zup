@@ -1,0 +1,10 @@
+--TEST--
+missing ';' after a return statement
+--FILE--
+pub fn main(): i32 {
+  return 42
+}
+--EXPECTERR--
+zup: error: expected ';' after return statement (got TOKEN_RBRACE) [3:1]
+--EXIT--
+1

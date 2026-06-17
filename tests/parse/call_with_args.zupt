@@ -1,0 +1,14 @@
+--TEST--
+calls with arguments are rejected until parameters are supported
+--FILE--
+fn id(): i32 {
+  return 1;
+}
+
+pub fn main(): i32 {
+  return id(42);
+}
+--EXPECTERR--
+zup: error: 'id' takes no arguments (parameters not supported yet) [6:10]
+--EXIT--
+1

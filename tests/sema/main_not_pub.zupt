@@ -1,0 +1,10 @@
+--TEST--
+'main' must be declared public
+--FILE--
+fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'main' must be public (declared with 'pub') [1:1]
+--EXIT--
+1

@@ -1,0 +1,38 @@
+--TEST--
+calls resolve against functions defined later in the file
+--FILE--
+fn seven(): i32 {
+  return sevenimpl();
+}
+
+fn sevenimpl(): i32 {
+  return 7;
+}
+
+fn noop() {
+  return;
+}
+
+pub fn main(): i32 {
+  noop();
+  return seven();
+}
+--ARGS--
+--ast
+--EXPECT--
+Container (file) (4 members)
+  FnDecl priv 'seven' -> i32
+    Return
+      Call 'sevenimpl' (0 args)
+  FnDecl priv 'sevenimpl' -> i32
+    Return
+      Number literal 7
+  FnDecl priv 'noop' -> void
+    Return
+  FnDecl pub 'main' -> i32
+    ExprStmt
+      Call 'noop' (0 args)
+    Return
+      Call 'seven' (0 args)
+--EXIT--
+0

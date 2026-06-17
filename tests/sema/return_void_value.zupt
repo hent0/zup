@@ -1,0 +1,14 @@
+--TEST--
+a void function cannot return a value
+--FILE--
+fn noop() {
+  return 1;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: void function 'noop' cannot return a value [2:3]
+--EXIT--
+1

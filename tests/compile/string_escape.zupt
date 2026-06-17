@@ -1,0 +1,10 @@
+--TEST--
+escape sequences are emitted as real bytes at runtime
+--FILE--
+pub fn main(): i32 {
+  printf("tab\there\nline2\n");
+  return 0;
+}
+--EXPECT--
+tab	here
+line2

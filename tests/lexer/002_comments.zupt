@@ -1,0 +1,11 @@
+--TEST--
+token stream of a minimal main
+--ARGS--
+--tokenize
+--FILE--
+  // printf("Hello, world!\n");
+  /**
+   * Multiline comment
+   */
+--EXPECT--
+--EXPECT_ERR--

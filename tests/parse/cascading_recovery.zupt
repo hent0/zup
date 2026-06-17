@@ -1,0 +1,13 @@
+--TEST--
+missing ':' before return type triggers panic-mode recovery (cascading errors)
+--FILE--
+pub fn main() i32 {
+  return 1;
+}
+--EXPECTERR--
+zup: error: expected '{' (got TOKEN_I32) [1:15]
+zup: error: expected statement (got TOKEN_I32) [1:15]
+zup: error: expected '}' (got TOKEN_I32) [1:15]
+zup: error: expected 'fn' (got TOKEN_I32) [1:15]
+--EXIT--
+1

@@ -1,0 +1,18 @@
+--TEST--
+defining the same function twice is a semantic error
+--FILE--
+fn foo(): i32 {
+  return 1;
+}
+
+fn foo(): i32 {
+  return 2;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: redefinition of function 'foo' [5:1]
+--EXIT--
+1

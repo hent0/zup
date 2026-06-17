@@ -1,0 +1,10 @@
+--TEST--
+function declaration without a name
+--FILE--
+pub fn (): i32 {
+  return 1;
+}
+--EXPECTERR--
+zup: error: expected function name (got TOKEN_LPAREN) [1:8]
+--EXIT--
+1

@@ -1,0 +1,14 @@
+--TEST--
+a non-void function must return a value
+--FILE--
+fn seven(): i32 {
+  return;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: non-void function 'seven' must return a value [2:3]
+--EXIT--
+1

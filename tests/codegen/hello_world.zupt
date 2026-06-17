@@ -1,0 +1,25 @@
+--TEST--
+hello world lowers to printf calls and a constant return
+--ARGS--
+--ir -o -
+--FILE--
+fn test() {}
+pub fn main(): i32 {
+  printf("Hello, %s!\n", "world");
+  return 123;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+@.str.0 = private unnamed_addr constant [12 x i8] c"Hello, %s!\0A\00"
+@.str.1 = private unnamed_addr constant [6 x i8] c"world\00"
+
+define internal void @test() {
+entry:
+  ret void
+}
+
+define i32 @main() {
+entry:
+  %1 = call i32 @printf(ptr @.str.0, ptr @.str.1)
+  ret i32 123
+}

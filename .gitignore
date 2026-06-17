@@ -1,0 +1,6 @@
+build/
+.direnv/
+.cache/
+tests/**/*.diff
+tests/**/*.out
+tests/**/*.err

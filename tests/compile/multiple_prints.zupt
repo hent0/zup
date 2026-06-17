@@ -1,0 +1,11 @@
+--TEST--
+multiple printf calls emit in order
+--FILE--
+pub fn main(): i32 {
+  printf("first\n");
+  printf("second\n");
+  return 0;
+}
+--EXPECT--
+first
+second

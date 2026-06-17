@@ -1,0 +1,10 @@
+--TEST--
+function declaration missing '(' after the name
+--FILE--
+pub fn main): i32 {
+  return 1;
+}
+--EXPECTERR--
+zup: error: expected '(' after function name (got TOKEN_RPAREN) [1:12]
+--EXIT--
+1

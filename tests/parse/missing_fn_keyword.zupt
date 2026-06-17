@@ -1,0 +1,10 @@
+--TEST--
+declaration missing the 'fn' keyword
+--FILE--
+pub main(): i32 {
+  return 1;
+}
+--EXPECTERR--
+zup: error: expected 'fn' (got TOKEN_ID) [1:5]
+--EXIT--
+1

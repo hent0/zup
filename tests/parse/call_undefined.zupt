@@ -1,0 +1,10 @@
+--TEST--
+calling an undefined function is a semantic error
+--FILE--
+pub fn main(): i32 {
+  return missing();
+}
+--EXPECTERR--
+zup: error: call to undefined function 'missing' [2:10]
+--EXIT--
+1

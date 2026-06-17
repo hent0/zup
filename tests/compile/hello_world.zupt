@@ -1,0 +1,9 @@
+--TEST--
+compiled program prints to stdout and exits 0
+--FILE--
+pub fn main(): i32 {
+  printf("Hello, %s!\n", "world");
+  return 0;
+}
+--EXPECT--
+Hello, world!

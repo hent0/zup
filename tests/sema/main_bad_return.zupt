@@ -1,0 +1,10 @@
+--TEST--
+'main' must return i32
+--FILE--
+pub fn main(): i64 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'main' must return i32 [1:5]
+--EXIT--
+1

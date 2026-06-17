@@ -1,0 +1,11 @@
+--TEST--
+a program can print and then exit with a nonzero code
+--FILE--
+pub fn main(): i32 {
+  printf("bye\n");
+  return 3;
+}
+--EXPECT--
+bye
+--EXIT--
+3

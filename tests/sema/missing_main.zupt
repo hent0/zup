@@ -1,0 +1,10 @@
+--TEST--
+a program without a 'main' function has no entry point
+--FILE--
+fn foo(): i32 {
+  return 1;
+}
+--EXPECTERR--
+zup: error: no entry point: 'main' function is required
+--EXIT--
+1
