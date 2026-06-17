@@ -1,0 +1,25 @@
+--TEST--
+multiple parameters lower to a comma-separated signature and call
+--ARGS--
+--ir -o -
+--FILE--
+fn sub(a: i32, b: i32): i32 {
+  return a;
+}
+
+pub fn main(): i32 {
+  return sub(7, 2);
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i32 @sub(i32 %a, i32 %b) {
+entry:
+  ret i32 %a
+}
+
+define i32 @main() {
+entry:
+  %1 = call i32 @sub(i32 7, i32 2)
+  ret i32 %1
+}

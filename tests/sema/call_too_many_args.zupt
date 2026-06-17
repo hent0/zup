@@ -1,0 +1,14 @@
+--TEST--
+passing more arguments than parameters is an error (and must not crash)
+--FILE--
+fn one(x: i32): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return one(1, 2);
+}
+--EXPECTERR--
+zup: error: 'one' expects 1 argument but got 2 [6:10]
+--EXIT--
+1

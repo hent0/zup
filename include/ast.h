@@ -130,6 +130,7 @@ expr_t *ast_id_init(token_t token, arena_t *arena);
 expr_t *ast_call_init(expr_t *callee, arena_t *arena);
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
+param_t *ast_param_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);
 unit_t *ast_unit_init(source_t *src, arena_t *arena);

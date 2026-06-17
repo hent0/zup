@@ -1,0 +1,12 @@
+--TEST--
+arguments bind to parameters positionally
+--FILE--
+fn second(a: i32, b: i32): i32 {
+  return b;
+}
+
+pub fn main(): i32 {
+  return second(1, 9);
+}
+--EXIT--
+9

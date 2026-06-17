@@ -1,0 +1,25 @@
+--TEST--
+multiple parameters of different integer types parse in order
+--ARGS--
+--ast
+--FILE--
+fn add3(a: i32, b: i64, c: i8): i64 {
+  return c;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'add3' -> i64
+    param a: i32
+    param b: i64
+    param c: i8
+    Return
+      Id c
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

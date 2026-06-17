@@ -1,0 +1,14 @@
+--TEST--
+passing an argument whose type is not assignable to the parameter is an error
+--FILE--
+fn one(x: i32): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return one("hi");
+}
+--EXPECTERR--
+zup: error: cannot pass i8[] as argument 'x' of 'one' (expected i32) [6:10]
+--EXIT--
+1

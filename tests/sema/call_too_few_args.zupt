@@ -1,0 +1,14 @@
+--TEST--
+calling a function with the wrong number of arguments is an error
+--FILE--
+fn one(x: i32): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return one();
+}
+--EXPECTERR--
+zup: error: 'one' expects 1 argument but got 0 [6:10]
+--EXIT--
+1

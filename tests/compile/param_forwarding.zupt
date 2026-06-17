@@ -1,0 +1,16 @@
+--TEST--
+a parameter can be used as an argument to another call
+--FILE--
+fn pick(x: i32): i32 {
+  return x;
+}
+
+fn forward(y: i32): i32 {
+  return pick(y);
+}
+
+pub fn main(): i32 {
+  return forward(5);
+}
+--EXIT--
+5

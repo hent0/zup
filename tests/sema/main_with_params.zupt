@@ -1,0 +1,10 @@
+--TEST--
+'main' is not allowed to declare parameters
+--FILE--
+pub fn main(x: i32): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'main' must take no parameters [1:5]
+--EXIT--
+1

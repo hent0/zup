@@ -12,6 +12,8 @@ struct ctx_str {
   ctx_str_t *next;
 };
 
+#define CTX_REG_START 1
+
 typedef struct {
   FILE *out;
   arena_t *arena;
@@ -154,6 +156,14 @@ static int emit_call(ctx_t *ctx, expr_t *expr) {
       case EXPR_STRING:
         fprintf(ctx->out, "ptr @.str.%d", cg_string_index(ctx, arg));
         break;
+      case EXPR_NUMBER:
+        fprintf(ctx->out, "%s %s", type_kind_to_str(arg->type.kind),
+                arg->number.value);
+        break;
+      case EXPR_ID:
+        fprintf(ctx->out, "%s %%%s", type_kind_to_str(arg->type.kind),
+                arg->id.name);
+        break;
       default:
         NOT_IMPLEMENTED;
         return 1;
@@ -170,17 +180,29 @@ static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
                        const char *fn_name) {
   expr_t *value = stmt->ret.value;
 
-  if (value == NULL && type.kind != TYPE_VOID) {
-    // TODO: Add source
-    diag_error(NULL, stmt->line, stmt->col,
-               "non-void function '%s' must return a value", fn_name);
-    return 1;
+  if (value == NULL) {
+    if (type.kind != TYPE_VOID) {
+      // TODO: Add source
+      diag_error(NULL, stmt->line, stmt->col,
+                 "non-void function '%s' must return a value", fn_name);
+      return 1;
+    }
+    return 0;
   }
 
   switch (value->kind) {
   case EXPR_NUMBER:
     fprintf(ctx->out, "  ret %s %s\n", type_kind_to_str(type.kind),
             value->number.value);
+    return 0;
+  case EXPR_ID:
+    fprintf(ctx->out, "  ret %s %%%s\n", type_kind_to_str(type.kind),
+            value->id.name);
+    return 0;
+  case EXPR_CALL:
+    emit_call(ctx, value);
+    fprintf(ctx->out, "  ret %s %%%d\n", type_kind_to_str(type.kind),
+            ctx->reg - 1);
     return 0;
   default:
     return 1;
@@ -215,10 +237,17 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     }
     return 0;
   case DECL_FN:
-    fprintf(ctx->out, "define %s%s @%s() {\n",
+    ctx->reg = CTX_REG_START;
+    fprintf(ctx->out, "define %s%s @%s(",
             decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
             type_kind_to_str(decl->fn.return_type.kind), decl->name);
-    fprintf(ctx->out, "entry:\n");
+    for (const param_t *param = decl->fn.params; param != NULL;
+         param = param->next) {
+      fprintf(ctx->out, "%s %%%s%s", type_kind_to_str(param->type.kind),
+              param->name, param->next != NULL ? ", " : "");
+    }
+
+    fprintf(ctx->out, ") {\nentry:\n");
 
     for (stmt_t *stmt = decl->fn.body; stmt != NULL; stmt = stmt->next) {
       switch (stmt->kind) {
@@ -253,7 +282,7 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
   ctx_t ctx = {
       .out = out,
       .arena = arena,
-      .reg = 1,
+      .reg = CTX_REG_START,
   };
 
   for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {

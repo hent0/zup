@@ -1,0 +1,10 @@
+--TEST--
+a parameter without a type is a parse error
+--FILE--
+fn bad(a: ) {
+  return;
+}
+--EXPECTERR--
+zup: error: expected a type (got TOKEN_RPAREN) [1:11]
+--EXIT--
+1

@@ -90,6 +90,14 @@ stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena) {
   return stmt;
 }
 
+param_t *ast_param_init(arena_t *arena) {
+  param_t *param = arena_alloc(arena, sizeof(param_t));
+  param->name = NULL;
+  param->type = (type_t){.kind = TYPE_UNKNOWN};
+  param->next = NULL;
+  return param;
+}
+
 decl_t *ast_fn_init(arena_t *arena) {
   decl_t *fn = arena_alloc(arena, sizeof(decl_t));
   fn->kind = DECL_FN;

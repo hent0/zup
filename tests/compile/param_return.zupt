@@ -1,0 +1,12 @@
+--TEST--
+a parameter's value flows through a call and out as the exit code
+--FILE--
+fn pick(x: i32): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return pick(7);
+}
+--EXIT--
+7

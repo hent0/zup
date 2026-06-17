@@ -1,0 +1,24 @@
+--TEST--
+a function with a single typed parameter parses into the AST
+--ARGS--
+--ast
+--FILE--
+fn inc(x: i32): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return inc(7);
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'inc' -> i32
+    param x: i32
+    Return
+      Id x
+  FnDecl pub 'main' -> i32
+    Return
+      Call 'inc' (1 args)
+        Number literal 7
+--EXIT--
+0

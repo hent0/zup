@@ -9,6 +9,6 @@ pub fn main(): i32 {
   return id(42);
 }
 --EXPECTERR--
-zup: error: 'id' takes no arguments (parameters not supported yet) [6:10]
+zup: error: 'id' expects 0 arguments but got 1 [6:10]
 --EXIT--
 1

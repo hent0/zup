@@ -1,19 +1,11 @@
 #include "parser.h"
 #include "ast.h"
 #include "compiler.h"
-#include "debug.h"
 #include "diag.h"
 #include "lexer.h"
 #include "token.h"
-#include <stdio.h>
 #include <stdlib.h>
 
-// Reports a parse error at the current (offending) token and flips the parser
-// into the failed state. We do NOT consume the token or unwind: each enclosing
-// context re-checks its own expectation against the stuck token, which is what
-// produces the cascading-diagnostics behaviour the tests expect. Loops bound
-// the cascade by breaking when no token was consumed (see parse_fn /
-// parser_parse).
 static void parse_error(parser_t *parser, const char *msg) {
   diag_error(parser->src, parser->current.line, parser->current.col,
              "%s (got %s)", msg, token_kind_to_str(parser->current.kind));
@@ -68,7 +60,7 @@ static type_t parse_type(parser_t *parser) {
     return (type_t){.kind = TYPE_STRING};
   default:
     parse_error(parser, "expected a type");
-    return (type_t){.kind = TYPE_VOID};
+    return (type_t){.kind = TYPE_UNKNOWN};
   }
 }
 
@@ -171,6 +163,20 @@ static type_t parse_return_type(parser_t *parser) {
   return (type_t){.kind = TYPE_VOID};
 }
 
+static param_t *parse_param(parser_t *parser) {
+  token_t id = expect(parser, TOKEN_ID, "expected identifier");
+  expect(parser, TOKEN_COLON, "expected ':' after identifier");
+  type_t type = parse_type(parser);
+  if (type.kind == TYPE_UNKNOWN) {
+    return NULL;
+  }
+
+  param_t *param = ast_param_init(parser->arena);
+  param->name = id.value;
+  param->type = type;
+  return param;
+}
+
 static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
   token_t kw = expect(parser, TOKEN_FN, "expected 'fn'");
   token_t name = expect(parser, TOKEN_ID, "expected function name");
@@ -182,33 +188,43 @@ static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
   fn->col = kw.col;
 
   expect(parser, TOKEN_LPAREN, "expected '(' after function name");
-  if (!check(parser, TOKEN_RPAREN)) {
-    // Parameters are not supported yet.
-    NOT_IMPLEMENTED;
-    parser->had_error = true;
-    return NULL;
+  param_t *p_tail = NULL;
+  while (!check(parser, TOKEN_RPAREN)) {
+    if (p_tail != NULL) {
+      expect(parser, TOKEN_COMMA, "expected ',' between arguments");
+    }
+    param_t *param = parse_param(parser);
+    if (param == NULL) {
+      break;
+    }
+
+    if (p_tail == NULL) {
+      fn->fn.params = param;
+    } else {
+      p_tail->next = param;
+    }
+    p_tail = param;
+    fn->fn.params_count++;
   }
   expect(parser, TOKEN_RPAREN, "expected ')' after parameters");
 
   fn->fn.return_type = parse_return_type(parser);
 
   expect(parser, TOKEN_LBRACE, "expected '{'");
-  stmt_t *tail = NULL;
+  stmt_t *s_tail = NULL;
   while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
     stmt_t *stmt = parse_stmt(parser);
     if (stmt == NULL) {
-      // parse_stmt made no progress on the stuck token; stop to avoid
-      // looping and let the enclosing '}' / 'fn' expectations report too.
       break;
     }
 
-    if (tail == NULL) {
+    if (s_tail == NULL) {
       fn->fn.body = stmt;
     } else {
-      tail->next = stmt;
+      s_tail->next = stmt;
     }
 
-    tail = stmt;
+    s_tail = stmt;
     fn->fn.stmt_count++;
   }
 

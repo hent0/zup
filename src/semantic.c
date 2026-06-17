@@ -21,8 +21,29 @@ static decl_t *symtab_lookup(const symtab_t *tab, const char *name) {
 }
 
 typedef struct {
+  const char *name;
+  type_t type;
+} local_t;
+
+typedef struct {
+  local_t *items;
+  size_t count;
+} scope_t;
+
+static const local_t *scope_lookup(const scope_t *scope, const char *name) {
+  for (size_t i = 0; i < scope->count; i++) {
+    if (strcmp(scope->items[i].name, name) == 0) {
+      return &scope->items[i];
+    }
+  }
+  return NULL;
+}
+
+typedef struct {
   const symtab_t *tab;
   const source_t *src;
+  const scope_t *scope;
+  arena_t *arena;
   bool had_error;
 } sema_t;
 
@@ -45,22 +66,29 @@ static bool type_assignable(TypeKind to, TypeKind from) {
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr);
 
+// TODO: Refactor out later
+static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
+  expr_t *first = call->call.args;
+  if (first == NULL || first->kind != EXPR_STRING) {
+    diag_error(sema->src, call->line, call->col,
+               "'printf' expects a string literal as its first argument");
+    sema->had_error = true;
+  }
+
+  for (expr_t *arg = first != NULL ? first->next : NULL; arg != NULL;
+       arg = arg->next) {
+    check_expr(sema, arg);
+  }
+  return (exprty_t){.kind = TYPE_I32, .ok = true};
+}
+
 static exprty_t check_call(sema_t *sema, expr_t *call) {
   expr_t *callee = call->call.callee;
   const char *name = callee->id.name;
 
+  // TODO: Refactor out later
   if (strcmp(name, "printf") == 0) {
-    expr_t *first = call->call.args;
-    if (first == NULL || first->kind != EXPR_STRING) {
-      diag_error(sema->src, call->line, call->col,
-                 "'printf' expects a string literal as its first argument");
-      sema->had_error = true;
-    }
-    for (expr_t *arg = first != NULL ? first->next : NULL; arg != NULL;
-         arg = arg->next) {
-      check_expr(sema, arg);
-    }
-    return (exprty_t){.kind = TYPE_I32, .ok = true};
+    return check_printf_call(sema, call);
   }
 
   decl_t *fn = symtab_lookup(sema->tab, name);
@@ -71,13 +99,27 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
-  if (call->call.arg_count > 0) {
+  if (call->call.arg_count != fn->fn.params_count) {
     diag_error(sema->src, call->line, call->col,
-               "'%s' takes no arguments (parameters not supported yet)", name);
+               "'%s' expects %zu argument%s but got %zu", name,
+               fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
+               call->call.arg_count);
     sema->had_error = true;
   }
+
+  param_t *param = fn->fn.params;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    check_expr(sema, arg);
+    exprty_t at = check_expr(sema, arg);
+    if (param != NULL) {
+      if (at.ok && !type_assignable(param->type.kind, at.kind)) {
+        diag_error(sema->src, call->line, call->col,
+                   "cannot pass %s as argument '%s' of '%s' (expected %s)",
+                   type_kind_to_str(at.kind), param->name, name,
+                   type_kind_to_str(param->type.kind));
+        sema->had_error = true;
+      }
+      param = param->next;
+    }
   }
 
   return (exprty_t){.kind = fn->fn.return_type.kind, .ok = true};
@@ -95,12 +137,19 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr) {
   case EXPR_CALL:
     result = check_call(sema, expr);
     break;
-  case EXPR_ID:
-    diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
-               expr->id.name);
-    sema->had_error = true;
-    result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+  case EXPR_ID: {
+    const local_t *local =
+        sema->scope ? scope_lookup(sema->scope, expr->id.name) : NULL;
+    if (local == NULL) {
+      diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
+                 expr->id.name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = local->type.kind, .ok = true};
+    }
     break;
+  }
   default:
     result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     break;
@@ -151,6 +200,25 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
+  scope_t scope = {
+      .items = arena_alloc(sema->arena, sizeof(scope_t) * fn->fn.params_count),
+      .count = 0};
+
+  for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
+    if (scope_lookup(&scope, param->name) != NULL) {
+      diag_error(sema->src, fn->line, fn->col, "duplicate parameter name '%s'",
+                 param->name);
+      sema->had_error = true;
+      continue;
+    }
+    scope.items[scope.count++] = (local_t){
+        .name = param->name,
+        .type = param->type,
+    };
+  }
+
+  sema->scope = &scope;
+
   stmt_t *last = NULL;
   for (stmt_t *stmt = fn->fn.body; stmt != NULL; stmt = stmt->next) {
     check_stmt(sema, stmt, fn);
@@ -163,6 +231,8 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
                "non-void function '%s' must return a value", fn->name);
     sema->had_error = true;
   }
+
+  sema->scope = NULL;
 }
 
 static bool check_entry_point(const symtab_t *tab, const source_t *src) {
@@ -221,7 +291,12 @@ int semantic_check(unit_t *unit, arena_t *arena) {
     had_error = true;
   }
 
-  sema_t sema = {.tab = &tab, .src = unit->src, .had_error = false};
+  sema_t sema = {
+      .tab = &tab,
+      .src = unit->src,
+      .arena = arena,
+      .had_error = false,
+  };
   for (size_t i = 0; i < tab.count; i++) {
     check_fn(&sema, tab.fns[i]);
   }

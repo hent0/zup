@@ -1,0 +1,10 @@
+--TEST--
+referencing a name that is not a parameter or function is an error
+--FILE--
+pub fn main(): i32 {
+  return z;
+}
+--EXPECTERR--
+zup: error: undefined name 'z' [2:10]
+--EXIT--
+1
