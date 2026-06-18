@@ -1,0 +1,17 @@
+--TEST--
+integer arguments to printf are formatted at runtime (literal and parameter)
+--FILE--
+fn show(n: i32): void {
+  printf("n=%d\n", n);
+}
+
+pub fn main(): i32 {
+  printf("lit=%d\n", 42);
+  show(7);
+  return 0;
+}
+--EXPECT--
+lit=42
+n=7
+--EXIT--
+0

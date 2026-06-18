@@ -1,0 +1,28 @@
+--TEST--
+a parameter passed to printf lowers as a typed operand
+--ARGS--
+--ir -o -
+--FILE--
+fn show(n: i32): void {
+  printf("%d\n", n);
+}
+
+pub fn main(): i32 {
+  show(42);
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+@.str.0 = private unnamed_addr constant [4 x i8] c"%d\0A\00"
+
+define internal void @show(i32 %n) {
+entry:
+  %1 = call i32 @printf(ptr @.str.0, i32 %n)
+  ret void
+}
+
+define i32 @main() {
+entry:
+  call void @show(i32 42)
+  ret i32 0
+}

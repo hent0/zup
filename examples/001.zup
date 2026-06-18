@@ -1,8 +1,12 @@
+fn number(x: i32): i32 {
+  return x;
+}
+
 // Single line comment
 pub fn /** Stupid comment here */ main(): i32 {
-  printf("Hello, %s!\n", "world");
+  printf("Hello, %s %d!\n", "world", number(123));
   /**
    * Multiline comment
    */
-  return 123;// Line breaking comment
+  return number(123);// Line breaking comment
 }
