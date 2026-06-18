@@ -30,6 +30,9 @@ typedef enum {
   TOKEN_I32,
   TOKEN_I64,
   TOKEN_STRING,
+  TOKEN_BOOL,
+  TOKEN_TRUE,
+  TOKEN_FALSE,
 } TokenKind;
 
 typedef struct {

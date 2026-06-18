@@ -102,6 +102,7 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return collect_expr(ctx, expr->binary.rhs);
   case EXPR_NUMBER:
   case EXPR_ID:
+  case EXPR_BOOLEAN:
     return 0;
   }
   return 0;
@@ -167,6 +168,11 @@ static unsigned type_bits(TypeKind kind) {
 
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
+  case EXPR_BOOLEAN:
+    return (value_t){
+        .type = expr->type,
+        .ref = expr->boolean.value ? "true" : "false",
+    };
   case EXPR_NUMBER:
     return (value_t){
         .type = expr->type,

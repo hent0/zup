@@ -1,0 +1,35 @@
+--TEST--
+the bool type keyword and true/false literals tokenize
+--ARGS--
+--tokenize
+--FILE--
+fn f(): bool {
+  return true;
+}
+
+fn g(): bool {
+  return false;
+}
+--EXPECT--
+TOKEN_FN [1:1]
+TOKEN_ID('f') [1:4]
+TOKEN_LPAREN [1:5]
+TOKEN_RPAREN [1:6]
+TOKEN_COLON [1:7]
+TOKEN_BOOL [1:9]
+TOKEN_LBRACE [1:14]
+TOKEN_RETURN [2:3]
+TOKEN_TRUE [2:10]
+TOKEN_SEMICOLON [2:14]
+TOKEN_RBRACE [3:1]
+TOKEN_FN [5:1]
+TOKEN_ID('g') [5:4]
+TOKEN_LPAREN [5:5]
+TOKEN_RPAREN [5:6]
+TOKEN_COLON [5:7]
+TOKEN_BOOL [5:9]
+TOKEN_LBRACE [5:14]
+TOKEN_RETURN [6:3]
+TOKEN_FALSE [6:10]
+TOKEN_SEMICOLON [6:15]
+TOKEN_RBRACE [7:1]

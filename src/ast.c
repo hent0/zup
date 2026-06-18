@@ -8,6 +8,8 @@ char *type_kind_to_ir(TypeKind kind) {
   switch (kind) {
   case TYPE_VOID:
     return "void";
+  case TYPE_BOOL:
+    return "i1";
   case TYPE_I8:
     return "i8";
   case TYPE_I16:
@@ -27,6 +29,8 @@ char *type_kind_to_str(TypeKind kind) {
   switch (kind) {
   case TYPE_VOID:
     return "void";
+  case TYPE_BOOL:
+    return "bool";
   case TYPE_I8:
     return "i8";
   case TYPE_I16:
@@ -86,6 +90,17 @@ expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena) {
   expr->binary.op = op;
   expr->binary.lhs = lhs;
   expr->binary.rhs = rhs;
+  return expr;
+}
+
+expr_t *ast_boolean_init(bool value, token_t token, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_BOOLEAN;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_BOOL};
+  expr->next = NULL;
+  expr->boolean.value = value;
   return expr;
 }
 
@@ -232,6 +247,9 @@ static void dump_binary(const expr_t *expr, int depth) {
 static void dump_expr(const expr_t *expr, int depth) {
   print_indent(depth);
   switch (expr->kind) {
+  case EXPR_BOOLEAN:
+    printf("Boolean literal %s\n", expr->boolean.value ? "true" : "false");
+    break;
   case EXPR_NUMBER:
     printf("Number literal %s\n", expr->number.value);
     break;

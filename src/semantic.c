@@ -153,6 +153,9 @@ static bool check_literal_fit(sema_t *sema, expr_t *expr, TypeKind type) {
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   exprty_t result;
   switch (expr->kind) {
+  case EXPR_BOOLEAN:
+    result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+    break;
   case EXPR_NUMBER: {
     TypeKind type = is_integer(expected) ? expected : TYPE_I32;
     if (check_literal_fit(sema, expr, type)) {
@@ -197,6 +200,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   case EXPR_BINARY: {
     exprty_t lhs = check_expr(sema, expr->binary.lhs, expected);
     exprty_t rhs = check_expr(sema, expr->binary.rhs, expected);
+
     if (!lhs.ok || !rhs.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else if (!is_integer(lhs.kind) || lhs.kind != rhs.kind) {

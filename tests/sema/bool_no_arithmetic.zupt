@@ -1,0 +1,14 @@
+--TEST--
+arithmetic operators do not apply to bool
+--FILE--
+fn f(): bool {
+  return true + false;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '+' to bool and bool [2:10]
+--EXIT--
+1

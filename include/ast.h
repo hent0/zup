@@ -9,6 +9,7 @@
 typedef enum {
   TYPE_UNKNOWN,
   TYPE_VOID,
+  TYPE_BOOL,
   TYPE_I8,
   TYPE_I16,
   TYPE_I32,
@@ -29,6 +30,7 @@ typedef enum {
 } BinaryOp;
 
 typedef enum {
+  EXPR_BOOLEAN,
   EXPR_NUMBER,
   EXPR_STRING,
   EXPR_ID,
@@ -52,6 +54,9 @@ struct expr {
       char *value;
       size_t length;
     } string;
+    struct {
+      bool value;
+    } boolean;
     struct {
       char *name;
     } id;
@@ -148,6 +153,7 @@ char *binop_to_ir(BinaryOp op);
 char *binop_to_str(BinaryOp op);
 
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena);
+expr_t *ast_boolean_init(bool value, token_t token, arena_t *arena);
 expr_t *ast_number_init(token_t token, arena_t *arena);
 expr_t *ast_string_init(token_t token, arena_t *arena);
 expr_t *ast_id_init(token_t token, arena_t *arena);

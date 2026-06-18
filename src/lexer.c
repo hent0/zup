@@ -7,9 +7,10 @@
 #include <string.h>
 
 const keyword_t keywords[] = {
-    {"pub", TOKEN_PUB}, {"fn", TOKEN_FN},   {"return", TOKEN_RETURN},
-    {"as", TOKEN_AS},   {"i8", TOKEN_I8},   {"i16", TOKEN_I16},
-    {"i32", TOKEN_I32}, {"i64", TOKEN_I64}, {"void", TOKEN_VOID},
+    {"pub", TOKEN_PUB},   {"fn", TOKEN_FN},     {"return", TOKEN_RETURN},
+    {"as", TOKEN_AS},     {"i8", TOKEN_I8},     {"i16", TOKEN_I16},
+    {"i32", TOKEN_I32},   {"i64", TOKEN_I64},   {"void", TOKEN_VOID},
+    {"bool", TOKEN_BOOL}, {"true", TOKEN_TRUE}, {"false", TOKEN_FALSE},
     {NULL, TOKEN_EOF},
 };
 

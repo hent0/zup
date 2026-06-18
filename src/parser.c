@@ -43,6 +43,9 @@ static type_t parse_type(parser_t *parser) {
   case TOKEN_VOID:
     advance(parser);
     return (type_t){.kind = TYPE_VOID};
+  case TOKEN_BOOL:
+    advance(parser);
+    return (type_t){.kind = TYPE_BOOL};
   case TOKEN_I8:
     advance(parser);
     return (type_t){.kind = TYPE_I8};
@@ -100,6 +103,12 @@ static expr_t *parse_call_args(parser_t *parser, expr_t *callee) {
 static expr_t *parse_primary(parser_t *parser) {
   token_t token = parser->current;
   switch (parser->current.kind) {
+  case TOKEN_TRUE:
+    advance(parser);
+    return ast_boolean_init(true, token, parser->arena);
+  case TOKEN_FALSE:
+    advance(parser);
+    return ast_boolean_init(false, token, parser->arena);
   case TOKEN_NUMBER:
     advance(parser);
     return ast_number_init(token, parser->arena);

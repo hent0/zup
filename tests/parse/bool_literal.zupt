@@ -1,0 +1,22 @@
+--TEST--
+a bool return type and a true literal parse
+--ARGS--
+--ast
+--FILE--
+fn f(): bool {
+  return true;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> bool
+    Return
+      Boolean literal true
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

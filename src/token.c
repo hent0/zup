@@ -66,6 +66,12 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_I64";
   case TOKEN_STRING:
     return "TOKEN_STRING";
+  case TOKEN_BOOL:
+    return "TOKEN_BOOL";
+  case TOKEN_TRUE:
+    return "TOKEN_TRUE";
+  case TOKEN_FALSE:
+    return "TOKEN_FALSE";
   default:
     return "UNKNOWN TOKEN TYPE";
   }

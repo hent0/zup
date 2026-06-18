@@ -1,0 +1,10 @@
+--TEST--
+a bool is not assignable to an integer return type
+--FILE--
+pub fn main(): i32 {
+  return true;
+}
+--EXPECTERR--
+zup: error: cannot return bool from function returning i32 [2:3]
+--EXIT--
+1
