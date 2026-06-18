@@ -1,0 +1,25 @@
+--TEST--
+inequality lowers to icmp ne
+--ARGS--
+--ir -o -
+--FILE--
+fn ne(a: i32, b: i32): bool {
+  return a != b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i1 @ne(i32 %a, i32 %b) {
+entry:
+  %1 = icmp ne i32 %a, %b
+  ret i1 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

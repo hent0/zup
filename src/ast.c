@@ -58,6 +58,18 @@ char *binop_to_ir(BinaryOp op) {
     return "sdiv";
   case BINOP_REM:
     return "srem";
+  case BINOP_EQ:
+    return "icmp eq";
+  case BINOP_NE:
+    return "icmp ne";
+  case BINOP_LT:
+    return "icmp slt";
+  case BINOP_LE:
+    return "<=";
+  case BINOP_GT:
+    return ">";
+  case BINOP_GE:
+    return ">=";
   default:
     return "?";
   }
@@ -75,6 +87,18 @@ char *binop_to_str(BinaryOp op) {
     return "/";
   case BINOP_REM:
     return "%";
+  case BINOP_EQ:
+    return "=";
+  case BINOP_NE:
+    return "!=";
+  case BINOP_LT:
+    return "<";
+  case BINOP_LE:
+    return "<=";
+  case BINOP_GT:
+    return ">";
+  case BINOP_GE:
+    return ">=";
   default:
     return "?";
   }

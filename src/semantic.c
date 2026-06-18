@@ -1,6 +1,7 @@
 #include "semantic.h"
 #include "arena.h"
 #include "ast.h"
+#include "debug.h"
 #include "diag.h"
 #include <errno.h>
 #include <stdbool.h>
@@ -57,6 +58,20 @@ typedef struct {
 
 static bool is_integer(TypeKind k) {
   return k == TYPE_I8 || k == TYPE_I16 || k == TYPE_I32 || k == TYPE_I64;
+}
+
+static bool is_comparison(BinaryOp op) {
+  switch (op) {
+  case BINOP_EQ:
+  case BINOP_NE:
+  case BINOP_LT:
+  case BINOP_GT:
+  case BINOP_LE:
+  case BINOP_GE:
+    return true;
+  default:
+    return false;
+  }
 }
 
 static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
@@ -211,7 +226,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){.kind = lhs.kind, .ok = true};
+      TypeKind kind = is_comparison(expr->binary.op) ? TYPE_BOOL : lhs.kind;
+      result = (exprty_t){.kind = kind, .ok = true};
     }
     break;
   }

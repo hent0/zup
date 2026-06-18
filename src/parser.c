@@ -202,9 +202,45 @@ static expr_t *parse_additive(parser_t *parser) {
   return left;
 }
 
+static expr_t *parse_comparison(parser_t *parser) {
+  expr_t *left = parse_additive(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  for (;;) {
+    BinaryOp op;
+    if (check(parser, TOKEN_EQUAL_EQUAL)) {
+      op = BINOP_EQ;
+    } else if (check(parser, TOKEN_BANG_EQUAL)) {
+      op = BINOP_NE;
+    } else if (check(parser, TOKEN_LESS)) {
+      op = BINOP_LT;
+    } else if (check(parser, TOKEN_LESS_EQUAL)) {
+      op = BINOP_LE;
+    } else if (check(parser, TOKEN_GREATER)) {
+      op = BINOP_GT;
+    } else if (check(parser, TOKEN_GREATER_EQUAL)) {
+      op = BINOP_GE;
+    } else {
+      break;
+    }
+
+    advance(parser);
+    expr_t *right = parse_additive(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+
+    left = ast_binary_init(op, left, right, parser->arena);
+  }
+
+  return left;
+}
+
 static expr_t *parse_expr(parser_t *parser) {
   // TODO: Expand
-  return parse_additive(parser);
+  return parse_comparison(parser);
 }
 
 static stmt_t *parse_return(parser_t *parser) {

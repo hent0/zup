@@ -54,6 +54,22 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_SLASH";
   case TOKEN_PERCENT:
     return "TOKEN_PERCENT";
+  case TOKEN_EQUAL:
+    return "TOKEN_EQUAL";
+  case TOKEN_EQUAL_EQUAL:
+    return "TOKEN_EQUAL_EQUAL";
+  case TOKEN_BANG:
+    return "TOKEN_BANG";
+  case TOKEN_BANG_EQUAL:
+    return "TOKEN_BANG_EQUAL";
+  case TOKEN_LESS:
+    return "TOKEN_LESS";
+  case TOKEN_LESS_EQUAL:
+    return "TOKEN_LESS_EQUAL";
+  case TOKEN_GREATER:
+    return "TOKEN_GREATER";
+  case TOKEN_GREATER_EQUAL:
+    return "TOKEN_GREATER_EQUAL";
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:

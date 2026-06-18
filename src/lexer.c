@@ -265,6 +265,42 @@ token_t lexer_next_token(lexer_t *lexer) {
   case '%':
     return advance_with(lexer, token_init(TOKEN_PERCENT, .line = lexer->line,
                                           .col = lexer->col));
+  case '!':
+    if (peek(lexer) == '=') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_BANG_EQUAL, .line = lexer->line,
+                                         lexer->col)));
+    }
+    return advance_with(
+        lexer, token_init(TOKEN_BANG, .line = lexer->line, .col = lexer->col));
+  case '=':
+    if (peek(lexer) == '=') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_EQUAL_EQUAL, .line = lexer->line,
+                                         lexer->col)));
+    }
+    return advance_with(
+        lexer, token_init(TOKEN_EQUAL, .line = lexer->line, .col = lexer->col));
+  case '<':
+    if (peek(lexer) == '=') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_LESS_EQUAL, .line = lexer->line,
+                                         lexer->col)));
+    }
+    return advance_with(
+        lexer, token_init(TOKEN_LESS, .line = lexer->line, .col = lexer->col));
+  case '>':
+    if (peek(lexer) == '=') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_GREATER_EQUAL,
+                                         .line = lexer->line, lexer->col)));
+    }
+    return advance_with(lexer, token_init(TOKEN_GREATER, .line = lexer->line,
+                                          .col = lexer->col));
   default:
     diag_error(NULL, lexer->line, lexer->col, "unexpected '%c'",
                *lexer->current);

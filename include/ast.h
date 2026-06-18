@@ -27,6 +27,12 @@ typedef enum {
   BINOP_MUL,
   BINOP_DIV,
   BINOP_REM,
+  BINOP_EQ,
+  BINOP_NE,
+  BINOP_LT,
+  BINOP_LE,
+  BINOP_GT,
+  BINOP_GE,
 } BinaryOp;
 
 typedef enum {

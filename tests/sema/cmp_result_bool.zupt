@@ -1,0 +1,14 @@
+--TEST--
+a comparison produces a bool, not an integer
+--FILE--
+fn f(a: i32, b: i32): i32 {
+  return a < b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot return bool from function returning i32 [2:3]
+--EXIT--
+1

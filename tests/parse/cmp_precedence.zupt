@@ -1,0 +1,26 @@
+--TEST--
+comparison binds looser than addition
+--ARGS--
+--ast
+--FILE--
+fn f(): bool {
+  return 1 + 2 < 3;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> bool
+    Return
+      Binary <
+        Binary +
+          Number literal 1
+          Number literal 2
+        Number literal 3
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0
