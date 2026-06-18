@@ -1,8 +1,11 @@
-fn show(n: i32): void {
-  printf("%d\n", n);
+fn pick(x: i32, y: i32): i32 {
+  return x;
+}
+
+fn forward(y: i32): i32 {
+  return pick(y, 2);
 }
 
 pub fn main(): i32 {
-  show(42);
-  return 0;
+  return forward(pick(5, pick(4, 2)));
 }

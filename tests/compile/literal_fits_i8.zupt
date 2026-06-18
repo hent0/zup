@@ -1,0 +1,12 @@
+--TEST--
+the largest value that fits in i8 is accepted
+--FILE--
+fn maxi8(): i8 {
+  return 127;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXIT--
+0

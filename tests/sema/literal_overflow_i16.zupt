@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in i16 is rejected
+--FILE--
+fn bad(): i16 {
+  return 32768;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 32768 out of range for i16 [2:10]
+--EXIT--
+1

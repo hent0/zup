@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in i64 is rejected
+--FILE--
+fn bad(): i64 {
+  return 9223372036854775808;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 9223372036854775808 out of range for i64 [2:10]
+--EXIT--
+1

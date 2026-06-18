@@ -2,8 +2,11 @@
 #include "arena.h"
 #include "ast.h"
 #include "diag.h"
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -119,13 +122,46 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
   return (exprty_t){.kind = fn->fn.return_type.kind, .ok = true};
 }
 
+static unsigned long long type_int_max(TypeKind k) {
+  switch (k) {
+  case TYPE_I8:
+    return 127ULL;
+  case TYPE_I16:
+    return 32767ULL;
+  case TYPE_I32:
+    return 2147483647ULL;
+  case TYPE_I64:
+    return 9223372036854775807ULL;
+  default:
+    return 0;
+  }
+}
+
+static bool check_literal_fit(sema_t *sema, expr_t *expr, TypeKind type) {
+  errno = 0;
+  unsigned long long v = strtoull(expr->number.value, NULL, 0);
+  if (errno == ERANGE || v > type_int_max(type)) {
+    diag_error(sema->src, expr->line, expr->col,
+               "integer literal %s out of range for %s", expr->number.value,
+               type_kind_to_str(type));
+    sema->had_error = true;
+    return true;
+  }
+  return false;
+}
+
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   exprty_t result;
   switch (expr->kind) {
-  case EXPR_NUMBER:
-    result = (exprty_t){.kind = is_integer(expected) ? expected : TYPE_I32,
-                        .ok = true};
+  case EXPR_NUMBER: {
+    TypeKind type = is_integer(expected) ? expected : TYPE_I32;
+    if (check_literal_fit(sema, expr, type)) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = type, .ok = true};
+    }
     break;
+  }
   case EXPR_STRING:
     result = (exprty_t){.kind = TYPE_STRING, .ok = true};
     break;

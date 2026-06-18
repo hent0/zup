@@ -1,0 +1,15 @@
+--TEST--
+an out-of-range integer literal in argument position is rejected
+--FILE--
+fn take(x: i8): i8 {
+  return x;
+}
+
+pub fn main(): i32 {
+  take(128);
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 128 out of range for i8 [6:8]
+--EXIT--
+1

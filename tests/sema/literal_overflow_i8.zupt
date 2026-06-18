@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in i8 is rejected
+--FILE--
+fn bad(): i8 {
+  return 128;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 128 out of range for i8 [2:10]
+--EXIT--
+1

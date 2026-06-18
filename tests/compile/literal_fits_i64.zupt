@@ -1,0 +1,12 @@
+--TEST--
+the largest value that fits in i64 is accepted
+--FILE--
+fn maxi64(): i64 {
+  return 9223372036854775807;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXIT--
+0

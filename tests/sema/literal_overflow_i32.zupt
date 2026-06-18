@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in i32 is rejected
+--FILE--
+fn bad(): i32 {
+  return 2147483648;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 2147483648 out of range for i32 [2:10]
+--EXIT--
+1
