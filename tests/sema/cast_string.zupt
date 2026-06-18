@@ -1,0 +1,10 @@
+--TEST--
+casting between a string and an integer is rejected
+--FILE--
+pub fn main(): i32 {
+  return "x" as i32;
+}
+--EXPECTERR--
+zup: error: cannot cast i8[] to i32 [2:10]
+--EXIT--
+1

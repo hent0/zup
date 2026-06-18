@@ -17,6 +17,7 @@ typedef enum {
   TOKEN_COLON,
   TOKEN_SEMICOLON,
   TOKEN_COMMA,
+  TOKEN_AS,
   // Types
   TOKEN_VOID,
   TOKEN_I8,

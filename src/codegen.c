@@ -93,6 +93,8 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       }
     }
     return 0;
+  case EXPR_CAST:
+    return collect_expr(ctx, expr->cast.operand);
   case EXPR_NUMBER:
   case EXPR_ID:
     return 0;
@@ -143,6 +145,21 @@ static int emit_std(ctx_t *ctx) {
 
 static value_t emit_call(ctx_t *ctx, expr_t *call);
 
+static unsigned type_bits(TypeKind kind) {
+  switch (kind) {
+  case TYPE_I8:
+    return 8;
+  case TYPE_I16:
+    return 16;
+  case TYPE_I32:
+    return 32;
+  case TYPE_I64:
+    return 64;
+  default:
+    return 0;
+  }
+}
+
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
   case EXPR_NUMBER:
@@ -162,6 +179,24 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   case EXPR_CALL:
     return emit_call(ctx, expr);
+  case EXPR_CAST: {
+    value_t operand = emit_value(ctx, expr->cast.operand);
+    TypeKind from = operand.type.kind;
+    TypeKind to = expr->cast.target.kind;
+
+    if (type_bits(to) == type_bits(from)) {
+      return (value_t){.type = expr->cast.target, .ref = operand.ref};
+    }
+
+    const char *op = type_bits(to) < type_bits(from) ? "trunc" : "sext";
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
+            type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
+    return (value_t){
+        .type = expr->cast.target,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
   default:
     return (value_t){
         .type = (type_t){.kind = TYPE_UNKNOWN},

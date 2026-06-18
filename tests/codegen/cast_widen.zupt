@@ -1,0 +1,25 @@
+--TEST--
+a widening integer cast lowers to sext
+--ARGS--
+--ir -o -
+--FILE--
+fn widen(x: i8): i64 {
+  return x as i64;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i64 @widen(i8 %x) {
+entry:
+  %1 = sext i8 %x to i64
+  ret i64 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

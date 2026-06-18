@@ -168,6 +168,19 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   case EXPR_CALL:
     result = check_call(sema, expr);
     break;
+  case EXPR_CAST: {
+    exprty_t operand = check_expr(sema, expr->cast.operand, TYPE_UNKNOWN);
+    TypeKind target = expr->cast.target.kind;
+    if (operand.ok && (!is_integer(operand.kind) || !is_integer(target))) {
+      diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
+                 type_kind_to_str(operand.kind), type_kind_to_str(target));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = target, .ok = operand.ok};
+    }
+    break;
+  }
   case EXPR_ID: {
     const local_t *local =
         sema->scope ? scope_lookup(sema->scope, expr->id.name) : NULL;

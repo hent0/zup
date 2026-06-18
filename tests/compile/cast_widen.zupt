@@ -1,0 +1,12 @@
+--TEST--
+widening a small value preserves it at runtime
+--FILE--
+fn widen(x: i8): i32 {
+  return x as i32;
+}
+
+pub fn main(): i32 {
+  return widen(100);
+}
+--EXIT--
+100

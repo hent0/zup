@@ -42,6 +42,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_SEMICOLON";
   case TOKEN_COMMA:
     return "TOKEN_COMMA";
+  case TOKEN_AS:
+    return "TOKEN_AS";
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:

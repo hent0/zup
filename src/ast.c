@@ -89,6 +89,18 @@ expr_t *ast_call_init(expr_t *callee, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_CAST;
+  expr->line = operand->line;
+  expr->col = operand->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->cast.operand = operand;
+  expr->cast.target = target;
+  return expr;
+}
+
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena) {
   stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
   stmt->kind = STMT_RETURN;
@@ -182,6 +194,10 @@ static void dump_expr(const expr_t *expr, int depth) {
     for (const expr_t *arg = expr->call.args; arg != NULL; arg = arg->next) {
       dump_expr(arg, depth + 1);
     }
+    break;
+  case EXPR_CAST:
+    printf("Cast to %s\n", type_kind_to_str(expr->cast.target.kind));
+    dump_expr(expr->cast.operand, depth + 1);
     break;
   }
 }

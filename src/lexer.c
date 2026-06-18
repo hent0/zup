@@ -7,9 +7,10 @@
 #include <string.h>
 
 const keyword_t keywords[] = {
-    {"pub", TOKEN_PUB}, {"fn", TOKEN_FN},     {"return", TOKEN_RETURN},
-    {"i8", TOKEN_I8},   {"i16", TOKEN_I16},   {"i32", TOKEN_I32},
-    {"i64", TOKEN_I64}, {"void", TOKEN_VOID}, {NULL, TOKEN_EOF},
+    {"pub", TOKEN_PUB}, {"fn", TOKEN_FN},   {"return", TOKEN_RETURN},
+    {"as", TOKEN_AS},   {"i8", TOKEN_I8},   {"i16", TOKEN_I16},
+    {"i32", TOKEN_I32}, {"i64", TOKEN_I64}, {"void", TOKEN_VOID},
+    {NULL, TOKEN_EOF},
 };
 
 static bool at_eof(lexer_t *lexer) { return *lexer->current == '\0'; }

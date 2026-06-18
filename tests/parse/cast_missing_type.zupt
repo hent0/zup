@@ -1,0 +1,10 @@
+--TEST--
+a cast without a target type is a parse error
+--FILE--
+pub fn main(): i32 {
+  return 0 as;
+}
+--EXPECTERR--
+zup: error: expected a type (got TOKEN_SEMICOLON) [2:14]
+--EXIT--
+1

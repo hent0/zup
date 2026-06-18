@@ -120,9 +120,24 @@ static expr_t *parse_primary(parser_t *parser) {
   }
 }
 
+static expr_t *parse_cast(parser_t *parser) {
+  expr_t *expr = parse_primary(parser);
+  if (expr == NULL) {
+    return NULL;
+  }
+  while (match(parser, TOKEN_AS)) {
+    type_t target = parse_type(parser);
+    if (target.kind == TYPE_UNKNOWN) {
+      return NULL;
+    }
+    expr = ast_cast_init(expr, target, parser->arena);
+  }
+  return expr;
+}
+
 static expr_t *parse_expr(parser_t *parser) {
   // TODO: Expand
-  return parse_primary(parser);
+  return parse_cast(parser);
 }
 
 static stmt_t *parse_return(parser_t *parser) {

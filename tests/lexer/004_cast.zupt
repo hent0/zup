@@ -1,0 +1,23 @@
+--TEST--
+the cast keyword 'as' tokenizes as its own keyword
+--ARGS--
+--tokenize
+--FILE--
+pub fn main(): i32 {
+  return 0 as i32;
+}
+--EXPECT--
+TOKEN_PUB [1:1]
+TOKEN_FN [1:5]
+TOKEN_ID('main') [1:8]
+TOKEN_LPAREN [1:12]
+TOKEN_RPAREN [1:13]
+TOKEN_COLON [1:14]
+TOKEN_I32 [1:16]
+TOKEN_LBRACE [1:20]
+TOKEN_RETURN [2:3]
+TOKEN_NUMBER(0) [2:10]
+TOKEN_AS [2:12]
+TOKEN_I32 [2:15]
+TOKEN_SEMICOLON [2:18]
+TOKEN_RBRACE [3:1]

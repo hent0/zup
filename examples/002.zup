@@ -1,11 +1,7 @@
-fn pick(x: i32, y: i32): i32 {
-  return x;
-}
-
-fn forward(y: i32): i32 {
-  return pick(y, 2);
+fn narrow(x: i64): i8 {
+  return x as i8;
 }
 
 pub fn main(): i32 {
-  return forward(pick(5, pick(4, 2)));
+  return 0;
 }

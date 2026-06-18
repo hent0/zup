@@ -1,0 +1,24 @@
+--TEST--
+a cast to the same width is a no-op (no conversion instruction)
+--ARGS--
+--ir -o -
+--FILE--
+fn same(x: i32): i32 {
+  return x as i32;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i32 @same(i32 %x) {
+entry:
+  ret i32 %x
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

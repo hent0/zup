@@ -1,0 +1,24 @@
+--TEST--
+a cast expression parses into a cast node wrapping its operand
+--ARGS--
+--ast
+--FILE--
+fn widen(x: i8): i64 {
+  return x as i64;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'widen' -> i64
+    param x: i8
+    Return
+      Cast to i64
+        Id x
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

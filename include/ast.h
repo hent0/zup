@@ -25,6 +25,7 @@ typedef enum {
   EXPR_STRING,
   EXPR_ID,
   EXPR_CALL,
+  EXPR_CAST,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -50,6 +51,10 @@ struct expr {
       expr_t *args;
       size_t arg_count;
     } call;
+    struct {
+      expr_t *operand;
+      type_t target;
+    } cast;
   };
 };
 
@@ -129,6 +134,7 @@ expr_t *ast_number_init(token_t token, arena_t *arena);
 expr_t *ast_string_init(token_t token, arena_t *arena);
 expr_t *ast_id_init(token_t token, arena_t *arena);
 expr_t *ast_call_init(expr_t *callee, arena_t *arena);
+expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena);
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
