@@ -1,0 +1,8 @@
+--TEST--
+subtraction is left-associative: 10 - 3 - 2 = 5
+--FILE--
+pub fn main(): i32 {
+  return 10 - 3 - 2;
+}
+--EXIT--
+5

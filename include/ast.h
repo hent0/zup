@@ -21,11 +21,20 @@ typedef struct {
 } type_t;
 
 typedef enum {
+  BINOP_ADD,
+  BINOP_SUB,
+  BINOP_MUL,
+  BINOP_DIV,
+  BINOP_REM,
+} BinaryOp;
+
+typedef enum {
   EXPR_NUMBER,
   EXPR_STRING,
   EXPR_ID,
   EXPR_CALL,
   EXPR_CAST,
+  EXPR_BINARY,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -55,6 +64,11 @@ struct expr {
       expr_t *operand;
       type_t target;
     } cast;
+    struct {
+      BinaryOp op;
+      expr_t *lhs;
+      expr_t *rhs;
+    } binary;
   };
 };
 
@@ -130,6 +144,10 @@ typedef struct {
 char *type_kind_to_ir(TypeKind kind);
 char *type_kind_to_str(TypeKind kind);
 
+char *binop_to_ir(BinaryOp op);
+char *binop_to_str(BinaryOp op);
+
+expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena);
 expr_t *ast_number_init(token_t token, arena_t *arena);
 expr_t *ast_string_init(token_t token, arena_t *arena);
 expr_t *ast_id_init(token_t token, arena_t *arena);

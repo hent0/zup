@@ -1,0 +1,8 @@
+--TEST--
+remainder at runtime: 17 % 5 = 2
+--FILE--
+pub fn main(): i32 {
+  return 17 % 5;
+}
+--EXIT--
+2

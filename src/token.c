@@ -44,6 +44,16 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_COMMA";
   case TOKEN_AS:
     return "TOKEN_AS";
+  case TOKEN_PLUS:
+    return "TOKEN_PLUS";
+  case TOKEN_MINUS:
+    return "TOKEN_MINUS";
+  case TOKEN_STAR:
+    return "TOKEN_STAR";
+  case TOKEN_SLASH:
+    return "TOKEN_SLASH";
+  case TOKEN_PERCENT:
+    return "TOKEN_PERCENT";
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:

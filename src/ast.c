@@ -42,6 +42,53 @@ char *type_kind_to_str(TypeKind kind) {
   }
 }
 
+char *binop_to_ir(BinaryOp op) {
+  switch (op) {
+  case BINOP_ADD:
+    return "add";
+  case BINOP_SUB:
+    return "sub";
+  case BINOP_MUL:
+    return "mul";
+  case BINOP_DIV:
+    return "sdiv";
+  case BINOP_REM:
+    return "srem";
+  default:
+    return "?";
+  }
+}
+
+char *binop_to_str(BinaryOp op) {
+  switch (op) {
+  case BINOP_ADD:
+    return "+";
+  case BINOP_SUB:
+    return "-";
+  case BINOP_MUL:
+    return "*";
+  case BINOP_DIV:
+    return "/";
+  case BINOP_REM:
+    return "%";
+  default:
+    return "?";
+  }
+}
+
+expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_BINARY;
+  expr->line = lhs->line;
+  expr->col = lhs->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->binary.op = op;
+  expr->binary.lhs = lhs;
+  expr->binary.rhs = rhs;
+  return expr;
+}
+
 expr_t *ast_number_init(token_t token, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_NUMBER;
@@ -174,6 +221,14 @@ static void print_indent(int depth) {
   }
 }
 
+static void dump_expr(const expr_t *expr, int depth);
+
+static void dump_binary(const expr_t *expr, int depth) {
+  printf("Binary %s\n", binop_to_str(expr->binary.op));
+  dump_expr(expr->binary.lhs, depth + 1);
+  dump_expr(expr->binary.rhs, depth + 1);
+}
+
 static void dump_expr(const expr_t *expr, int depth) {
   print_indent(depth);
   switch (expr->kind) {
@@ -198,6 +253,9 @@ static void dump_expr(const expr_t *expr, int depth) {
   case EXPR_CAST:
     printf("Cast to %s\n", type_kind_to_str(expr->cast.target.kind));
     dump_expr(expr->cast.operand, depth + 1);
+    break;
+  case EXPR_BINARY:
+    dump_binary(expr, depth);
     break;
   }
 }

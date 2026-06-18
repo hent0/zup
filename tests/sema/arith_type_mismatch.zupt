@@ -1,0 +1,14 @@
+--TEST--
+binary arithmetic operands must have the same type
+--FILE--
+fn f(a: i32, b: i64): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '+' to i32 and i64 [2:10]
+--EXIT--
+1

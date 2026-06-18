@@ -1,0 +1,8 @@
+--TEST--
+integer division truncates: 17 / 5 = 3
+--FILE--
+pub fn main(): i32 {
+  return 17 / 5;
+}
+--EXIT--
+3

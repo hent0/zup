@@ -75,6 +75,8 @@ static void skip_comments(lexer_t *lexer) {
     }
     advance_n(lexer, 2);
     break;
+  default:
+    return;
   }
   skip_comments(lexer);
 }
@@ -247,6 +249,21 @@ token_t lexer_next_token(lexer_t *lexer) {
         lexer, token_init(TOKEN_COMMA, .line = lexer->line, .col = lexer->col));
   case '"':
     return string_literal(lexer);
+  case '+':
+    return advance_with(
+        lexer, token_init(TOKEN_PLUS, .line = lexer->line, .col = lexer->col));
+  case '-':
+    return advance_with(
+        lexer, token_init(TOKEN_MINUS, .line = lexer->line, .col = lexer->col));
+  case '*':
+    return advance_with(
+        lexer, token_init(TOKEN_STAR, .line = lexer->line, .col = lexer->col));
+  case '/':
+    return advance_with(
+        lexer, token_init(TOKEN_SLASH, .line = lexer->line, .col = lexer->col));
+  case '%':
+    return advance_with(lexer, token_init(TOKEN_PERCENT, .line = lexer->line,
+                                          .col = lexer->col));
   default:
     diag_error(NULL, lexer->line, lexer->col, "unexpected '%c'",
                *lexer->current);

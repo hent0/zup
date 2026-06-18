@@ -1,0 +1,21 @@
+--TEST--
+binary operands are evaluated left-to-right (side effects observable)
+--FILE--
+fn one(): i32 {
+  printf("one\n");
+  return 10;
+}
+
+fn two(): i32 {
+  printf("two\n");
+  return 3;
+}
+
+pub fn main(): i32 {
+  return one() - two();
+}
+--EXPECT--
+one
+two
+--EXIT--
+7

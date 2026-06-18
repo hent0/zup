@@ -95,6 +95,11 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return 0;
   case EXPR_CAST:
     return collect_expr(ctx, expr->cast.operand);
+  case EXPR_BINARY:
+    if (collect_expr(ctx, expr->binary.lhs) != 0) {
+      return 1;
+    }
+    return collect_expr(ctx, expr->binary.rhs);
   case EXPR_NUMBER:
   case EXPR_ID:
     return 0;
@@ -194,6 +199,19 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
             type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
     return (value_t){
         .type = expr->cast.target,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+  case EXPR_BINARY: {
+    value_t left = emit_value(ctx, expr->binary.lhs);
+    value_t right = emit_value(ctx, expr->binary.rhs);
+
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = %s %s %s, %s\n", reg,
+            binop_to_ir(expr->binary.op), type_kind_to_ir(left.type.kind),
+            left.ref, right.ref);
+    return (value_t){
+        .type = expr->type,
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }

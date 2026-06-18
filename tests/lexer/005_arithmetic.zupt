@@ -1,0 +1,31 @@
+--TEST--
+arithmetic operators each tokenize to their own token
+--ARGS--
+--tokenize
+--FILE--
+pub fn main(): i32 {
+  return 1 + 2 - 3 * 4 / 5 % 6;
+}
+--EXPECT--
+TOKEN_PUB [1:1]
+TOKEN_FN [1:5]
+TOKEN_ID('main') [1:8]
+TOKEN_LPAREN [1:12]
+TOKEN_RPAREN [1:13]
+TOKEN_COLON [1:14]
+TOKEN_I32 [1:16]
+TOKEN_LBRACE [1:20]
+TOKEN_RETURN [2:3]
+TOKEN_NUMBER(1) [2:10]
+TOKEN_PLUS [2:12]
+TOKEN_NUMBER(2) [2:14]
+TOKEN_MINUS [2:16]
+TOKEN_NUMBER(3) [2:18]
+TOKEN_STAR [2:20]
+TOKEN_NUMBER(4) [2:22]
+TOKEN_SLASH [2:24]
+TOKEN_NUMBER(5) [2:26]
+TOKEN_PERCENT [2:28]
+TOKEN_NUMBER(6) [2:30]
+TOKEN_SEMICOLON [2:31]
+TOKEN_RBRACE [3:1]

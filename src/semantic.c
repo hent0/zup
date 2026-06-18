@@ -194,6 +194,23 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     }
     break;
   }
+  case EXPR_BINARY: {
+    exprty_t lhs = check_expr(sema, expr->binary.lhs, expected);
+    exprty_t rhs = check_expr(sema, expr->binary.rhs, expected);
+    if (!lhs.ok || !rhs.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else if (!is_integer(lhs.kind) || lhs.kind != rhs.kind) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "cannot apply '%s' to %s and %s",
+                 binop_to_str(expr->binary.op), type_kind_to_str(lhs.kind),
+                 type_kind_to_str(rhs.kind));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = lhs.kind, .ok = true};
+    }
+    break;
+  }
   default:
     result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     break;

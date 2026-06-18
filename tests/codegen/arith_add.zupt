@@ -1,0 +1,26 @@
+--TEST--
+addition lowers to add
+--ARGS--
+--ir -o -
+--FILE--
+fn add(a: i32, b: i32): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return add(1, 2);
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i32 @add(i32 %a, i32 %b) {
+entry:
+  %1 = add i32 %a, %b
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  %1 = call i32 @add(i32 1, i32 2)
+  ret i32 %1
+}
