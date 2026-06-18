@@ -1,0 +1,14 @@
+--TEST--
+returning a wider integer (a param) from a narrower-return function is an error
+--FILE--
+fn pick(x: i32): i8 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot return i32 from function returning i8 [2:3]
+--EXIT--
+1

@@ -73,10 +73,10 @@ while [ "$remaining" -gt 0 ]; do
     shift
     remaining=$((remaining - 1))
     case "$arg" in
-        --only-failures) ONLY_FAILURES=true ;;
-        --ff)            FAIL_FIRST=true ;;
-        --no-diff)       NO_DIFF=true ;;
-        *)               set -- "$@" "$arg" ;;
+        -only-failures) ONLY_FAILURES=true ;;
+        -ff)            FAIL_FIRST=true ;;
+        -no-diff)       NO_DIFF=true ;;
+        *)              set -- "$@" "$arg" ;;
     esac
 done
 
@@ -261,6 +261,6 @@ while IFS= read -r test; do
 done < "$tmp_list"
 
 echo
-echo "-----------------------------------------------------------------"
-printf 'passed: %d  failed: %d  skipped: %d\n' "$pass" "$fail" "$skip"
+echo "================================================================="
+printf 'total: %d  passed: %d  failed: %d  skipped: %d\n' $(( pass + fail + skip )) "$pass" "$fail" "$skip"
 [ "$fail" -eq 0 ]

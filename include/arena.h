@@ -18,6 +18,7 @@ arena_t arena_create(size_t capacity);
 void *arena_alloc(arena_t *arena, size_t size);
 char *arena_strdup(arena_t *arena, const char *str);
 char *arena_strndup(arena_t *arena, const char *str, size_t n);
+char *arena_format(arena_t *a, const char *format, ...);
 void arena_reset(arena_t *arena);
 void arena_destroy(arena_t *arena);
 

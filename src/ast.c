@@ -4,6 +4,25 @@
 #include "utils.h"
 #include <stdio.h>
 
+char *type_kind_to_ir(TypeKind kind) {
+  switch (kind) {
+  case TYPE_VOID:
+    return "void";
+  case TYPE_I8:
+    return "i8";
+  case TYPE_I16:
+    return "i16";
+  case TYPE_I32:
+    return "i32";
+  case TYPE_I64:
+    return "i64";
+  case TYPE_STRING:
+    return "ptr";
+  default:
+    return "?";
+  }
+}
+
 char *type_kind_to_str(TypeKind kind) {
   switch (kind) {
   case TYPE_VOID:

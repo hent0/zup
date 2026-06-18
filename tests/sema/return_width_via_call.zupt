@@ -1,0 +1,18 @@
+--TEST--
+returning a call result of the wrong integer width is an error
+--FILE--
+fn pick(x: i8): i8 {
+  return x;
+}
+
+fn forward(y: i8): i32 {
+  return pick(y);
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot return i8 from function returning i32 [6:3]
+--EXIT--
+1

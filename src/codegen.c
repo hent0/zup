@@ -5,14 +5,19 @@
 #include "diag.h"
 #include <stdio.h>
 
+#define CTX_REG_START 1
+
+typedef struct {
+  type_t type;
+  const char *ref;
+} value_t;
+
 typedef struct ctx_str ctx_str_t;
 struct ctx_str {
   expr_t *node;
   int id;
   ctx_str_t *next;
 };
-
-#define CTX_REG_START 1
 
 typedef struct {
   FILE *out;
@@ -38,7 +43,7 @@ static int intern_string(ctx_t *ctx, expr_t *node) {
   return str->id;
 }
 
-static int cg_string_index(ctx_t *ctx, expr_t *node) {
+static int string_index(ctx_t *ctx, expr_t *node) {
   for (ctx_str_t *str = ctx->strings; str != NULL; str = str->next) {
     if (str->node == node) {
       return str->id;
@@ -136,86 +141,97 @@ static int emit_std(ctx_t *ctx) {
   return 0;
 }
 
-static int emit_call(ctx_t *ctx, expr_t *expr) {
-  if (expr == NULL) {
-    return 1;
-  }
+static value_t emit_call(ctx_t *ctx, expr_t *call);
 
-  switch (expr->type.kind) {
-  case TYPE_VOID:
-    fprintf(ctx->out, "  call void @%s()\n", expr->call.callee->id.name);
-    return 0;
+static value_t emit_value(ctx_t *ctx, expr_t *expr) {
+  switch (expr->kind) {
+  case EXPR_NUMBER:
+    return (value_t){
+        .type = expr->type,
+        .ref = expr->number.value,
+    };
+  case EXPR_STRING:
+    return (value_t){
+        .type = expr->type,
+        .ref = arena_format(ctx->arena, "@.str.%d", string_index(ctx, expr)),
+    };
+  case EXPR_ID:
+    return (value_t){
+        .type = expr->type,
+        .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
+    };
+  case EXPR_CALL:
+    return emit_call(ctx, expr);
   default:
-    fprintf(ctx->out, "  %%%d = call %s @%s(", ctx->reg++,
-            type_kind_to_str(expr->type.kind), expr->call.callee->id.name);
-    for (expr_t *arg = expr->call.args; arg != NULL; arg = arg->next) {
-      if (arg != expr->call.args) {
-        fprintf(ctx->out, ", ");
-      }
-      switch (arg->kind) {
-      case EXPR_STRING:
-        fprintf(ctx->out, "ptr @.str.%d", cg_string_index(ctx, arg));
-        break;
-      case EXPR_NUMBER:
-        fprintf(ctx->out, "%s %s", type_kind_to_str(arg->type.kind),
-                arg->number.value);
-        break;
-      case EXPR_ID:
-        fprintf(ctx->out, "%s %%%s", type_kind_to_str(arg->type.kind),
-                arg->id.name);
-        break;
-      default:
-        NOT_IMPLEMENTED;
-        return 1;
-      }
-    }
-    fprintf(ctx->out, ")\n");
-    return 0;
+    return (value_t){
+        .type = (type_t){.kind = TYPE_UNKNOWN},
+        .ref = NULL,
+    };
+  }
+}
+
+static value_t emit_call(ctx_t *ctx, expr_t *call) {
+  const char *name = call->call.callee->id.name;
+
+  size_t n = call->call.arg_count;
+  value_t *argv = arena_alloc(ctx->arena, sizeof(value_t) * (n ? n : 1));
+  size_t i = 0;
+  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
+    argv[i++] = emit_value(ctx, arg);
   }
 
-  return 0;
+  value_t result;
+  if (call->type.kind == TYPE_VOID) {
+    fprintf(ctx->out, "  call void @%s(", name);
+    result = (value_t){
+        .type = call->type,
+        .ref = NULL,
+    };
+  } else {
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = call %s @%s(", reg,
+            type_kind_to_ir(call->type.kind), name);
+    result = (value_t){
+        .type = call->type,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+
+  for (i = 0; i < n; i++) {
+    fprintf(ctx->out, "%s%s %s", i ? ", " : "",
+            type_kind_to_ir(argv[i].type.kind), argv[i].ref);
+  }
+  fprintf(ctx->out, ")\n");
+  return result;
 }
 
 static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
                        const char *fn_name) {
   expr_t *value = stmt->ret.value;
-
   if (value == NULL) {
     if (type.kind != TYPE_VOID) {
-      // TODO: Add source
       diag_error(NULL, stmt->line, stmt->col,
                  "non-void function '%s' must return a value", fn_name);
       return 1;
     }
-    return 0;
+
+    return 0; // emit_decl appends the trailing `ret void`
   }
 
-  switch (value->kind) {
-  case EXPR_NUMBER:
-    fprintf(ctx->out, "  ret %s %s\n", type_kind_to_str(type.kind),
-            value->number.value);
-    return 0;
-  case EXPR_ID:
-    fprintf(ctx->out, "  ret %s %%%s\n", type_kind_to_str(type.kind),
-            value->id.name);
-    return 0;
-  case EXPR_CALL:
-    emit_call(ctx, value);
-    fprintf(ctx->out, "  ret %s %%%d\n", type_kind_to_str(type.kind),
-            ctx->reg - 1);
-    return 0;
-  default:
-    return 1;
-  }
+  value_t val = emit_value(ctx, value);
+  fprintf(ctx->out, "  ret %s %s\n", type_kind_to_ir(type.kind), val.ref);
+  return 0;
 }
 
 static int emit_expr(ctx_t *ctx, expr_t *expr) {
   if (expr == NULL) {
     return 1;
   }
+
   switch (expr->kind) {
   case EXPR_CALL:
-    return emit_call(ctx, expr);
+    emit_call(ctx, expr);
+    return 0;
   default:
     NOT_IMPLEMENTED;
     return 1;
@@ -240,10 +256,10 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     ctx->reg = CTX_REG_START;
     fprintf(ctx->out, "define %s%s @%s(",
             decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-            type_kind_to_str(decl->fn.return_type.kind), decl->name);
+            type_kind_to_ir(decl->fn.return_type.kind), decl->name);
     for (const param_t *param = decl->fn.params; param != NULL;
          param = param->next) {
-      fprintf(ctx->out, "%s %%%s%s", type_kind_to_str(param->type.kind),
+      fprintf(ctx->out, "%s %%%s%s", type_kind_to_ir(param->type.kind),
               param->name, param->next != NULL ? ", " : "");
     }
 

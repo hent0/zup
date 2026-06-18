@@ -1,7 +1,3 @@
-fn one(x: i32): i32 {
-  return x;
-}
-
-pub fn main(): i32 {
-  return one("hi");
+pub fn main(): i64 {
+  return 0;
 }

@@ -3,7 +3,7 @@ multiple parameters of different integer types parse in order
 --ARGS--
 --ast
 --FILE--
-fn add3(a: i32, b: i64, c: i8): i64 {
+fn add3(a: i32, b: i64, c: i8): i8 {
   return c;
 }
 
@@ -12,7 +12,7 @@ pub fn main(): i32 {
 }
 --EXPECT--
 Container (file) (2 members)
-  FnDecl priv 'add3' -> i64
+  FnDecl priv 'add3' -> i8
     param a: i32
     param b: i64
     param c: i8

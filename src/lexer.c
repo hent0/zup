@@ -1,6 +1,5 @@
 #include "lexer.h"
 #include "arena.h"
-#include "debug.h"
 #include "diag.h"
 #include "token.h"
 #include <ctype.h>

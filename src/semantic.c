@@ -52,19 +52,13 @@ typedef struct {
   bool ok;
 } exprty_t;
 
-static bool is_integer(TypeKind kind) {
-  return kind == TYPE_I8 || kind == TYPE_I16 || kind == TYPE_I32 ||
-         kind == TYPE_I64;
+static bool is_integer(TypeKind k) {
+  return k == TYPE_I8 || k == TYPE_I16 || k == TYPE_I32 || k == TYPE_I64;
 }
 
-static bool type_assignable(TypeKind to, TypeKind from) {
-  if (is_integer(to)) {
-    return is_integer(from);
-  }
-  return to == from;
-}
+static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
 
-static exprty_t check_expr(sema_t *sema, expr_t *expr);
+static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
 
 // TODO: Refactor out later
 static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
@@ -75,9 +69,8 @@ static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
     sema->had_error = true;
   }
 
-  for (expr_t *arg = first != NULL ? first->next : NULL; arg != NULL;
-       arg = arg->next) {
-    check_expr(sema, arg);
+  for (expr_t *arg = first; arg != NULL; arg = arg->next) {
+    check_expr(sema, arg, TYPE_UNKNOWN);
   }
   return (exprty_t){.kind = TYPE_I32, .ok = true};
 }
@@ -109,7 +102,8 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
 
   param_t *param = fn->fn.params;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    exprty_t at = check_expr(sema, arg);
+    exprty_t at =
+        check_expr(sema, arg, param ? param->type.kind : TYPE_UNKNOWN);
     if (param != NULL) {
       if (at.ok && !type_assignable(param->type.kind, at.kind)) {
         diag_error(sema->src, call->line, call->col,
@@ -125,11 +119,12 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
   return (exprty_t){.kind = fn->fn.return_type.kind, .ok = true};
 }
 
-static exprty_t check_expr(sema_t *sema, expr_t *expr) {
+static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   exprty_t result;
   switch (expr->kind) {
   case EXPR_NUMBER:
-    result = (exprty_t){.kind = TYPE_I32, .ok = true};
+    result = (exprty_t){.kind = is_integer(expected) ? expected : TYPE_I32,
+                        .ok = true};
     break;
   case EXPR_STRING:
     result = (exprty_t){.kind = TYPE_STRING, .ok = true};
@@ -171,7 +166,7 @@ static void check_return(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     return;
   }
 
-  exprty_t value = check_expr(sema, stmt->ret.value);
+  exprty_t value = check_expr(sema, stmt->ret.value, ret);
 
   if (ret == TYPE_VOID) {
     diag_error(sema->src, stmt->line, stmt->col,
@@ -194,14 +189,14 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     check_return(sema, stmt, fn);
     break;
   case STMT_EXPR:
-    check_expr(sema, stmt->expr_stmt.expr);
+    check_expr(sema, stmt->expr_stmt.expr, TYPE_UNKNOWN);
     break;
   }
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
   scope_t scope = {
-      .items = arena_alloc(sema->arena, sizeof(scope_t) * fn->fn.params_count),
+      .items = arena_alloc(sema->arena, sizeof(local_t) * fn->fn.params_count),
       .count = 0};
 
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {

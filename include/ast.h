@@ -122,6 +122,7 @@ typedef struct {
   decl_t *root;
 } unit_t;
 
+char *type_kind_to_ir(TypeKind kind);
 char *type_kind_to_str(TypeKind kind);
 
 expr_t *ast_number_init(token_t token, arena_t *arena);

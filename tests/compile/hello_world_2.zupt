@@ -1,0 +1,13 @@
+--TEST--
+compiled program prints to stdout and exits 0
+--FILE--
+fn number(): i32 {
+  return 2;
+}
+
+pub fn main(): i32 {
+  printf("Hello, %s %d!\n", "world", number());
+  return 0;
+}
+--EXPECT--
+Hello, world 2!

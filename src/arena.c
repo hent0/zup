@@ -1,4 +1,6 @@
 #include "arena.h"
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -54,6 +56,19 @@ char *arena_strndup(arena_t *arena, const char *str, size_t n) {
   memcpy(copy, str, n);
   copy[n] = '\0';
   return copy;
+}
+
+char *arena_format(arena_t *a, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  va_list args2;
+  va_copy(args2, args);
+  int n = vsnprintf(NULL, 0, format, args);
+  va_end(args);
+  char *buf = arena_alloc(a, n + 1);
+  vsnprintf(buf, n + 1, format, args2);
+  va_end(args2);
+  return buf;
 }
 
 void arena_reset(arena_t *arena) {
