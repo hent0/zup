@@ -1,0 +1,15 @@
+--TEST--
+execution falls through past the if when the condition is false
+--FILE--
+fn pick(x: i32): i32 {
+  if x > 0 {
+    return 1;
+  }
+  return 2;
+}
+
+pub fn main(): i32 {
+  return pick(0);
+}
+--EXIT--
+2

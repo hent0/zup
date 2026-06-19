@@ -1,0 +1,13 @@
+--TEST--
+an if condition must be a bool
+--FILE--
+pub fn main(): i32 {
+  if 1 {
+    return 0;
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: if condition must be bool, got i32 [2:6]
+--EXIT--
+1

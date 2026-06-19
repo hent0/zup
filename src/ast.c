@@ -65,11 +65,11 @@ char *binop_to_ir(BinaryOp op) {
   case BINOP_LT:
     return "icmp slt";
   case BINOP_LE:
-    return "<=";
+    return "icmp sle";
   case BINOP_GT:
-    return ">";
+    return "icmp sgt";
   case BINOP_GE:
-    return ">=";
+    return "icmp sge";
   default:
     return "?";
   }
@@ -207,6 +207,19 @@ stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena) {
   return stmt;
 }
 
+stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
+                    stmt_t *else_body, arena_t *arena) {
+  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
+  stmt->kind = STMT_IF;
+  stmt->line = token.line;
+  stmt->col = token.col;
+  stmt->next = NULL;
+  stmt->if_stmt.cond = cond;
+  stmt->if_stmt.then_body = then_body;
+  stmt->if_stmt.else_body = else_body;
+  return stmt;
+}
+
 param_t *ast_param_init(arena_t *arena) {
   param_t *param = arena_alloc(arena, sizeof(param_t));
   param->name = NULL;
@@ -302,6 +315,14 @@ static void dump_expr(const expr_t *expr, int depth) {
   }
 }
 
+static void dump_stmt(const stmt_t *stmt, int depth);
+
+static void dump_block(const stmt_t *block, int depth) {
+  for (const stmt_t *stmt = block; stmt != NULL; stmt = stmt->next) {
+    dump_stmt(stmt, depth + 1);
+  }
+}
+
 static void dump_stmt(const stmt_t *stmt, int depth) {
   print_indent(depth);
   switch (stmt->kind) {
@@ -314,6 +335,18 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
   case STMT_EXPR:
     printf("ExprStmt\n");
     dump_expr(stmt->expr_stmt.expr, depth + 1);
+    break;
+  case STMT_IF:
+    printf("If\n");
+    dump_expr(stmt->if_stmt.cond, depth + 1);
+    print_indent(depth + 1);
+    printf("Then\n");
+    dump_block(stmt->if_stmt.then_body, depth + 1);
+    if (stmt->if_stmt.else_body != NULL) {
+      print_indent(depth + 1);
+      printf("Else\n");
+      dump_block(stmt->if_stmt.else_body, depth + 1);
+    }
     break;
   }
 }
@@ -341,9 +374,7 @@ static void dump_decl(const decl_t *decl, int depth) {
       printf("param %s: %s\n", param->name, type_kind_to_str(param->type.kind));
     }
 
-    for (const stmt_t *stmt = decl->fn.body; stmt != NULL; stmt = stmt->next) {
-      dump_stmt(stmt, depth + 1);
-    }
+    dump_block(decl->fn.body, depth);
     break;
   case DECL_CONTAINER:
     printf("Container %s (%zu members)\n", decl->name ? decl->name : "(file)",

@@ -243,6 +243,31 @@ static expr_t *parse_expr(parser_t *parser) {
   return parse_comparison(parser);
 }
 
+static stmt_t *parse_stmt(parser_t *parser);
+
+static stmt_t *parse_block(parser_t *parser) {
+  expect(parser, TOKEN_LBRACE, "expected '{'");
+  stmt_t *head = NULL;
+  stmt_t *tail = NULL;
+  while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    stmt_t *stmt = parse_stmt(parser);
+    if (stmt == NULL) {
+      break;
+    }
+
+    if (tail == NULL) {
+      head = stmt;
+    } else {
+      tail->next = stmt;
+    }
+
+    tail = stmt;
+  }
+
+  expect(parser, TOKEN_RBRACE, "expected '}'");
+  return head;
+}
+
 static stmt_t *parse_return(parser_t *parser) {
   token_t token = parser->current;
   expect(parser, TOKEN_RETURN, "expected 'return'");
@@ -254,9 +279,25 @@ static stmt_t *parse_return(parser_t *parser) {
   return ast_return_init(token, value, parser->arena);
 }
 
+static stmt_t *parse_if(parser_t *parser) {
+  token_t token = expect(parser, TOKEN_IF, "expected 'if'");
+  expr_t *cond = parse_expr(parser);
+  stmt_t *then_body = parse_block(parser);
+  stmt_t *else_body = NULL;
+  if (match(parser, TOKEN_ELSE)) {
+    else_body =
+        check(parser, TOKEN_IF) ? parse_if(parser) : parse_block(parser);
+  }
+  return ast_if_init(token, cond, then_body, else_body, parser->arena);
+}
+
 static stmt_t *parse_stmt(parser_t *parser) {
   if (check(parser, TOKEN_RETURN)) {
     return parse_return(parser);
+  }
+
+  if (check(parser, TOKEN_IF)) {
+    return parse_if(parser);
   }
 
   if (!starts_expr(parser->current.kind)) {
@@ -327,26 +368,7 @@ static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
   expect(parser, TOKEN_RPAREN, "expected ')' after parameters");
 
   fn->fn.return_type = parse_return_type(parser);
-
-  expect(parser, TOKEN_LBRACE, "expected '{'");
-  stmt_t *s_tail = NULL;
-  while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
-    stmt_t *stmt = parse_stmt(parser);
-    if (stmt == NULL) {
-      break;
-    }
-
-    if (s_tail == NULL) {
-      fn->fn.body = stmt;
-    } else {
-      s_tail->next = stmt;
-    }
-
-    s_tail = stmt;
-    fn->fn.stmt_count++;
-  }
-
-  expect(parser, TOKEN_RBRACE, "expected '}'");
+  fn->fn.body = parse_block(parser);
   return fn;
 }
 

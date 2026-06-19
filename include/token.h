@@ -31,6 +31,8 @@ typedef enum {
   TOKEN_LESS_EQUAL,
   TOKEN_GREATER,
   TOKEN_GREATER_EQUAL,
+  TOKEN_IF,
+  TOKEN_ELSE,
   // Types
   TOKEN_VOID,
   TOKEN_I8,

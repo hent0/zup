@@ -70,6 +70,10 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_GREATER";
   case TOKEN_GREATER_EQUAL:
     return "TOKEN_GREATER_EQUAL";
+  case TOKEN_IF:
+    return "TOKEN_IF";
+  case TOKEN_ELSE:
+    return "TOKEN_ELSE";
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:

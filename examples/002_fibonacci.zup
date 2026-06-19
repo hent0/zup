@@ -1,0 +1,14 @@
+fn fib(n: i32, a: i32, b: i32): i32 {
+  if n <= 0 {
+    return 0;
+  }
+
+  printf("%d ", a);
+  return fib(n - 1, b, a + b);
+}
+
+pub fn main(): i32 {
+  fib(10, 0, 1);
+  printf("\n");
+  return 0;
+}

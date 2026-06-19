@@ -1,0 +1,15 @@
+--TEST--
+the then-branch runs when the condition is true
+--FILE--
+fn pick(x: i32): i32 {
+  if x > 0 {
+    return 1;
+  }
+  return 2;
+}
+
+pub fn main(): i32 {
+  return pick(5);
+}
+--EXIT--
+1

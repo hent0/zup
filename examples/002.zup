@@ -1,7 +1,0 @@
-fn f(): bool {
-  return 1 + 2 < 3;
-}
-
-pub fn main(): i32 {
-  return 0;
-}

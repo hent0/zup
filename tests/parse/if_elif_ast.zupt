@@ -1,0 +1,33 @@
+--TEST--
+else if nests as an if statement inside the else arm
+--ARGS--
+--ast
+--FILE--
+pub fn main(): i32 {
+  if false {
+    return 0;
+  } else if true {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+--EXPECT--
+Container (file) (1 members)
+  FnDecl pub 'main' -> i32
+    If
+      Boolean literal false
+      Then
+        Return
+          Number literal 0
+      Else
+        If
+          Boolean literal true
+          Then
+            Return
+              Number literal 1
+          Else
+            Return
+              Number literal 2
+--EXIT--
+0

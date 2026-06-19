@@ -277,7 +277,51 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_EXPR:
     check_expr(sema, stmt->expr_stmt.expr, TYPE_UNKNOWN);
     break;
+  case STMT_IF: {
+    exprty_t cond = check_expr(sema, stmt->if_stmt.cond, TYPE_BOOL);
+    if (cond.ok && cond.kind != TYPE_BOOL) {
+      diag_error(sema->src, stmt->if_stmt.cond->line, stmt->if_stmt.cond->col,
+                 "if condition must be bool, got %s",
+                 type_kind_to_str(cond.kind));
+      sema->had_error = true;
+    }
+    for (stmt_t *s = stmt->if_stmt.then_body; s != NULL; s = s->next) {
+      check_stmt(sema, s, fn);
+    }
+    for (stmt_t *s = stmt->if_stmt.else_body; s != NULL; s = s->next) {
+      check_stmt(sema, s, fn);
+    }
+    break;
   }
+  }
+}
+
+static bool block_returns(stmt_t *body);
+
+// Does this statement guarantee a return on every path through it?
+static bool stmt_returns(stmt_t *stmt) {
+  switch (stmt->kind) {
+  case STMT_RETURN:
+    return true;
+  case STMT_IF:
+    return stmt->if_stmt.else_body != NULL &&
+           block_returns(stmt->if_stmt.then_body) &&
+           block_returns(stmt->if_stmt.else_body);
+  default:
+    return false;
+  }
+}
+
+// A block returns iff its last statement returns on every path.
+static bool block_returns(stmt_t *body) {
+  if (body == NULL) {
+    return false;
+  }
+  stmt_t *last = body;
+  while (last->next != NULL) {
+    last = last->next;
+  }
+  return stmt_returns(last);
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
@@ -300,14 +344,11 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
 
   sema->scope = &scope;
 
-  stmt_t *last = NULL;
   for (stmt_t *stmt = fn->fn.body; stmt != NULL; stmt = stmt->next) {
     check_stmt(sema, stmt, fn);
-    last = stmt;
   }
 
-  if (fn->fn.return_type.kind != TYPE_VOID &&
-      (last == NULL || last->kind != STMT_RETURN)) {
+  if (fn->fn.return_type.kind != TYPE_VOID && !block_returns(fn->fn.body)) {
     diag_error(sema->src, fn->line, fn->col,
                "non-void function '%s' must return a value", fn->name);
     sema->had_error = true;

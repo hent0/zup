@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #define CTX_REG_START 1
+#define CTX_LABEL_START 1
 
 typedef struct {
   type_t type;
@@ -27,6 +28,7 @@ typedef struct {
   int strings_count;
 
   unsigned int reg;
+  unsigned int label;
 } ctx_t;
 
 static int intern_string(ctx_t *ctx, expr_t *node) {
@@ -114,6 +116,20 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
     return collect_expr(ctx, stmt->ret.value);
   case STMT_EXPR:
     return collect_expr(ctx, stmt->expr_stmt.expr);
+  case STMT_IF:
+    collect_expr(ctx, stmt->if_stmt.cond);
+    for (stmt_t *s = stmt->if_stmt.then_body; s != NULL; s = s->next) {
+      if (collect_stmt(ctx, s) != 0) {
+        return 1;
+      }
+    }
+
+    for (stmt_t *s = stmt->if_stmt.else_body; s != NULL; s = s->next) {
+      if (collect_stmt(ctx, s) != 0) {
+        return 1;
+      }
+    }
+    return 0;
   }
   return 0;
 }
@@ -297,6 +313,59 @@ static int emit_expr(ctx_t *ctx, expr_t *expr) {
   }
 }
 
+static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
+
+static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
+  for (stmt_t *stmt = body; stmt != NULL; stmt = stmt->next) {
+    switch (stmt->kind) {
+    case STMT_RETURN:
+      if (emit_return(ctx, stmt, ret, fn) != 0) {
+        return 1;
+      }
+      break;
+    case STMT_EXPR:
+      if (emit_expr(ctx, stmt->expr_stmt.expr) != 0) {
+        return 1;
+      }
+      break;
+    case STMT_IF:
+      if (emit_condition(ctx, stmt, ret, fn) != 0) {
+        return 1;
+      }
+      break;
+    }
+  }
+
+  return 0;
+}
+
+static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
+                          const char *fn) {
+  if (stmt == NULL) {
+    return 1;
+  }
+
+  value_t cond = emit_value(ctx, stmt->if_stmt.cond);
+  unsigned int label = ctx->label++;
+  fprintf(ctx->out, "  br i1 %s, label %%then.%d, label %%%s.%d\n", cond.ref,
+          label, stmt->if_stmt.else_body != NULL ? "else" : "endif", label);
+  fprintf(ctx->out, "then.%d:\n", label);
+  if (emit_block(ctx, stmt->if_stmt.then_body, ret, fn) != 0) {
+    return 1;
+  }
+
+  if (stmt->if_stmt.else_body != NULL) {
+    fprintf(ctx->out, "else.%d:\n", label);
+    if (emit_block(ctx, stmt->if_stmt.else_body, ret, fn) != 0) {
+      return 1;
+    }
+  } else {
+    fprintf(ctx->out, "endif.%d:\n", label);
+  }
+
+  return 0;
+}
+
 static int emit_decl(ctx_t *ctx, decl_t *decl) {
   if (decl == NULL) {
     return 1;
@@ -313,6 +382,7 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   case DECL_FN:
     ctx->reg = CTX_REG_START;
+    ctx->label = CTX_LABEL_START;
     fprintf(ctx->out, "define %s%s @%s(",
             decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
             type_kind_to_ir(decl->fn.return_type.kind), decl->name);
@@ -324,19 +394,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
 
     fprintf(ctx->out, ") {\nentry:\n");
 
-    for (stmt_t *stmt = decl->fn.body; stmt != NULL; stmt = stmt->next) {
-      switch (stmt->kind) {
-      case STMT_RETURN:
-        if (emit_return(ctx, stmt, decl->fn.return_type, decl->name) != 0) {
-          return 1;
-        }
-        break;
-      case STMT_EXPR:
-        if (emit_expr(ctx, stmt->expr_stmt.expr) != 0) {
-          return 1;
-        }
-        break;
-      }
+    if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
+      return 1;
     }
 
     if (decl->fn.return_type.kind == TYPE_VOID) {
@@ -358,6 +417,7 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
       .out = out,
       .arena = arena,
       .reg = CTX_REG_START,
+      .label = CTX_LABEL_START,
   };
 
   for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {

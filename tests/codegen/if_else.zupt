@@ -1,0 +1,32 @@
+--TEST--
+an if/else lowers to a conditional branch into two blocks
+--ARGS--
+--ir -o -
+--FILE--
+fn classify(c: bool): i32 {
+  if c {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i32 @classify(i1 %c) {
+entry:
+  br i1 %c, label %then.1, label %else.1
+then.1:
+  ret i32 1
+else.1:
+  ret i32 2
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

@@ -1,0 +1,22 @@
+fn classify(c: bool): i32 {
+  if c {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+
+// declare i32 @printf(ptr, ...)
+//
+// define internal i32 @classify(i1 %c) {
+// entry:
+//   br i1 %c, label %then.0, label %else.0
+// then.0:
+//   ret i32 1
+// else.0:
+//   ret i32 2
+// }

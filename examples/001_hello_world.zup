@@ -1,0 +1,8 @@
+// Single line comment
+pub fn /** Stupid comment here */ main(): i32 {
+  printf("Hello, %s!\n", "world");
+  /**
+   * Multiline comment
+   */
+  return 0;// Line breaking comment
+}
