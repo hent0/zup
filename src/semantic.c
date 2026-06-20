@@ -235,16 +235,22 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_UNARY: {
-    exprty_t operand = check_expr(sema, expr->unary.operand, TYPE_BOOL);
+    // !  : operand must be bool, result bool
+    // -  : operand must be an integer, result the same integer type
+    bool is_not = expr->unary.op == UNOP_NOT;
+    TypeKind operand_expected = is_not ? TYPE_BOOL : expected;
+    exprty_t operand = check_expr(sema, expr->unary.operand, operand_expected);
+
+    bool valid = is_not ? operand.kind == TYPE_BOOL : is_integer(operand.kind);
     if (!operand.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
-    } else if (operand.kind != TYPE_BOOL) {
+    } else if (!valid) {
       diag_error(sema->src, expr->line, expr->col, "cannot apply '%s' to %s",
                  unop_to_str(expr->unary.op), type_kind_to_str(operand.kind));
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+      result = (exprty_t){.kind = is_not ? TYPE_BOOL : operand.kind, .ok = true};
     }
     break;
   }

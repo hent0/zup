@@ -134,6 +134,10 @@ static expr_t *parse_unary(parser_t *parser) {
     return ast_unary_init(UNOP_NOT, parse_unary(parser), parser->arena);
   }
 
+  if (match(parser, TOKEN_MINUS)) {
+    return ast_unary_init(UNOP_NEG, parse_unary(parser), parser->arena);
+  }
+
   return parse_primary(parser);
 }
 

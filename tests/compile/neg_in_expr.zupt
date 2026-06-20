@@ -1,0 +1,8 @@
+--TEST--
+unary minus as a binary operand: 100 + -8 is 92
+--FILE--
+pub fn main(): i32 {
+  return 100 + -8;
+}
+--EXIT--
+92

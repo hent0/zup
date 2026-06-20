@@ -128,10 +128,23 @@ bool binop_is_comparison(BinaryOp op) {
 
 bool binop_is_logical(BinaryOp op) { return op == BINOP_AND || op == BINOP_OR; }
 
+char *unop_to_ir(UnaryOp op) {
+  switch (op) {
+  case UNOP_NOT:
+    return "xor";
+  case UNOP_NEG:
+    return "sub";
+  default:
+    return "?";
+  }
+}
+
 char *unop_to_str(UnaryOp op) {
   switch (op) {
   case UNOP_NOT:
     return "!";
+  case UNOP_NEG:
+    return "-";
   default:
     return "?";
   }

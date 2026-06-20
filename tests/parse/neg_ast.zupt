@@ -1,0 +1,24 @@
+--TEST--
+unary minus parses as a unary expression
+--ARGS--
+--ast
+--FILE--
+fn f(x: i32): i32 {
+  return -x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> i32
+    param x: i32
+    Return
+      Unary -
+        Id x
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

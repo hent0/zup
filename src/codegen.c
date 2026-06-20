@@ -310,9 +310,19 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   case EXPR_UNARY: {
     value_t operand = emit_value(ctx, expr->unary.operand);
     unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", reg, operand.ref);
+    if (expr->unary.op == UNOP_NOT) {
+      // !x  ->  xor i1 x, true
+      fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", reg, operand.ref);
+      return (value_t){
+          .type = (type_t){.kind = TYPE_BOOL},
+          .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+    // -x  ->  sub <ty> 0, x
+    fprintf(ctx->out, "  %%%u = sub %s 0, %s\n", reg,
+            type_kind_to_ir(operand.type.kind), operand.ref);
     return (value_t){
-        .type = (type_t){.kind = TYPE_BOOL},
+        .type = operand.type,
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }

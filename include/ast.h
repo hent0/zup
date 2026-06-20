@@ -39,6 +39,7 @@ typedef enum {
 
 typedef enum {
   UNOP_NOT,
+  UNOP_NEG,
 } UnaryOp;
 
 typedef enum {
@@ -195,6 +196,7 @@ char *binop_to_str(BinaryOp op);
 bool binop_is_comparison(BinaryOp op);
 bool binop_is_logical(BinaryOp op);
 
+char *unop_to_ir(UnaryOp op);
 char *unop_to_str(UnaryOp op);
 
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena);

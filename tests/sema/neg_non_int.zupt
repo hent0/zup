@@ -1,0 +1,10 @@
+--TEST--
+unary minus requires an integer operand
+--FILE--
+pub fn main(): i32 {
+  return -true;
+}
+--EXPECTERR--
+zup: error: cannot apply '-' to bool [2:11]
+--EXIT--
+1

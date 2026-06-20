@@ -1,0 +1,9 @@
+--TEST--
+unary minus negates a value (binds tighter than +): -x + 10 with x=3 is 7
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 3;
+  return -x + 10;
+}
+--EXIT--
+7
