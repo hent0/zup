@@ -139,6 +139,8 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       return 1;
     }
     return collect_expr(ctx, expr->binary.rhs);
+  case EXPR_UNARY:
+    return collect_expr(ctx, expr->unary.operand);
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -302,6 +304,15 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
             left.ref, right.ref);
     return (value_t){
         .type = expr->type,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+  case EXPR_UNARY: {
+    value_t operand = emit_value(ctx, expr->unary.operand);
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", reg, operand.ref);
+    return (value_t){
+        .type = (type_t){.kind = TYPE_BOOL},
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }

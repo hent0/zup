@@ -1,0 +1,11 @@
+--TEST--
+double negation: !!true is true
+--FILE--
+pub fn main(): i32 {
+  if !!true {
+    return 1;
+  }
+  return 2;
+}
+--EXIT--
+1

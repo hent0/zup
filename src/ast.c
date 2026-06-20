@@ -128,6 +128,15 @@ bool binop_is_comparison(BinaryOp op) {
 
 bool binop_is_logical(BinaryOp op) { return op == BINOP_AND || op == BINOP_OR; }
 
+char *unop_to_str(UnaryOp op) {
+  switch (op) {
+  case UNOP_NOT:
+    return "!";
+  default:
+    return "?";
+  }
+}
+
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_BINARY;
@@ -138,6 +147,18 @@ expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena) {
   expr->binary.op = op;
   expr->binary.lhs = lhs;
   expr->binary.rhs = rhs;
+  return expr;
+}
+
+expr_t *ast_unary_init(UnaryOp op, expr_t *operand, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_UNARY;
+  expr->line = operand->line;
+  expr->col = operand->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->unary.op = op;
+  expr->unary.operand = operand;
   return expr;
 }
 
@@ -327,6 +348,11 @@ static void dump_binary(const expr_t *expr, int depth) {
   dump_expr(expr->binary.rhs, depth + 1);
 }
 
+static void dump_unary(const expr_t *expr, int depth) {
+  printf("Unary %s\n", unop_to_str(expr->unary.op));
+  dump_expr(expr->unary.operand, depth + 1);
+}
+
 static void dump_expr(const expr_t *expr, int depth) {
   print_indent(depth);
   switch (expr->kind) {
@@ -357,6 +383,9 @@ static void dump_expr(const expr_t *expr, int depth) {
     break;
   case EXPR_BINARY:
     dump_binary(expr, depth);
+    break;
+  case EXPR_UNARY:
+    dump_unary(expr, depth);
     break;
   }
 }

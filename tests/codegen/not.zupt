@@ -1,0 +1,25 @@
+--TEST--
+logical not lowers to xor with true
+--ARGS--
+--ir -o -
+--FILE--
+fn f(x: bool): bool {
+  return !x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i1 @f(i1 %x) {
+entry:
+  %1 = xor i1 %x, true
+  ret i1 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

@@ -38,6 +38,10 @@ typedef enum {
 } BinaryOp;
 
 typedef enum {
+  UNOP_NOT,
+} UnaryOp;
+
+typedef enum {
   EXPR_BOOLEAN,
   EXPR_NUMBER,
   EXPR_STRING,
@@ -45,6 +49,7 @@ typedef enum {
   EXPR_CALL,
   EXPR_CAST,
   EXPR_BINARY,
+  EXPR_UNARY,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -82,6 +87,10 @@ struct expr {
       expr_t *lhs;
       expr_t *rhs;
     } binary;
+    struct {
+      UnaryOp op;
+      expr_t *operand;
+    } unary;
   };
 };
 
@@ -186,7 +195,10 @@ char *binop_to_str(BinaryOp op);
 bool binop_is_comparison(BinaryOp op);
 bool binop_is_logical(BinaryOp op);
 
+char *unop_to_str(UnaryOp op);
+
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena);
+expr_t *ast_unary_init(UnaryOp op, expr_t *operand, arena_t *arena);
 expr_t *ast_boolean_init(bool value, token_t token, arena_t *arena);
 expr_t *ast_number_init(token_t token, arena_t *arena);
 expr_t *ast_string_init(token_t token, arena_t *arena);

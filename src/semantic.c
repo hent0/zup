@@ -234,6 +234,20 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     }
     break;
   }
+  case EXPR_UNARY: {
+    exprty_t operand = check_expr(sema, expr->unary.operand, TYPE_BOOL);
+    if (!operand.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else if (operand.kind != TYPE_BOOL) {
+      diag_error(sema->src, expr->line, expr->col, "cannot apply '%s' to %s",
+                 unop_to_str(expr->unary.op), type_kind_to_str(operand.kind));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+    }
+    break;
+  }
   default:
     result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     break;

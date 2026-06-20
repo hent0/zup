@@ -129,8 +129,16 @@ static expr_t *parse_primary(parser_t *parser) {
   }
 }
 
+static expr_t *parse_unary(parser_t *parser) {
+  if (match(parser, TOKEN_BANG)) {
+    return ast_unary_init(UNOP_NOT, parse_unary(parser), parser->arena);
+  }
+
+  return parse_primary(parser);
+}
+
 static expr_t *parse_cast(parser_t *parser) {
-  expr_t *expr = parse_primary(parser);
+  expr_t *expr = parse_unary(parser);
   if (expr == NULL) {
     return NULL;
   }

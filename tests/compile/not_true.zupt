@@ -1,0 +1,11 @@
+--TEST--
+!true is false, so the branch is not taken
+--FILE--
+pub fn main(): i32 {
+  if !true {
+    return 1;
+  }
+  return 2;
+}
+--EXIT--
+2
