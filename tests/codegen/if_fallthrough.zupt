@@ -1,0 +1,36 @@
+--TEST--
+a non-returning if branches to the merge block and continues after it
+--ARGS--
+--ir -o -
+--FILE--
+fn pick(c: bool): i32 {
+  let x: i32 = 7;
+  if c {
+    x = 9;
+  }
+  return x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define internal i32 @pick(i1 %c) {
+entry:
+  %x = alloca i32
+  store i32 7, ptr %x
+  br i1 %c, label %then.1, label %endif.1
+then.1:
+  store i32 9, ptr %x
+  br label %endif.1
+endif.1:
+  %1 = load i32, ptr %x
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

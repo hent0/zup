@@ -1,0 +1,11 @@
+--TEST--
+assigning to a name that was never declared is an error
+--FILE--
+pub fn main(): i32 {
+  y = 5;
+  return 0;
+}
+--EXPECTERR--
+zup: error: undefined name 'y' [2:3]
+--EXIT--
+1

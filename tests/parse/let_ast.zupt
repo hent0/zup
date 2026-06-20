@@ -1,0 +1,21 @@
+--TEST--
+let binding and assignment parse
+--ARGS--
+--ast
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 5;
+  x = 9;
+  return x;
+}
+--EXPECT--
+Container (file) (1 members)
+  FnDecl pub 'main' -> i32
+    Let x: i32
+      Number literal 5
+    Assign x
+      Number literal 9
+    Return
+      Id x
+--EXIT--
+0

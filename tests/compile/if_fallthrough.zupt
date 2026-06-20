@@ -1,0 +1,16 @@
+--TEST--
+the then-body runs, then control falls through to the code after the if
+--FILE--
+fn pick(c: bool): i32 {
+  let x: i32 = 7;
+  if c {
+    x = 9;
+  }
+  return x;
+}
+
+pub fn main(): i32 {
+  return pick(true);
+}
+--EXIT--
+9

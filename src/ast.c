@@ -220,6 +220,31 @@ stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
   return stmt;
 }
 
+stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
+                     arena_t *arena) {
+  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
+  stmt->kind = STMT_LET;
+  stmt->line = token.line;
+  stmt->col = token.col;
+  stmt->next = NULL;
+  stmt->let.name = name;
+  stmt->let.type = type;
+  stmt->let.init = init;
+  return stmt;
+}
+
+stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
+                        arena_t *arena) {
+  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
+  stmt->kind = STMT_ASSIGN;
+  stmt->line = token.line;
+  stmt->col = token.col;
+  stmt->next = NULL;
+  stmt->assign.name = name;
+  stmt->assign.value = value;
+  return stmt;
+}
+
 param_t *ast_param_init(arena_t *arena) {
   param_t *param = arena_alloc(arena, sizeof(param_t));
   param->name = NULL;
@@ -347,6 +372,15 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
       printf("Else\n");
       dump_block(stmt->if_stmt.else_body, depth + 1);
     }
+    break;
+  case STMT_LET:
+    printf("Let %s: %s\n", stmt->let.name,
+           type_kind_to_str(stmt->let.type.kind));
+    dump_expr(stmt->let.init, depth + 1);
+    break;
+  case STMT_ASSIGN:
+    printf("Assign %s\n", stmt->assign.name);
+    dump_expr(stmt->assign.value, depth + 1);
     break;
   }
 }

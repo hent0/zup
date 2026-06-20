@@ -1,0 +1,11 @@
+--TEST--
+a let initializer must match the declared type
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = true;
+  return x;
+}
+--EXPECTERR--
+zup: error: cannot assign bool to variable 'x' of type i32 [2:3]
+--EXIT--
+1

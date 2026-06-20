@@ -3,7 +3,9 @@
 #include "ast.h"
 #include "debug.h"
 #include "diag.h"
+#include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #define CTX_REG_START 1
 #define CTX_LABEL_START 1
@@ -20,12 +22,22 @@ struct ctx_str {
   ctx_str_t *next;
 };
 
+typedef struct ctx_local ctx_local_t;
+struct ctx_local {
+  const char *name;
+  type_t type;
+  const char *ptr;
+  ctx_local_t *next;
+};
+
 typedef struct {
   FILE *out;
   arena_t *arena;
   ctx_str_t *strings;
   ctx_str_t *strings_tail;
   int strings_count;
+  ctx_local_t *locals;
+  ctx_local_t *locals_tail;
 
   unsigned int reg;
   unsigned int label;
@@ -53,6 +65,30 @@ static int string_index(ctx_t *ctx, expr_t *node) {
   }
 
   return -1;
+}
+
+static ctx_local_t *find_local(ctx_t *ctx, const char *name) {
+  for (ctx_local_t *l = ctx->locals; l != NULL; l = l->next) {
+    if (strcmp(l->name, name) == 0) {
+      return l;
+    }
+  }
+  return NULL;
+}
+
+static void add_local(ctx_t *ctx, const char *name, type_t type,
+                      const char *ptr) {
+  ctx_local_t *l = arena_alloc(ctx->arena, sizeof(ctx_local_t));
+  l->name = name;
+  l->type = type;
+  l->ptr = ptr;
+  l->next = NULL;
+  if (ctx->locals_tail == NULL) {
+    ctx->locals = l;
+  } else {
+    ctx->locals_tail->next = l;
+  }
+  ctx->locals_tail = l;
 }
 
 // Re-encode decoded bytes into LLVM's c"..." form.
@@ -130,6 +166,10 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
       }
     }
     return 0;
+  case STMT_LET:
+    return collect_expr(ctx, stmt->let.init);
+  case STMT_ASSIGN:
+    return collect_expr(ctx, stmt->assign.value);
   }
   return 0;
 }
@@ -199,11 +239,22 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .type = expr->type,
         .ref = arena_format(ctx->arena, "@.str.%d", string_index(ctx, expr)),
     };
-  case EXPR_ID:
+  case EXPR_ID: {
+    ctx_local_t *local = find_local(ctx, expr->id.name);
+    if (local == NULL) {
+      return (value_t){
+          .type = expr->type,
+          .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
+      };
+    }
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+            type_kind_to_ir(local->type.kind), local->ptr);
     return (value_t){
-        .type = expr->type,
-        .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
+        .type = local->type,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
     };
+  }
   case EXPR_CALL:
     return emit_call(ctx, expr);
   case EXPR_CAST: {
@@ -290,7 +341,8 @@ static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
       return 1;
     }
 
-    return 0; // emit_decl appends the trailing `ret void`
+    fprintf(ctx->out, "  ret void\n");
+    return 0;
   }
 
   value_t val = emit_value(ctx, value);
@@ -315,6 +367,30 @@ static int emit_expr(ctx_t *ctx, expr_t *expr) {
 
 static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 
+static bool block_terminates(stmt_t *body);
+
+static bool stmt_terminates(stmt_t *stmt) {
+  switch (stmt->kind) {
+  case STMT_RETURN:
+    return true;
+  case STMT_IF:
+    return stmt->if_stmt.else_body != NULL &&
+           block_terminates(stmt->if_stmt.then_body) &&
+           block_terminates(stmt->if_stmt.else_body);
+  default:
+    return false;
+  }
+}
+
+static bool block_terminates(stmt_t *body) {
+  for (stmt_t *s = body; s != NULL; s = s->next) {
+    if (stmt_terminates(s)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
   for (stmt_t *stmt = body; stmt != NULL; stmt = stmt->next) {
     switch (stmt->kind) {
@@ -333,6 +409,31 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
         return 1;
       }
       break;
+    case STMT_LET: {
+      const char *ptr = arena_format(ctx->arena, "%%%s", stmt->let.name);
+      fprintf(ctx->out, "  %s = alloca %s\n", ptr,
+              type_kind_to_ir(stmt->let.type.kind));
+      value_t value = emit_value(ctx, stmt->let.init);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n",
+              type_kind_to_ir(stmt->let.type.kind), value.ref, ptr);
+      add_local(ctx, stmt->let.name, stmt->let.type, ptr);
+      break;
+    }
+    case STMT_ASSIGN: {
+      ctx_local_t *local = find_local(ctx, stmt->assign.name);
+      if (local == NULL) {
+        NOT_IMPLEMENTED; // assigning to a parameter has no slot
+        break;
+      }
+      value_t value = emit_value(ctx, stmt->assign.value);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n",
+              type_kind_to_ir(local->type.kind), value.ref, local->ptr);
+      break;
+    }
+    }
+
+    if (stmt_terminates(stmt)) {
+      break;
     }
   }
 
@@ -345,22 +446,36 @@ static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
     return 1;
   }
 
+  bool has_else = stmt->if_stmt.else_body != NULL;
+  bool then_term = block_terminates(stmt->if_stmt.then_body);
+  bool else_term = has_else && block_terminates(stmt->if_stmt.else_body);
+  bool merge = !has_else || !then_term || !else_term;
+
   value_t cond = emit_value(ctx, stmt->if_stmt.cond);
   unsigned int label = ctx->label++;
-  fprintf(ctx->out, "  br i1 %s, label %%then.%d, label %%%s.%d\n", cond.ref,
-          label, stmt->if_stmt.else_body != NULL ? "else" : "endif", label);
-  fprintf(ctx->out, "then.%d:\n", label);
+  fprintf(ctx->out, "  br i1 %s, label %%then.%u, label %%%s.%u\n", cond.ref,
+          label, has_else ? "else" : "endif", label);
+
+  fprintf(ctx->out, "then.%u:\n", label);
   if (emit_block(ctx, stmt->if_stmt.then_body, ret, fn) != 0) {
     return 1;
   }
+  if (!then_term) {
+    fprintf(ctx->out, "  br label %%endif.%u\n", label);
+  }
 
-  if (stmt->if_stmt.else_body != NULL) {
-    fprintf(ctx->out, "else.%d:\n", label);
+  if (has_else) {
+    fprintf(ctx->out, "else.%u:\n", label);
     if (emit_block(ctx, stmt->if_stmt.else_body, ret, fn) != 0) {
       return 1;
     }
-  } else {
-    fprintf(ctx->out, "endif.%d:\n", label);
+    if (!else_term) {
+      fprintf(ctx->out, "  br label %%endif.%u\n", label);
+    }
+  }
+
+  if (merge) {
+    fprintf(ctx->out, "endif.%u:\n", label);
   }
 
   return 0;
@@ -383,6 +498,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
   case DECL_FN:
     ctx->reg = CTX_REG_START;
     ctx->label = CTX_LABEL_START;
+    ctx->locals = NULL;
+    ctx->locals_tail = NULL;
     fprintf(ctx->out, "define %s%s @%s(",
             decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
             type_kind_to_ir(decl->fn.return_type.kind), decl->name);
@@ -398,7 +515,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
       return 1;
     }
 
-    if (decl->fn.return_type.kind == TYPE_VOID) {
+    if (decl->fn.return_type.kind == TYPE_VOID &&
+        !block_terminates(decl->fn.body)) {
       fprintf(ctx->out, "  ret void\n");
     }
 

@@ -1,7 +1,6 @@
 #include "semantic.h"
 #include "arena.h"
 #include "ast.h"
-#include "debug.h"
 #include "diag.h"
 #include <errno.h>
 #include <stdbool.h>
@@ -46,7 +45,7 @@ static const local_t *scope_lookup(const scope_t *scope, const char *name) {
 typedef struct {
   const symtab_t *tab;
   const source_t *src;
-  const scope_t *scope;
+  scope_t *scope;
   arena_t *arena;
   bool had_error;
 } sema_t;
@@ -293,12 +292,54 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     }
     break;
   }
+  case STMT_LET: {
+    if (stmt->let.init != NULL) {
+      exprty_t init = check_expr(sema, stmt->let.init, stmt->let.type.kind);
+      if (stmt->let.type.kind == TYPE_UNKNOWN) {
+        stmt->let.type.kind = init.kind;
+      } else if (init.ok && !type_assignable(stmt->let.type.kind, init.kind)) {
+        diag_error(sema->src, stmt->line, stmt->col,
+                   "cannot assign %s to variable '%s' of type %s",
+                   type_kind_to_str(init.kind), stmt->let.name,
+                   type_kind_to_str(stmt->let.type.kind));
+        sema->had_error = true;
+      }
+    }
+    if (scope_lookup(sema->scope, stmt->let.name) != NULL) {
+      diag_error(sema->src, stmt->line, stmt->col, "redeclaration of '%s'",
+                 stmt->let.name);
+      sema->had_error = true;
+    } else {
+      sema->scope->items[sema->scope->count++] =
+          (local_t){.name = stmt->let.name, .type = stmt->let.type};
+    }
+    break;
+  }
+  case STMT_ASSIGN: {
+    const local_t *local =
+        sema->scope ? scope_lookup(sema->scope, stmt->assign.name) : NULL;
+    if (local == NULL) {
+      diag_error(sema->src, stmt->line, stmt->col, "undefined name '%s'",
+                 stmt->assign.name);
+      sema->had_error = true;
+      check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
+      break;
+    }
+    exprty_t value = check_expr(sema, stmt->assign.value, local->type.kind);
+    if (value.ok && !type_assignable(local->type.kind, value.kind)) {
+      diag_error(sema->src, stmt->line, stmt->col,
+                 "cannot assign %s to variable '%s' of type %s",
+                 type_kind_to_str(value.kind), stmt->assign.name,
+                 type_kind_to_str(local->type.kind));
+      sema->had_error = true;
+    }
+    break;
+  }
   }
 }
 
 static bool block_returns(stmt_t *body);
 
-// Does this statement guarantee a return on every path through it?
 static bool stmt_returns(stmt_t *stmt) {
   switch (stmt->kind) {
   case STMT_RETURN:
@@ -312,7 +353,6 @@ static bool stmt_returns(stmt_t *stmt) {
   }
 }
 
-// A block returns iff its last statement returns on every path.
 static bool block_returns(stmt_t *body) {
   if (body == NULL) {
     return false;
@@ -324,9 +364,24 @@ static bool block_returns(stmt_t *body) {
   return stmt_returns(last);
 }
 
+static size_t count_lets(stmt_t *body) {
+  size_t n = 0;
+  for (stmt_t *s = body; s != NULL; s = s->next) {
+    if (s->kind == STMT_LET) {
+      n++;
+    } else if (s->kind == STMT_IF) {
+      n += count_lets(s->if_stmt.then_body);
+      n += count_lets(s->if_stmt.else_body);
+    }
+  }
+  return n;
+}
+
 static void check_fn(sema_t *sema, const decl_t *fn) {
+  size_t capacity = fn->fn.params_count + count_lets(fn->fn.body);
   scope_t scope = {
-      .items = arena_alloc(sema->arena, sizeof(local_t) * fn->fn.params_count),
+      .items =
+          arena_alloc(sema->arena, sizeof(local_t) * (capacity ? capacity : 1)),
       .count = 0};
 
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {

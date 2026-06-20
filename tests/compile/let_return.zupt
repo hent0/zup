@@ -1,0 +1,9 @@
+--TEST--
+a let binding's value can be read back
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 7;
+  return x;
+}
+--EXIT--
+7

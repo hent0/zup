@@ -238,10 +238,7 @@ static expr_t *parse_comparison(parser_t *parser) {
   return left;
 }
 
-static expr_t *parse_expr(parser_t *parser) {
-  // TODO: Expand
-  return parse_comparison(parser);
-}
+static expr_t *parse_expr(parser_t *parser) { return parse_comparison(parser); }
 
 static stmt_t *parse_stmt(parser_t *parser);
 
@@ -291,6 +288,32 @@ static stmt_t *parse_if(parser_t *parser) {
   return ast_if_init(token, cond, then_body, else_body, parser->arena);
 }
 
+static stmt_t *parse_let(parser_t *parser) {
+  token_t token = expect(parser, TOKEN_LET, "expected 'let'");
+  token_t id = expect(parser, TOKEN_ID, "expected identifier");
+  stmt_t *let = ast_let_init(token, id.value, (type_t){.kind = TYPE_UNKNOWN},
+                             NULL, parser->arena);
+
+  if (match(parser, TOKEN_COLON)) {
+    let->let.type = parse_type(parser);
+  }
+
+  if (match(parser, TOKEN_SEMICOLON)) {
+    if (let->let.type.kind == TYPE_UNKNOWN) {
+      parse_error(parser, "expected type");
+      return NULL;
+    }
+    return let;
+  } else if (match(parser, TOKEN_EQUAL)) {
+    let->let.init = parse_expr(parser);
+    expect(parser, TOKEN_SEMICOLON, "expected ';' after let statement");
+    return let;
+  }
+
+  parse_error(parser, "expected '=' or ';'");
+  return NULL;
+}
+
 static stmt_t *parse_stmt(parser_t *parser) {
   if (check(parser, TOKEN_RETURN)) {
     return parse_return(parser);
@@ -298,6 +321,10 @@ static stmt_t *parse_stmt(parser_t *parser) {
 
   if (check(parser, TOKEN_IF)) {
     return parse_if(parser);
+  }
+
+  if (check(parser, TOKEN_LET)) {
+    return parse_let(parser);
   }
 
   if (!starts_expr(parser->current.kind)) {
@@ -310,6 +337,20 @@ static stmt_t *parse_stmt(parser_t *parser) {
   if (expr == NULL) {
     return NULL;
   }
+
+  if (match(parser, TOKEN_EQUAL)) {
+    if (expr->kind != EXPR_ID) {
+      parse_error(parser, "invalid assignment target");
+      return NULL;
+    }
+    expr_t *value = parse_expr(parser);
+    if (value == NULL) {
+      return NULL;
+    }
+    expect(parser, TOKEN_SEMICOLON, "expected ';' after assignment");
+    return ast_assign_init(start, expr->id.name, value, parser->arena);
+  }
+
   expect(parser, TOKEN_SEMICOLON, "expected ';' after expression statement");
   return ast_expr_stmt_init(start, expr, parser->arena);
 }

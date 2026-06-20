@@ -1,0 +1,19 @@
+--TEST--
+a local variable lowers to alloca / store / load
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 5;
+  return x;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+define i32 @main() {
+entry:
+  %x = alloca i32
+  store i32 5, ptr %x
+  %1 = load i32, ptr %x
+  ret i32 %1
+}

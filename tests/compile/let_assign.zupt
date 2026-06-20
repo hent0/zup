@@ -1,0 +1,10 @@
+--TEST--
+assigning to a local updates its value
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 1;
+  x = 9;
+  return x;
+}
+--EXIT--
+9

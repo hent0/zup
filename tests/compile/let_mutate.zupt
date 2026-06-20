@@ -1,0 +1,10 @@
+--TEST--
+a local can be updated from its own current value
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 0;
+  x = x + 5;
+  return x;
+}
+--EXIT--
+5

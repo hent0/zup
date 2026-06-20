@@ -87,6 +87,8 @@ typedef enum {
   STMT_RETURN,
   STMT_EXPR,
   STMT_IF,
+  STMT_LET,
+  STMT_ASSIGN,
 } StmtKind;
 
 typedef struct stmt stmt_t;
@@ -107,6 +109,15 @@ struct stmt {
       stmt_t *then_body;
       stmt_t *else_body;
     } if_stmt;
+    struct {
+      char *name;
+      type_t type;
+      expr_t *init;
+    } let;
+    struct {
+      char *name;
+      expr_t *value;
+    } assign;
   };
 };
 
@@ -175,6 +186,10 @@ stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
                     stmt_t *else_body, arena_t *arena);
+stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
+                        arena_t *arena);
+stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
+                     arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);

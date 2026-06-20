@@ -33,6 +33,7 @@ typedef enum {
   TOKEN_GREATER_EQUAL,
   TOKEN_IF,
   TOKEN_ELSE,
+  TOKEN_LET,
   // Types
   TOKEN_VOID,
   TOKEN_I8,
