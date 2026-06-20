@@ -1,0 +1,14 @@
+--TEST--
+a while loop accumulates: sum of 0..4 is 10
+--FILE--
+pub fn main(): i32 {
+  let i: i32 = 0;
+  let sum: i32 = 0;
+  while i < 5 {
+    sum = sum + i;
+    i = i + 1;
+  }
+  return sum;
+}
+--EXIT--
+10

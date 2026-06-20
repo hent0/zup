@@ -245,6 +245,18 @@ stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
   return stmt;
 }
 
+stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
+                       arena_t *arena) {
+  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
+  stmt->kind = STMT_WHILE;
+  stmt->line = token.line;
+  stmt->col = token.col;
+  stmt->next = NULL;
+  stmt->while_loop.cond = cond;
+  stmt->while_loop.body = body;
+  return stmt;
+}
+
 param_t *ast_param_init(arena_t *arena) {
   param_t *param = arena_alloc(arena, sizeof(param_t));
   param->name = NULL;
@@ -381,6 +393,13 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
   case STMT_ASSIGN:
     printf("Assign %s\n", stmt->assign.name);
     dump_expr(stmt->assign.value, depth + 1);
+    break;
+  case STMT_WHILE:
+    printf("While\n");
+    dump_expr(stmt->while_loop.cond, depth + 1);
+    print_indent(depth + 1);
+    printf("Do\n");
+    dump_block(stmt->while_loop.body, depth + 1);
     break;
   }
 }

@@ -335,6 +335,19 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     }
     break;
   }
+  case STMT_WHILE: {
+    exprty_t cond = check_expr(sema, stmt->while_loop.cond, TYPE_BOOL);
+    if (cond.ok && cond.kind != TYPE_BOOL) {
+      diag_error(
+          sema->src, stmt->while_loop.cond->line, stmt->while_loop.cond->col,
+          "while condition must be bool, got %s", type_kind_to_str(cond.kind));
+      sema->had_error = true;
+    }
+    for (stmt_t *s = stmt->while_loop.body; s != NULL; s = s->next) {
+      check_stmt(sema, s, fn);
+    }
+    break;
+  }
   }
 }
 

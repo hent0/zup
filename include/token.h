@@ -34,6 +34,7 @@ typedef enum {
   TOKEN_IF,
   TOKEN_ELSE,
   TOKEN_LET,
+  TOKEN_WHILE,
   // Types
   TOKEN_VOID,
   TOKEN_I8,

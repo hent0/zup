@@ -1,0 +1,12 @@
+--TEST--
+a while whose condition is false on entry runs zero times
+--FILE--
+pub fn main(): i32 {
+  let i: i32 = 5;
+  while i < 0 {
+    i = i + 1;
+  }
+  return i;
+}
+--EXIT--
+5

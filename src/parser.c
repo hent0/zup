@@ -314,6 +314,13 @@ static stmt_t *parse_let(parser_t *parser) {
   return NULL;
 }
 
+static stmt_t *parse_while(parser_t *parser) {
+  token_t token = expect(parser, TOKEN_WHILE, "expected 'while'");
+  expr_t *cond = parse_expr(parser);
+  stmt_t *body = parse_block(parser);
+  return ast_while_init(token, cond, body, parser->arena);
+}
+
 static stmt_t *parse_stmt(parser_t *parser) {
   if (check(parser, TOKEN_RETURN)) {
     return parse_return(parser);
@@ -325,6 +332,10 @@ static stmt_t *parse_stmt(parser_t *parser) {
 
   if (check(parser, TOKEN_LET)) {
     return parse_let(parser);
+  }
+
+  if (check(parser, TOKEN_WHILE)) {
+    return parse_while(parser);
   }
 
   if (!starts_expr(parser->current.kind)) {

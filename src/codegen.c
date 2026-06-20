@@ -170,6 +170,14 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
     return collect_expr(ctx, stmt->let.init);
   case STMT_ASSIGN:
     return collect_expr(ctx, stmt->assign.value);
+  case STMT_WHILE:
+    collect_expr(ctx, stmt->while_loop.cond);
+    for (stmt_t *s = stmt->while_loop.body; s != NULL; s = s->next) {
+      if (collect_stmt(ctx, s) != 0) {
+        return 1;
+      }
+    }
+    return 0;
   }
   return 0;
 }
@@ -391,6 +399,8 @@ static bool block_terminates(stmt_t *body) {
   return false;
 }
 
+static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
+
 static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
   for (stmt_t *stmt = body; stmt != NULL; stmt = stmt->next) {
     switch (stmt->kind) {
@@ -430,6 +440,12 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
               type_kind_to_ir(local->type.kind), value.ref, local->ptr);
       break;
     }
+    case STMT_WHILE: {
+      if (emit_while(ctx, stmt, ret, fn) != 0) {
+        return 1;
+      }
+      break;
+    }
     }
 
     if (stmt_terminates(stmt)) {
@@ -437,6 +453,28 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     }
   }
 
+  return 0;
+}
+
+static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
+  if (stmt == NULL) {
+    return 1;
+  }
+
+  unsigned int label = ctx->label++;
+  fprintf(ctx->out, "  br label %%cond.%d\n", label);
+  fprintf(ctx->out, "cond.%d:\n", label);
+  value_t cond = emit_value(ctx, stmt->while_loop.cond);
+  fprintf(ctx->out, "  br i1 %s, label %%body.%d, label %%endwhile.%d\n",
+          cond.ref, label, label);
+  fprintf(ctx->out, "body.%d:\n", label);
+  if (emit_block(ctx, stmt->while_loop.body, ret, fn) != 0) {
+    return 1;
+  }
+  if (!block_terminates(stmt->while_loop.body)) {
+    fprintf(ctx->out, "  br label %%cond.%d\n", label);
+  }
+  fprintf(ctx->out, "endwhile.%d:\n", label);
   return 0;
 }
 

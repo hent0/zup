@@ -76,6 +76,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_ELSE";
   case TOKEN_LET:
     return "TOKEN_LET";
+  case TOKEN_WHILE:
+    return "TOKEN_WHILE";
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:
