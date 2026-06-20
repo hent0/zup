@@ -1,0 +1,11 @@
+--TEST--
+&& binds tighter than || at runtime: false || true && true is true
+--FILE--
+pub fn main(): i32 {
+  if false || true && true {
+    return 7;
+  }
+  return 0;
+}
+--EXIT--
+7

@@ -238,7 +238,39 @@ static expr_t *parse_comparison(parser_t *parser) {
   return left;
 }
 
-static expr_t *parse_expr(parser_t *parser) { return parse_comparison(parser); }
+static expr_t *parse_and(parser_t *parser) {
+  expr_t *left = parse_comparison(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  while (match(parser, TOKEN_AMPERSAND_AMPERSAND)) {
+    expr_t *right = parse_comparison(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+    left = ast_binary_init(BINOP_AND, left, right, parser->arena);
+  }
+  return left;
+}
+
+static expr_t *parse_or(parser_t *parser) {
+  expr_t *left = parse_and(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  while (match(parser, TOKEN_PIPE_PIPE)) {
+    expr_t *right = parse_and(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+    left = ast_binary_init(BINOP_OR, left, right, parser->arena);
+  }
+  return left;
+}
+
+static expr_t *parse_expr(parser_t *parser) { return parse_or(parser); }
 
 static stmt_t *parse_stmt(parser_t *parser);
 

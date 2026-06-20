@@ -33,6 +33,8 @@ typedef enum {
   BINOP_LE,
   BINOP_GT,
   BINOP_GE,
+  BINOP_AND,
+  BINOP_OR,
 } BinaryOp;
 
 typedef enum {
@@ -181,6 +183,8 @@ char *type_kind_to_str(TypeKind kind);
 
 char *binop_to_ir(BinaryOp op);
 char *binop_to_str(BinaryOp op);
+bool binop_is_comparison(BinaryOp op);
+bool binop_is_logical(BinaryOp op);
 
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena);
 expr_t *ast_boolean_init(bool value, token_t token, arena_t *arena);

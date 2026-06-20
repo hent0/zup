@@ -1,0 +1,13 @@
+--TEST--
+logical operators require bool operands
+--FILE--
+pub fn main(): i32 {
+  if 1 && true {
+    return 0;
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '&&' to i32 and bool [2:6]
+--EXIT--
+1

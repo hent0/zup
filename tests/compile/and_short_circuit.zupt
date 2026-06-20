@@ -1,0 +1,19 @@
+--TEST--
+&& does not evaluate its right operand when the left is false
+--FILE--
+fn rhs(): bool {
+  printf("rhs\n");
+  return true;
+}
+
+pub fn main(): i32 {
+  if false && rhs() {
+    printf("then\n");
+  }
+  printf("end\n");
+  return 0;
+}
+--EXPECT--
+end
+--EXIT--
+0

@@ -316,6 +316,24 @@ token_t lexer_next_token(lexer_t *lexer) {
     }
     return advance_with(lexer, token_init(TOKEN_GREATER, .line = lexer->line,
                                           .col = lexer->col));
+  case '&':
+    if (peek(lexer) == '&') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_AMPERSAND_AMPERSAND,
+                                         .line = lexer->line, lexer->col)));
+    }
+    return advance_with(lexer, token_init(TOKEN_AMPERSAND, .line = lexer->line,
+                                          .col = lexer->col));
+  case '|':
+    if (peek(lexer) == '|') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_PIPE_PIPE, .line = lexer->line,
+                                         lexer->col)));
+    }
+    return advance_with(
+        lexer, token_init(TOKEN_PIPE, .line = lexer->line, .col = lexer->col));
   default:
     diag_error(NULL, lexer->line, lexer->col, "unexpected '%c'",
                *lexer->current);

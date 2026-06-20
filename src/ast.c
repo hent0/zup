@@ -70,6 +70,10 @@ char *binop_to_ir(BinaryOp op) {
     return "icmp sgt";
   case BINOP_GE:
     return "icmp sge";
+  case BINOP_AND:
+    return "and";
+  case BINOP_OR:
+    return "or";
   default:
     return "?";
   }
@@ -99,10 +103,30 @@ char *binop_to_str(BinaryOp op) {
     return ">";
   case BINOP_GE:
     return ">=";
+  case BINOP_AND:
+    return "&&";
+  case BINOP_OR:
+    return "||";
   default:
     return "?";
   }
 }
+
+bool binop_is_comparison(BinaryOp op) {
+  switch (op) {
+  case BINOP_EQ:
+  case BINOP_NE:
+  case BINOP_LT:
+  case BINOP_GT:
+  case BINOP_LE:
+  case BINOP_GE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool binop_is_logical(BinaryOp op) { return op == BINOP_AND || op == BINOP_OR; }
 
 expr_t *ast_binary_init(BinaryOp op, expr_t *lhs, expr_t *rhs, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));

@@ -60,24 +60,11 @@ static bool is_integer(TypeKind k) {
   return k == TYPE_I8 || k == TYPE_I16 || k == TYPE_I32 || k == TYPE_I64;
 }
 
-static bool is_comparison(BinaryOp op) {
-  switch (op) {
-  case BINOP_EQ:
-  case BINOP_NE:
-  case BINOP_LT:
-  case BINOP_GT:
-  case BINOP_LE:
-  case BINOP_GE:
-    return true;
-  default:
-    return false;
-  }
-}
-
 static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
 
+// =============================STD============================
 // TODO: Refactor out later
 static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
   expr_t *first = call->call.args;
@@ -92,6 +79,7 @@ static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
   }
   return (exprty_t){.kind = TYPE_I32, .ok = true};
 }
+// ============================================================
 
 static exprty_t check_call(sema_t *sema, expr_t *call) {
   expr_t *callee = call->call.callee;
@@ -218,6 +206,20 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
 
     if (!lhs.ok || !rhs.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+
+    if (binop_is_logical(expr->binary.op)) {
+      if (lhs.kind != TYPE_BOOL || rhs.kind != TYPE_BOOL) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "cannot apply '%s' to %s and %s",
+                   binop_to_str(expr->binary.op), type_kind_to_str(lhs.kind),
+                   type_kind_to_str(rhs.kind));
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      } else {
+        result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+      }
     } else if (!is_integer(lhs.kind) || lhs.kind != rhs.kind) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot apply '%s' to %s and %s",
@@ -226,7 +228,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      TypeKind kind = is_comparison(expr->binary.op) ? TYPE_BOOL : lhs.kind;
+      TypeKind kind =
+          binop_is_comparison(expr->binary.op) ? TYPE_BOOL : lhs.kind;
       result = (exprty_t){.kind = kind, .ok = true};
     }
     break;

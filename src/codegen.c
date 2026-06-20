@@ -69,9 +69,9 @@ static int string_index(ctx_t *ctx, expr_t *node) {
 }
 
 static ctx_local_t *find_local(ctx_t *ctx, const char *name) {
-  for (ctx_local_t *l = ctx->locals; l != NULL; l = l->next) {
-    if (strcmp(l->name, name) == 0) {
-      return l;
+  for (ctx_local_t *local = ctx->locals; local != NULL; local = local->next) {
+    if (strcmp(local->name, name) == 0) {
+      return local;
     }
   }
   return NULL;
@@ -79,17 +79,17 @@ static ctx_local_t *find_local(ctx_t *ctx, const char *name) {
 
 static void add_local(ctx_t *ctx, const char *name, type_t type,
                       const char *ptr) {
-  ctx_local_t *l = arena_alloc(ctx->arena, sizeof(ctx_local_t));
-  l->name = name;
-  l->type = type;
-  l->ptr = ptr;
-  l->next = NULL;
+  ctx_local_t *local = arena_alloc(ctx->arena, sizeof(ctx_local_t));
+  local->name = name;
+  local->type = type;
+  local->ptr = ptr;
+  local->next = NULL;
   if (ctx->locals_tail == NULL) {
-    ctx->locals = l;
+    ctx->locals = local;
   } else {
-    ctx->locals_tail->next = l;
+    ctx->locals_tail->next = local;
   }
-  ctx->locals_tail = l;
+  ctx->locals_tail = local;
 }
 
 // Re-encode decoded bytes into LLVM's c"..." form.
@@ -234,6 +234,8 @@ static unsigned type_bits(TypeKind kind) {
   }
 }
 
+static value_t emit_logical(ctx_t *ctx, expr_t *expr);
+
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
   case EXPR_BOOLEAN:
@@ -288,6 +290,9 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   }
   case EXPR_BINARY: {
+    if (binop_is_logical(expr->binary.op)) {
+      return emit_logical(ctx, expr);
+    }
     value_t left = emit_value(ctx, expr->binary.lhs);
     value_t right = emit_value(ctx, expr->binary.rhs);
 
@@ -306,6 +311,39 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .ref = NULL,
     };
   }
+}
+
+static value_t emit_logical(ctx_t *ctx, expr_t *expr) {
+  unsigned int id = ctx->label++;
+  unsigned int slot = ctx->reg++;
+  const char *kw = binop_to_ir(expr->binary.op);
+
+  fprintf(ctx->out, "  %%%u = alloca i1\n", slot);
+
+  value_t lhs = emit_value(ctx, expr->binary.lhs);
+  fprintf(ctx->out, "  store i1 %s, ptr %%%u\n", lhs.ref, slot);
+
+  if (expr->binary.op == BINOP_AND) {
+    fprintf(ctx->out, "  br i1 %s, label %%%s.rhs.%u, label %%%s.end.%u\n",
+            lhs.ref, kw, id, kw, id);
+  } else {
+    fprintf(ctx->out, "  br i1 %s, label %%%s.end.%u, label %%%s.rhs.%u\n",
+            lhs.ref, kw, id, kw, id);
+  }
+
+  fprintf(ctx->out, "%s.rhs.%u:\n", kw, id);
+  value_t rhs = emit_value(ctx, expr->binary.rhs);
+  fprintf(ctx->out, "  store i1 %s, ptr %%%u\n", rhs.ref, slot);
+  fprintf(ctx->out, "  br label %%%s.end.%u\n", kw, id);
+
+  fprintf(ctx->out, "%s.end.%u:\n", kw, id);
+  unsigned int result = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", result, slot);
+
+  return (value_t){
+      .type = (type_t){.kind = TYPE_BOOL},
+      .ref = arena_format(ctx->arena, "%%%u", result),
+  };
 }
 
 static value_t emit_call(ctx_t *ctx, expr_t *call) {

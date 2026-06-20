@@ -1,0 +1,29 @@
+--TEST--
+&& binds tighter than ||
+--ARGS--
+--ast
+--FILE--
+fn f(a: bool, b: bool, c: bool): bool {
+  return a || b && c;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> bool
+    param a: bool
+    param b: bool
+    param c: bool
+    Return
+      Binary ||
+        Id a
+        Binary &&
+          Id b
+          Id c
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

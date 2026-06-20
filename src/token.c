@@ -82,6 +82,14 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_BREAK";
   case TOKEN_CONTINUE:
     return "TOKEN_CONTINUE";
+  case TOKEN_AMPERSAND:
+    return "TOKEN_AMPERSAND";
+  case TOKEN_AMPERSAND_AMPERSAND:
+    return "TOKEN_AMPERSAND_AMPERSAND";
+  case TOKEN_PIPE:
+    return "TOKEN_PIPE";
+  case TOKEN_PIPE_PIPE:
+    return "TOKEN_PIPE_PIPE";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
