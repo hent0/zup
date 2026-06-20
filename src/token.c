@@ -78,6 +78,11 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_LET";
   case TOKEN_WHILE:
     return "TOKEN_WHILE";
+  case TOKEN_BREAK:
+    return "TOKEN_BREAK";
+  case TOKEN_CONTINUE:
+    return "TOKEN_CONTINUE";
+  // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
   case TOKEN_I8:

@@ -41,6 +41,7 @@ typedef struct {
 
   unsigned int reg;
   unsigned int label;
+  unsigned int loop_label;
 } ctx_t;
 
 static int intern_string(ctx_t *ctx, expr_t *node) {
@@ -177,6 +178,9 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
         return 1;
       }
     }
+    return 0;
+  case STMT_BREAK:
+  case STMT_CONTINUE:
     return 0;
   }
   return 0;
@@ -380,6 +384,8 @@ static bool block_terminates(stmt_t *body);
 static bool stmt_terminates(stmt_t *stmt) {
   switch (stmt->kind) {
   case STMT_RETURN:
+  case STMT_BREAK:
+  case STMT_CONTINUE:
     return true;
   case STMT_IF:
     return stmt->if_stmt.else_body != NULL &&
@@ -446,6 +452,14 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       }
       break;
     }
+    case STMT_BREAK: {
+      fprintf(ctx->out, "  br label %%endwhile.%d\n", ctx->loop_label);
+      break;
+    }
+    case STMT_CONTINUE: {
+      fprintf(ctx->out, "  br label %%cond.%d\n", ctx->loop_label);
+      break;
+    }
     }
 
     if (stmt_terminates(stmt)) {
@@ -462,6 +476,9 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
 
   unsigned int label = ctx->label++;
+  unsigned int outer = ctx->loop_label;
+  ctx->loop_label = label;
+
   fprintf(ctx->out, "  br label %%cond.%d\n", label);
   fprintf(ctx->out, "cond.%d:\n", label);
   value_t cond = emit_value(ctx, stmt->while_loop.cond);
@@ -475,6 +492,8 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
     fprintf(ctx->out, "  br label %%cond.%d\n", label);
   }
   fprintf(ctx->out, "endwhile.%d:\n", label);
+
+  ctx->loop_label = outer;
   return 0;
 }
 
@@ -536,6 +555,7 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
   case DECL_FN:
     ctx->reg = CTX_REG_START;
     ctx->label = CTX_LABEL_START;
+    ctx->loop_label = 0;
     ctx->locals = NULL;
     ctx->locals_tail = NULL;
     fprintf(ctx->out, "define %s%s @%s(",
@@ -574,6 +594,7 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
       .arena = arena,
       .reg = CTX_REG_START,
       .label = CTX_LABEL_START,
+      .loop_label = 0,
   };
 
   for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {

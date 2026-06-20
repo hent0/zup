@@ -338,6 +338,18 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return parse_while(parser);
   }
 
+  if (check(parser, TOKEN_BREAK)) {
+    token_t token = expect(parser, TOKEN_BREAK, "expected 'break'");
+    expect(parser, TOKEN_SEMICOLON, "expected ';'");
+    return ast_stmt_init(token, STMT_BREAK, parser->arena);
+  }
+
+  if (check(parser, TOKEN_CONTINUE)) {
+    token_t token = expect(parser, TOKEN_CONTINUE, "expected 'continue'");
+    expect(parser, TOKEN_SEMICOLON, "expected ';'");
+    return ast_stmt_init(token, STMT_CONTINUE, parser->arena);
+  }
+
   if (!starts_expr(parser->current.kind)) {
     parse_error(parser, "expected statement");
     return NULL;

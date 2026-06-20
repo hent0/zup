@@ -15,6 +15,8 @@ const keyword_t keywords[] = {
     {"else", TOKEN_ELSE},
     {"let", TOKEN_LET},
     {"while", TOKEN_WHILE},
+    {"break", TOKEN_BREAK},
+    {"continue", TOKEN_CONTINUE},
     // Types
     {"i8", TOKEN_I8},
     {"i16", TOKEN_I16},

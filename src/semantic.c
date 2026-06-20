@@ -47,6 +47,7 @@ typedef struct {
   const source_t *src;
   scope_t *scope;
   arena_t *arena;
+  unsigned int loop_depth;
   bool had_error;
 } sema_t;
 
@@ -343,8 +344,24 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
           "while condition must be bool, got %s", type_kind_to_str(cond.kind));
       sema->had_error = true;
     }
+    sema->loop_depth++;
     for (stmt_t *s = stmt->while_loop.body; s != NULL; s = s->next) {
       check_stmt(sema, s, fn);
+    }
+    sema->loop_depth--;
+    break;
+  }
+  case STMT_BREAK: {
+    if (sema->loop_depth == 0) {
+      diag_error(sema->src, stmt->line, stmt->col, "break outside of loop");
+      sema->had_error = true;
+    }
+    break;
+  }
+  case STMT_CONTINUE: {
+    if (sema->loop_depth == 0) {
+      diag_error(sema->src, stmt->line, stmt->col, "continue outside of loop");
+      sema->had_error = true;
     }
     break;
   }

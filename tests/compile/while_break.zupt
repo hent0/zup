@@ -1,0 +1,15 @@
+--TEST--
+break exits the loop early
+--FILE--
+pub fn main(): i32 {
+  let i: i32 = 0;
+  while i < 10 {
+    if i == 3 {
+      break;
+    }
+    i = i + 1;
+  }
+  return i;
+}
+--EXIT--
+3

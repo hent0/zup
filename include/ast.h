@@ -90,6 +90,8 @@ typedef enum {
   STMT_LET,
   STMT_ASSIGN,
   STMT_WHILE,
+  STMT_BREAK,
+  STMT_CONTINUE,
 } StmtKind;
 
 typedef struct stmt stmt_t;
@@ -197,6 +199,7 @@ stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
                      arena_t *arena);
 stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
                        arena_t *arena);
+stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);

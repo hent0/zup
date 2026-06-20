@@ -187,33 +187,30 @@ expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena) {
   return expr;
 }
 
-stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena) {
+stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena) {
   stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_RETURN;
+  stmt->kind = kind;
   stmt->line = token.line;
   stmt->col = token.col;
   stmt->next = NULL;
+  return stmt;
+}
+
+stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena) {
+  stmt_t *stmt = ast_stmt_init(token, STMT_RETURN, arena);
   stmt->ret.value = value;
   return stmt;
 }
 
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena) {
-  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_EXPR;
-  stmt->line = token.line;
-  stmt->col = token.col;
-  stmt->next = NULL;
+  stmt_t *stmt = ast_stmt_init(token, STMT_EXPR, arena);
   stmt->expr_stmt.expr = value;
   return stmt;
 }
 
 stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
                     stmt_t *else_body, arena_t *arena) {
-  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_IF;
-  stmt->line = token.line;
-  stmt->col = token.col;
-  stmt->next = NULL;
+  stmt_t *stmt = ast_stmt_init(token, STMT_IF, arena);
   stmt->if_stmt.cond = cond;
   stmt->if_stmt.then_body = then_body;
   stmt->if_stmt.else_body = else_body;
@@ -222,11 +219,7 @@ stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
 
 stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
                      arena_t *arena) {
-  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_LET;
-  stmt->line = token.line;
-  stmt->col = token.col;
-  stmt->next = NULL;
+  stmt_t *stmt = ast_stmt_init(token, STMT_LET, arena);
   stmt->let.name = name;
   stmt->let.type = type;
   stmt->let.init = init;
@@ -235,11 +228,7 @@ stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
 
 stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
                         arena_t *arena) {
-  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_ASSIGN;
-  stmt->line = token.line;
-  stmt->col = token.col;
-  stmt->next = NULL;
+  stmt_t *stmt = ast_stmt_init(token, STMT_ASSIGN, arena);
   stmt->assign.name = name;
   stmt->assign.value = value;
   return stmt;
@@ -247,11 +236,7 @@ stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
 
 stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
                        arena_t *arena) {
-  stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
-  stmt->kind = STMT_WHILE;
-  stmt->line = token.line;
-  stmt->col = token.col;
-  stmt->next = NULL;
+  stmt_t *stmt = ast_stmt_init(token, STMT_WHILE, arena);
   stmt->while_loop.cond = cond;
   stmt->while_loop.body = body;
   return stmt;
@@ -400,6 +385,12 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
     print_indent(depth + 1);
     printf("Do\n");
     dump_block(stmt->while_loop.body, depth + 1);
+    break;
+  case STMT_BREAK:
+    printf("Break\n");
+    break;
+  case STMT_CONTINUE:
+    printf("Continue\n");
     break;
   }
 }

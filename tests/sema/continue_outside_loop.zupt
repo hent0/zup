@@ -1,0 +1,11 @@
+--TEST--
+continue is only allowed inside a loop
+--FILE--
+pub fn main(): i32 {
+  continue;
+  return 0;
+}
+--EXPECTERR--
+zup: error: continue outside of loop [2:3]
+--EXIT--
+1

@@ -1,0 +1,33 @@
+--TEST--
+the break and continue keywords tokenize
+--ARGS--
+--tokenize
+--FILE--
+pub fn main(): i32 {
+  while true {
+    break;
+    continue;
+  }
+  return 0;
+}
+--EXPECT--
+TOKEN_PUB [1:1]
+TOKEN_FN [1:5]
+TOKEN_ID('main') [1:8]
+TOKEN_LPAREN [1:12]
+TOKEN_RPAREN [1:13]
+TOKEN_COLON [1:14]
+TOKEN_I32 [1:16]
+TOKEN_LBRACE [1:20]
+TOKEN_WHILE [2:3]
+TOKEN_TRUE [2:9]
+TOKEN_LBRACE [2:14]
+TOKEN_BREAK [3:5]
+TOKEN_SEMICOLON [3:10]
+TOKEN_CONTINUE [4:5]
+TOKEN_SEMICOLON [4:13]
+TOKEN_RBRACE [5:3]
+TOKEN_RETURN [6:3]
+TOKEN_NUMBER(0) [6:10]
+TOKEN_SEMICOLON [6:11]
+TOKEN_RBRACE [7:1]

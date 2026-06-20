@@ -1,0 +1,17 @@
+--TEST--
+continue skips the rest of the body for that iteration
+--FILE--
+pub fn main(): i32 {
+  let i: i32 = 0;
+  let sum: i32 = 0;
+  while i < 5 {
+    i = i + 1;
+    if i == 3 {
+      continue;
+    }
+    sum = sum + i;
+  }
+  return sum;
+}
+--EXIT--
+12
