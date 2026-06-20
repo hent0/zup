@@ -1,0 +1,8 @@
+--TEST--
+bitwise and: 6 & 3 = 2
+--FILE--
+pub fn main(): i32 {
+  return 6 & 3;
+}
+--EXIT--
+2

@@ -1,0 +1,8 @@
+--TEST--
+left shift: 1 << 4 = 16
+--FILE--
+pub fn main(): i32 {
+  return 1 << 4;
+}
+--EXIT--
+16

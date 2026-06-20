@@ -1,0 +1,8 @@
+--TEST--
+right shift: 48 >> 2 = 12
+--FILE--
+pub fn main(): i32 {
+  return 48 >> 2;
+}
+--EXIT--
+12

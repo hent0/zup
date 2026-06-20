@@ -74,9 +74,18 @@ char *binop_to_ir(BinaryOp op) {
     return "and";
   case BINOP_OR:
     return "or";
-  default:
-    return "?";
+  case BINOP_BITAND:
+    return "and";
+  case BINOP_BITOR:
+    return "or";
+  case BINOP_BITXOR:
+    return "xor";
+  case BINOP_SHL:
+    return "shl";
+  case BINOP_SHR:
+    return "ashr";
   }
+  return "?";
 }
 
 char *binop_to_str(BinaryOp op) {
@@ -107,9 +116,18 @@ char *binop_to_str(BinaryOp op) {
     return "&&";
   case BINOP_OR:
     return "||";
-  default:
-    return "?";
+  case BINOP_BITAND:
+    return "&";
+  case BINOP_BITOR:
+    return "|";
+  case BINOP_BITXOR:
+    return "^";
+  case BINOP_SHL:
+    return "<<";
+  case BINOP_SHR:
+    return ">>";
   }
+  return "?";
 }
 
 bool binop_is_comparison(BinaryOp op) {

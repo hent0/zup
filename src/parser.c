@@ -130,15 +130,16 @@ static expr_t *parse_primary(parser_t *parser) {
 }
 
 static expr_t *parse_unary(parser_t *parser) {
-  if (match(parser, TOKEN_BANG)) {
+  switch (parser->current.kind) {
+  case TOKEN_BANG:
+    advance(parser);
     return ast_unary_init(UNOP_NOT, parse_unary(parser), parser->arena);
-  }
-
-  if (match(parser, TOKEN_MINUS)) {
+  case TOKEN_MINUS:
+    advance(parser);
     return ast_unary_init(UNOP_NEG, parse_unary(parser), parser->arena);
+  default:
+    return parse_primary(parser);
   }
-
-  return parse_primary(parser);
 }
 
 static expr_t *parse_cast(parser_t *parser) {
@@ -214,8 +215,36 @@ static expr_t *parse_additive(parser_t *parser) {
   return left;
 }
 
-static expr_t *parse_comparison(parser_t *parser) {
+static expr_t *parse_shift(parser_t *parser) {
   expr_t *left = parse_additive(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  for (;;) {
+    BinaryOp op;
+    if (check(parser, TOKEN_LESS_LESS)) {
+      op = BINOP_SHL;
+    } else if (check(parser, TOKEN_GREATER_GREATER)) {
+      op = BINOP_SHR;
+    } else {
+      break;
+    }
+
+    advance(parser);
+    expr_t *right = parse_additive(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+
+    left = ast_binary_init(op, left, right, parser->arena);
+  }
+
+  return left;
+}
+
+static expr_t *parse_comparison(parser_t *parser) {
+  expr_t *left = parse_shift(parser);
   if (left == NULL) {
     return NULL;
   }
@@ -239,7 +268,7 @@ static expr_t *parse_comparison(parser_t *parser) {
     }
 
     advance(parser);
-    expr_t *right = parse_additive(parser);
+    expr_t *right = parse_shift(parser);
     if (right == NULL) {
       return NULL;
     }
@@ -250,14 +279,62 @@ static expr_t *parse_comparison(parser_t *parser) {
   return left;
 }
 
-static expr_t *parse_and(parser_t *parser) {
+static expr_t *parse_bitand(parser_t *parser) {
   expr_t *left = parse_comparison(parser);
   if (left == NULL) {
     return NULL;
   }
 
-  while (match(parser, TOKEN_AMPERSAND_AMPERSAND)) {
+  while (match(parser, TOKEN_AMPERSAND)) {
     expr_t *right = parse_comparison(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+    left = ast_binary_init(BINOP_BITAND, left, right, parser->arena);
+  }
+  return left;
+}
+
+static expr_t *parse_bitxor(parser_t *parser) {
+  expr_t *left = parse_bitand(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  while (match(parser, TOKEN_CARET)) {
+    expr_t *right = parse_bitand(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+    left = ast_binary_init(BINOP_BITXOR, left, right, parser->arena);
+  }
+  return left;
+}
+
+static expr_t *parse_bitor(parser_t *parser) {
+  expr_t *left = parse_bitxor(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  while (match(parser, TOKEN_PIPE)) {
+    expr_t *right = parse_bitxor(parser);
+    if (right == NULL) {
+      return NULL;
+    }
+    left = ast_binary_init(BINOP_BITOR, left, right, parser->arena);
+  }
+  return left;
+}
+
+static expr_t *parse_and(parser_t *parser) {
+  expr_t *left = parse_bitor(parser);
+  if (left == NULL) {
+    return NULL;
+  }
+
+  while (match(parser, TOKEN_AMPERSAND_AMPERSAND)) {
+    expr_t *right = parse_bitor(parser);
     if (right == NULL) {
       return NULL;
     }

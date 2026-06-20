@@ -1,0 +1,14 @@
+--TEST--
+bitwise operators require integer operands
+--FILE--
+fn f(): i32 {
+  return true & false;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '&' to bool and bool [2:10]
+--EXIT--
+1

@@ -1,0 +1,8 @@
+--TEST--
+shift binds looser than +: 1 + 1 << 4 is (1+1)<<4 = 32
+--FILE--
+pub fn main(): i32 {
+  return 1 + 1 << 4;
+}
+--EXIT--
+32

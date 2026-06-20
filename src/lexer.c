@@ -299,23 +299,37 @@ token_t lexer_next_token(lexer_t *lexer) {
     return advance_with(
         lexer, token_init(TOKEN_EQUAL, .line = lexer->line, .col = lexer->col));
   case '<':
-    if (peek(lexer) == '=') {
+    switch (peek(lexer)) {
+    case '=':
       return advance_with(
           lexer,
           advance_with(lexer, token_init(TOKEN_LESS_EQUAL, .line = lexer->line,
                                          lexer->col)));
+    case '<':
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_LESS_LESS, .line = lexer->line,
+                                         lexer->col)));
+    default:
+      return advance_with(lexer, token_init(TOKEN_LESS, .line = lexer->line,
+                                            .col = lexer->col));
     }
-    return advance_with(
-        lexer, token_init(TOKEN_LESS, .line = lexer->line, .col = lexer->col));
   case '>':
-    if (peek(lexer) == '=') {
+    switch (peek(lexer)) {
+    case '=':
       return advance_with(
           lexer,
           advance_with(lexer, token_init(TOKEN_GREATER_EQUAL,
                                          .line = lexer->line, lexer->col)));
+    case '>':
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_GREATER_GREATER,
+                                         .line = lexer->line, lexer->col)));
+    default:
+      return advance_with(lexer, token_init(TOKEN_GREATER, .line = lexer->line,
+                                            .col = lexer->col));
     }
-    return advance_with(lexer, token_init(TOKEN_GREATER, .line = lexer->line,
-                                          .col = lexer->col));
   case '&':
     if (peek(lexer) == '&') {
       return advance_with(
@@ -334,6 +348,9 @@ token_t lexer_next_token(lexer_t *lexer) {
     }
     return advance_with(
         lexer, token_init(TOKEN_PIPE, .line = lexer->line, .col = lexer->col));
+  case '^':
+    return advance_with(
+        lexer, token_init(TOKEN_CARET, .line = lexer->line, .col = lexer->col));
   default:
     diag_error(NULL, lexer->line, lexer->col, "unexpected '%c'",
                *lexer->current);

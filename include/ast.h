@@ -35,6 +35,11 @@ typedef enum {
   BINOP_GE,
   BINOP_AND,
   BINOP_OR,
+  BINOP_BITAND,
+  BINOP_BITOR,
+  BINOP_BITXOR,
+  BINOP_SHL,
+  BINOP_SHR,
 } BinaryOp;
 
 typedef enum {

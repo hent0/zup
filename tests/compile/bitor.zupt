@@ -1,0 +1,8 @@
+--TEST--
+bitwise or: 5 | 2 = 7
+--FILE--
+pub fn main(): i32 {
+  return 5 | 2;
+}
+--EXIT--
+7

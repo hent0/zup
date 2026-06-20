@@ -64,10 +64,14 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_BANG_EQUAL";
   case TOKEN_LESS:
     return "TOKEN_LESS";
+  case TOKEN_LESS_LESS:
+    return "TOKEN_LESS_LESS";
   case TOKEN_LESS_EQUAL:
     return "TOKEN_LESS_EQUAL";
   case TOKEN_GREATER:
     return "TOKEN_GREATER";
+  case TOKEN_GREATER_GREATER:
+    return "TOKEN_GREATER_GREATER";
   case TOKEN_GREATER_EQUAL:
     return "TOKEN_GREATER_EQUAL";
   case TOKEN_IF:
@@ -90,6 +94,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_PIPE";
   case TOKEN_PIPE_PIPE:
     return "TOKEN_PIPE_PIPE";
+  case TOKEN_CARET:
+    return "TOKEN_CARET";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
