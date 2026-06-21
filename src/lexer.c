@@ -13,6 +13,7 @@ const keyword_t keywords[] = {
     {"as", TOKEN_AS},
     {"if", TOKEN_IF},
     {"else", TOKEN_ELSE},
+    {"const", TOKEN_CONST},
     {"let", TOKEN_LET},
     {"while", TOKEN_WHILE},
     {"break", TOKEN_BREAK},

@@ -1,0 +1,12 @@
+--TEST--
+assigning to a const is an error
+--FILE--
+pub fn main(): i32 {
+  const x: i32 = 5;
+  x = 7;
+  return x;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'x' [3:3]
+--EXIT--
+1

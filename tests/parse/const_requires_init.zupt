@@ -1,0 +1,11 @@
+--TEST--
+a const must have an initializer
+--FILE--
+pub fn main(): i32 {
+  const x: i32;
+  return 0;
+}
+--EXPECTERR--
+zup: error: const requires an initializer (got TOKEN_SEMICOLON) [2:15]
+--EXIT--
+1

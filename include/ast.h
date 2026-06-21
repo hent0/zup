@@ -104,7 +104,7 @@ typedef enum {
   STMT_RETURN,
   STMT_EXPR,
   STMT_IF,
-  STMT_LET,
+  STMT_BINDING,
   STMT_ASSIGN,
   STMT_WHILE,
   STMT_BREAK,
@@ -132,8 +132,9 @@ struct stmt {
     struct {
       char *name;
       type_t type;
+      bool mutable;
       expr_t *init;
-    } let;
+    } binding;
     struct {
       char *name;
       expr_t *value;
@@ -218,8 +219,8 @@ stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
                     stmt_t *else_body, arena_t *arena);
 stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
                         arena_t *arena);
-stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
-                     arena_t *arena);
+stmt_t *ast_binding_init(token_t token, char *name, type_t type, bool mutable,
+                         expr_t *init, arena_t *arena);
 stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
                        arena_t *arena);
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);

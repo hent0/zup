@@ -26,6 +26,7 @@ static decl_t *symtab_lookup(const symtab_t *tab, const char *name) {
 typedef struct {
   const char *name;
   type_t type;
+  bool mutable;
 } local_t;
 
 typedef struct {
@@ -250,7 +251,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){.kind = is_not ? TYPE_BOOL : operand.kind, .ok = true};
+      result =
+          (exprty_t){.kind = is_not ? TYPE_BOOL : operand.kind, .ok = true};
     }
     break;
   }
@@ -316,26 +318,31 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     }
     break;
   }
-  case STMT_LET: {
-    if (stmt->let.init != NULL) {
-      exprty_t init = check_expr(sema, stmt->let.init, stmt->let.type.kind);
-      if (stmt->let.type.kind == TYPE_UNKNOWN) {
-        stmt->let.type.kind = init.kind;
-      } else if (init.ok && !type_assignable(stmt->let.type.kind, init.kind)) {
+  case STMT_BINDING: {
+    if (stmt->binding.init != NULL) {
+      exprty_t init =
+          check_expr(sema, stmt->binding.init, stmt->binding.type.kind);
+      if (stmt->binding.type.kind == TYPE_UNKNOWN) {
+        stmt->binding.type.kind = init.kind;
+      } else if (init.ok &&
+                 !type_assignable(stmt->binding.type.kind, init.kind)) {
         diag_error(sema->src, stmt->line, stmt->col,
                    "cannot assign %s to variable '%s' of type %s",
-                   type_kind_to_str(init.kind), stmt->let.name,
-                   type_kind_to_str(stmt->let.type.kind));
+                   type_kind_to_str(init.kind), stmt->binding.name,
+                   type_kind_to_str(stmt->binding.type.kind));
         sema->had_error = true;
       }
     }
-    if (scope_lookup(sema->scope, stmt->let.name) != NULL) {
+    if (scope_lookup(sema->scope, stmt->binding.name) != NULL) {
       diag_error(sema->src, stmt->line, stmt->col, "redeclaration of '%s'",
-                 stmt->let.name);
+                 stmt->binding.name);
       sema->had_error = true;
     } else {
-      sema->scope->items[sema->scope->count++] =
-          (local_t){.name = stmt->let.name, .type = stmt->let.type};
+      sema->scope->items[sema->scope->count++] = (local_t){
+          .name = stmt->binding.name,
+          .type = stmt->binding.type,
+          .mutable = stmt->binding.mutable,
+      };
     }
     break;
   }
@@ -345,6 +352,14 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     if (local == NULL) {
       diag_error(sema->src, stmt->line, stmt->col, "undefined name '%s'",
                  stmt->assign.name);
+      sema->had_error = true;
+      check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
+      break;
+    }
+
+    if (!local->mutable) {
+      diag_error(sema->src, stmt->line, stmt->col,
+                 "cannot assign to const '%s'", stmt->assign.name);
       sema->had_error = true;
       check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
       break;
@@ -417,21 +432,21 @@ static bool block_returns(stmt_t *body) {
   return stmt_returns(last);
 }
 
-static size_t count_lets(stmt_t *body) {
+static size_t count_bindings(stmt_t *body) {
   size_t n = 0;
   for (stmt_t *s = body; s != NULL; s = s->next) {
-    if (s->kind == STMT_LET) {
+    if (s->kind == STMT_BINDING) {
       n++;
     } else if (s->kind == STMT_IF) {
-      n += count_lets(s->if_stmt.then_body);
-      n += count_lets(s->if_stmt.else_body);
+      n += count_bindings(s->if_stmt.then_body);
+      n += count_bindings(s->if_stmt.else_body);
     }
   }
   return n;
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
-  size_t capacity = fn->fn.params_count + count_lets(fn->fn.body);
+  size_t capacity = fn->fn.params_count + count_bindings(fn->fn.body);
   scope_t scope = {
       .items =
           arena_alloc(sema->arena, sizeof(local_t) * (capacity ? capacity : 1)),

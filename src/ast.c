@@ -293,12 +293,13 @@ stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
   return stmt;
 }
 
-stmt_t *ast_let_init(token_t token, char *name, type_t type, expr_t *init,
-                     arena_t *arena) {
-  stmt_t *stmt = ast_stmt_init(token, STMT_LET, arena);
-  stmt->let.name = name;
-  stmt->let.type = type;
-  stmt->let.init = init;
+stmt_t *ast_binding_init(token_t token, char *name, type_t type, bool mutable,
+                         expr_t *init, arena_t *arena) {
+  stmt_t *stmt = ast_stmt_init(token, STMT_BINDING, arena);
+  stmt->binding.name = name;
+  stmt->binding.type = type;
+  stmt->binding.mutable = mutable;
+  stmt->binding.init = init;
   return stmt;
 }
 
@@ -454,10 +455,10 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
       dump_block(stmt->if_stmt.else_body, depth + 1);
     }
     break;
-  case STMT_LET:
-    printf("Let %s: %s\n", stmt->let.name,
-           type_kind_to_str(stmt->let.type.kind));
-    dump_expr(stmt->let.init, depth + 1);
+  case STMT_BINDING:
+    printf("%s %s: %s\n", stmt->binding.mutable ? "Let" : "Const",
+           stmt->binding.name, type_kind_to_str(stmt->binding.type.kind));
+    dump_expr(stmt->binding.init, depth + 1);
     break;
   case STMT_ASSIGN:
     printf("Assign %s\n", stmt->assign.name);

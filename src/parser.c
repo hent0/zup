@@ -409,30 +409,27 @@ static stmt_t *parse_if(parser_t *parser) {
   return ast_if_init(token, cond, then_body, else_body, parser->arena);
 }
 
-static stmt_t *parse_let(parser_t *parser) {
-  token_t token = expect(parser, TOKEN_LET, "expected 'let'");
+static stmt_t *parse_binding(parser_t *parser) {
+  bool mutable = check(parser, TOKEN_LET);
+  token_t token = mutable ? expect(parser, TOKEN_LET, "expected 'let'")
+                          : expect(parser, TOKEN_CONST, "expected 'const'");
   token_t id = expect(parser, TOKEN_ID, "expected identifier");
-  stmt_t *let = ast_let_init(token, id.value, (type_t){.kind = TYPE_UNKNOWN},
-                             NULL, parser->arena);
 
+  type_t type = (type_t){.kind = TYPE_UNKNOWN};
   if (match(parser, TOKEN_COLON)) {
-    let->let.type = parse_type(parser);
+    type = parse_type(parser);
   }
 
-  if (match(parser, TOKEN_SEMICOLON)) {
-    if (let->let.type.kind == TYPE_UNKNOWN) {
-      parse_error(parser, "expected type");
-      return NULL;
-    }
-    return let;
-  } else if (match(parser, TOKEN_EQUAL)) {
-    let->let.init = parse_expr(parser);
-    expect(parser, TOKEN_SEMICOLON, "expected ';' after let statement");
-    return let;
+  expr_t *init = NULL;
+  if (match(parser, TOKEN_EQUAL)) {
+    init = parse_expr(parser);
+  } else if (!mutable) {
+    parse_error(parser, "const requires an initializer");
   }
 
-  parse_error(parser, "expected '=' or ';'");
-  return NULL;
+  expect(parser, TOKEN_SEMICOLON, "expected ';' after binding");
+
+  return ast_binding_init(token, id.value, type, mutable, init, parser->arena);
 }
 
 static stmt_t *parse_while(parser_t *parser) {
@@ -451,8 +448,8 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return parse_if(parser);
   }
 
-  if (check(parser, TOKEN_LET)) {
-    return parse_let(parser);
+  if (check(parser, TOKEN_LET) || check(parser, TOKEN_CONST)) {
+    return parse_binding(parser);
   }
 
   if (check(parser, TOKEN_WHILE)) {

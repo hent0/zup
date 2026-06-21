@@ -1,0 +1,29 @@
+--TEST--
+the const keyword tokenizes
+--ARGS--
+--tokenize
+--FILE--
+pub fn main(): i32 {
+  const x: i32 = 5;
+  return x;
+}
+--EXPECT--
+TOKEN_PUB [1:1]
+TOKEN_FN [1:5]
+TOKEN_ID('main') [1:8]
+TOKEN_LPAREN [1:12]
+TOKEN_RPAREN [1:13]
+TOKEN_COLON [1:14]
+TOKEN_I32 [1:16]
+TOKEN_LBRACE [1:20]
+TOKEN_CONST [2:3]
+TOKEN_ID('x') [2:9]
+TOKEN_COLON [2:10]
+TOKEN_I32 [2:12]
+TOKEN_EQUAL [2:16]
+TOKEN_NUMBER(5) [2:18]
+TOKEN_SEMICOLON [2:19]
+TOKEN_RETURN [3:3]
+TOKEN_ID('x') [3:10]
+TOKEN_SEMICOLON [3:11]
+TOKEN_RBRACE [4:1]

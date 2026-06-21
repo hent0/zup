@@ -78,6 +78,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_IF";
   case TOKEN_ELSE:
     return "TOKEN_ELSE";
+  case TOKEN_CONST:
+    return "TOKEN_CONST";
   case TOKEN_LET:
     return "TOKEN_LET";
   case TOKEN_WHILE:

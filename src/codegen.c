@@ -169,8 +169,8 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
       }
     }
     return 0;
-  case STMT_LET:
-    return collect_expr(ctx, stmt->let.init);
+  case STMT_BINDING:
+    return collect_expr(ctx, stmt->binding.init);
   case STMT_ASSIGN:
     return collect_expr(ctx, stmt->assign.value);
   case STMT_WHILE:
@@ -484,14 +484,14 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
         return 1;
       }
       break;
-    case STMT_LET: {
-      const char *ptr = arena_format(ctx->arena, "%%%s", stmt->let.name);
+    case STMT_BINDING: {
+      const char *ptr = arena_format(ctx->arena, "%%%s", stmt->binding.name);
       fprintf(ctx->out, "  %s = alloca %s\n", ptr,
-              type_kind_to_ir(stmt->let.type.kind));
-      value_t value = emit_value(ctx, stmt->let.init);
+              type_kind_to_ir(stmt->binding.type.kind));
+      value_t value = emit_value(ctx, stmt->binding.init);
       fprintf(ctx->out, "  store %s %s, ptr %s\n",
-              type_kind_to_ir(stmt->let.type.kind), value.ref, ptr);
-      add_local(ctx, stmt->let.name, stmt->let.type, ptr);
+              type_kind_to_ir(stmt->binding.type.kind), value.ref, ptr);
+      add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
       break;
     }
     case STMT_ASSIGN: {

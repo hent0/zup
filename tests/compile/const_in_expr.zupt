@@ -1,0 +1,9 @@
+--TEST--
+a const can be used multiple times in an expression
+--FILE--
+pub fn main(): i32 {
+  const x: i32 = 5;
+  return x + x;
+}
+--EXIT--
+10

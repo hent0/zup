@@ -1,0 +1,9 @@
+--TEST--
+a const binding's value can be read back
+--FILE--
+pub fn main(): i32 {
+  const x: i32 = 7;
+  return x;
+}
+--EXIT--
+7
