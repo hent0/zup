@@ -1,0 +1,15 @@
+--TEST--
+break inside a for loop stops iteration early
+--FILE--
+pub fn main(): i32 {
+  let sum: i32 = 0;
+  for i in 0..10 {
+    if i == 4 {
+      break;
+    }
+    sum = sum + i;
+  }
+  return sum;
+}
+--EXIT--
+6

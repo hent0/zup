@@ -1,0 +1,33 @@
+--TEST--
+the for / in keywords and the .. range operator tokenize
+--ARGS--
+--tokenize
+--FILE--
+pub fn main(): i32 {
+  for i in 0..10 {
+  }
+  return 0;
+}
+--EXPECT--
+TOKEN_PUB [1:1]
+TOKEN_FN [1:5]
+TOKEN_ID('main') [1:8]
+TOKEN_LPAREN [1:12]
+TOKEN_RPAREN [1:13]
+TOKEN_COLON [1:14]
+TOKEN_I32 [1:16]
+TOKEN_LBRACE [1:20]
+TOKEN_FOR [2:3]
+TOKEN_ID('i') [2:7]
+TOKEN_IN [2:9]
+TOKEN_NUMBER(0) [2:12]
+TOKEN_DOT_DOT [2:13]
+TOKEN_NUMBER(10) [2:15]
+TOKEN_LBRACE [2:18]
+TOKEN_RBRACE [3:3]
+TOKEN_RETURN [4:3]
+TOKEN_NUMBER(0) [4:10]
+TOKEN_SEMICOLON [4:11]
+TOKEN_RBRACE [5:1]
+--EXIT--
+0

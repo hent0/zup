@@ -1,0 +1,13 @@
+--TEST--
+the loop variable is immutable and cannot be assigned inside the body
+--FILE--
+pub fn main(): i32 {
+  for i in 0..3 {
+    i = 0;
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign to loop variable 'i' [3:5]
+--EXIT--
+1

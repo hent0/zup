@@ -181,6 +181,15 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
       }
     }
     return 0;
+  case STMT_FOR:
+    collect_expr(ctx, stmt->for_loop.start);
+    collect_expr(ctx, stmt->for_loop.end);
+    for (stmt_t *s = stmt->for_loop.body; s != NULL; s = s->next) {
+      if (collect_stmt(ctx, s) != 0) {
+        return 1;
+      }
+    }
+    return 0;
   case STMT_BREAK:
   case STMT_CONTINUE:
     return 0;
@@ -465,6 +474,7 @@ static bool block_terminates(stmt_t *body) {
 }
 
 static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
+static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 
 static bool stmt_assigns(stmt_t *body, const char *name) {
   for (stmt_t *s = body; s != NULL; s = s->next) {
@@ -482,6 +492,11 @@ static bool stmt_assigns(stmt_t *body, const char *name) {
       break;
     case STMT_WHILE:
       if (stmt_assigns(s->while_loop.body, name)) {
+        return true;
+      }
+      break;
+    case STMT_FOR:
+      if (stmt_assigns(s->for_loop.body, name)) {
         return true;
       }
       break;
@@ -537,6 +552,12 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       }
       break;
     }
+    case STMT_FOR: {
+      if (emit_for(ctx, stmt, ret, fn) != 0) {
+        return 1;
+      }
+      break;
+    }
     case STMT_BREAK: {
       fprintf(ctx->out, "  br label %%endwhile.%d\n", ctx->loop_label);
       break;
@@ -578,6 +599,53 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
   fprintf(ctx->out, "endwhile.%d:\n", label);
 
+  ctx->loop_label = outer;
+  return 0;
+}
+
+static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
+  if (stmt == NULL) {
+    return 1;
+  }
+
+  const char *type = type_kind_to_ir(stmt->for_loop.start->type.kind);
+  const char *slot = arena_format(ctx->arena, "%%%s", stmt->for_loop.var);
+  fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
+  value_t start = emit_value(ctx, stmt->for_loop.start);
+  fprintf(ctx->out, "  store %s %s, ptr %s\n", type, start.ref, slot);
+  add_local(ctx, stmt->for_loop.var,
+            (type_t){.kind = stmt->for_loop.start->type.kind}, slot);
+
+  unsigned int label = ctx->label++;
+  unsigned int outer = ctx->loop_label;
+  ctx->loop_label = label;
+
+  fprintf(ctx->out, "  br label %%cond.%d\n", label);
+  fprintf(ctx->out, "cond.%d:\n", label);
+  unsigned int current = ctx->reg++;
+  fprintf(ctx->out, "  %%%d = load %s, ptr %s\n", current, type, slot);
+  value_t end = emit_value(ctx, stmt->for_loop.end);
+  unsigned int cmp = ctx->reg++;
+  fprintf(ctx->out, "  %%%d = icmp slt %s %%%d, %s\n", cmp, type, current,
+          end.ref);
+  fprintf(ctx->out, "  br i1 %%%d, label %%body.%d, label %%endwhile.%d\n", cmp,
+          label, label);
+
+  fprintf(ctx->out, "body.%d:\n", label);
+  if (emit_block(ctx, stmt->for_loop.body, ret, fn) != 0) {
+    return 1;
+  }
+
+  if (!block_terminates(stmt->for_loop.body)) {
+    unsigned int load = ctx->reg++;
+    fprintf(ctx->out, "  %%%d = load %s, ptr %s\n", load, type, slot);
+    unsigned int inc = ctx->reg++;
+    fprintf(ctx->out, "  %%%d = add %s %%%d, 1\n", inc, type, load);
+    fprintf(ctx->out, "  store %s %%%d, ptr %s\n", type, inc, slot);
+    fprintf(ctx->out, "  br label %%cond.%d\n", label);
+  }
+
+  fprintf(ctx->out, "endwhile.%d:\n", label);
   ctx->loop_label = outer;
   return 0;
 }

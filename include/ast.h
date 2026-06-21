@@ -107,6 +107,7 @@ typedef enum {
   STMT_BINDING,
   STMT_ASSIGN,
   STMT_WHILE,
+  STMT_FOR,
   STMT_BREAK,
   STMT_CONTINUE,
 } StmtKind;
@@ -143,6 +144,12 @@ struct stmt {
       expr_t *cond;
       stmt_t *body;
     } while_loop;
+    struct {
+      char *var;
+      expr_t *start;
+      expr_t *end;
+      stmt_t *body;
+    } for_loop;
   };
 };
 
@@ -224,6 +231,8 @@ stmt_t *ast_binding_init(token_t token, char *name, type_t type, bool mutable,
                          expr_t *init, arena_t *arena);
 stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
                        arena_t *arena);
+stmt_t *ast_for_init(token_t token, char *var, expr_t *start, expr_t *end,
+                     stmt_t *body, arena_t *arena);
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);

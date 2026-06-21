@@ -1,0 +1,12 @@
+--TEST--
+a range bound that is not an integer is rejected
+--FILE--
+pub fn main(): i32 {
+  for i in 0..true {
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: range bound must be an integer, got bool [2:15]
+--EXIT--
+1

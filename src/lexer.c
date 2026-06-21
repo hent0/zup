@@ -16,8 +16,10 @@ const keyword_t keywords[] = {
     {"const", TOKEN_CONST},
     {"let", TOKEN_LET},
     {"while", TOKEN_WHILE},
+    {"for", TOKEN_FOR},
     {"break", TOKEN_BREAK},
     {"continue", TOKEN_CONTINUE},
+    {"in", TOKEN_IN},
     // Types
     {"i8", TOKEN_I8},
     {"i16", TOKEN_I16},
@@ -352,6 +354,15 @@ token_t lexer_next_token(lexer_t *lexer) {
   case '^':
     return advance_with(
         lexer, token_init(TOKEN_CARET, .line = lexer->line, .col = lexer->col));
+  case '.':
+    if (peek(lexer) == '.') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_DOT_DOT, .line = lexer->line,
+                                         lexer->col)));
+    }
+    return advance_with(
+        lexer, token_init(TOKEN_DOT, .line = lexer->line, .col = lexer->col));
   default:
     diag_error(NULL, lexer->line, lexer->col, "unexpected '%c'",
                *lexer->current);

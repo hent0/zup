@@ -84,10 +84,18 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_LET";
   case TOKEN_WHILE:
     return "TOKEN_WHILE";
+  case TOKEN_FOR:
+    return "TOKEN_FOR";
   case TOKEN_BREAK:
     return "TOKEN_BREAK";
   case TOKEN_CONTINUE:
     return "TOKEN_CONTINUE";
+  case TOKEN_IN:
+    return "TOKEN_IN";
+  case TOKEN_DOT:
+    return "TOKEN_DOT";
+  case TOKEN_DOT_DOT:
+    return "TOKEN_DOT_DOT";
   case TOKEN_AMPERSAND:
     return "TOKEN_AMPERSAND";
   case TOKEN_AMPERSAND_AMPERSAND:
@@ -117,9 +125,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_TRUE";
   case TOKEN_FALSE:
     return "TOKEN_FALSE";
-  default:
-    return "UNKNOWN TOKEN TYPE";
   }
+  return "UNKNOWN TOKEN TYPE";
 }
 
 int tokens_dump(source_t *src, arena_t *arena) {

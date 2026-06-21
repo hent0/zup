@@ -27,6 +27,7 @@ typedef struct {
   const char *name;
   type_t type;
   bool mutable;
+  bool is_loop_var;
 } local_t;
 
 typedef struct {
@@ -359,7 +360,9 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
 
     if (!local->mutable) {
       diag_error(sema->src, stmt->line, stmt->col,
-                 "cannot assign to const '%s'", stmt->assign.name);
+                 local->is_loop_var ? "cannot assign to loop variable '%s'"
+                                    : "cannot assign to const '%s'",
+                 stmt->assign.name);
       sema->had_error = true;
       check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
       break;
@@ -387,6 +390,49 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       check_stmt(sema, s, fn);
     }
     sema->loop_depth--;
+    break;
+  }
+  case STMT_FOR: {
+    exprty_t start = check_expr(sema, stmt->for_loop.start, TYPE_UNKNOWN);
+    exprty_t end = check_expr(sema, stmt->for_loop.end, TYPE_UNKNOWN);
+
+    TypeKind var_type = TYPE_I32;
+    if (start.ok && !is_integer(start.kind)) {
+      diag_error(sema->src, stmt->for_loop.start->line,
+                 stmt->for_loop.start->col,
+                 "range bound must be an integer, got %s",
+                 type_kind_to_str(start.kind));
+      sema->had_error = true;
+    } else if (end.ok && !is_integer(end.kind)) {
+      diag_error(sema->src, stmt->for_loop.end->line, stmt->for_loop.end->col,
+                 "range bound must be an integer, got %s",
+                 type_kind_to_str(end.kind));
+      sema->had_error = true;
+    } else if (start.ok && end.ok && start.kind != end.kind) {
+      diag_error(sema->src, stmt->for_loop.start->line,
+                 stmt->for_loop.start->col,
+                 "range bounds must have the same type, got %s and %s",
+                 type_kind_to_str(start.kind), type_kind_to_str(end.kind));
+      sema->had_error = true;
+    } else if (start.ok) {
+      var_type = start.kind;
+    }
+
+    size_t saved = sema->scope->count;
+    sema->scope->items[sema->scope->count++] = (local_t){
+        .name = stmt->for_loop.var,
+        .type = (type_t){.kind = var_type},
+        .mutable = false,
+        .is_loop_var = true,
+    };
+
+    sema->loop_depth++;
+    for (stmt_t *s = stmt->for_loop.body; s != NULL; s = s->next) {
+      check_stmt(sema, s, fn);
+    }
+    sema->loop_depth--;
+
+    sema->scope->count = saved;
     break;
   }
   case STMT_BREAK: {
@@ -440,6 +486,10 @@ static size_t count_bindings(stmt_t *body) {
     } else if (s->kind == STMT_IF) {
       n += count_bindings(s->if_stmt.then_body);
       n += count_bindings(s->if_stmt.else_body);
+    } else if (s->kind == STMT_WHILE) {
+      n += count_bindings(s->while_loop.body);
+    } else if (s->kind == STMT_FOR) {
+      n += 1 + count_bindings(s->for_loop.body);
     }
   }
   return n;

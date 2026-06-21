@@ -1,0 +1,12 @@
+--TEST--
+the loop variable is scoped to the body and does not leak past the loop
+--FILE--
+pub fn main(): i32 {
+  for i in 0..3 {
+  }
+  return i;
+}
+--EXPECTERR--
+zup: error: undefined name 'i' [4:10]
+--EXIT--
+1

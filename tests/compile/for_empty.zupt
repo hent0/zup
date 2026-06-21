@@ -1,0 +1,12 @@
+--TEST--
+an empty range runs the body zero times
+--FILE--
+pub fn main(): i32 {
+  let sum: i32 = 7;
+  for i in 0..0 {
+    sum = 0;
+  }
+  return sum;
+}
+--EXIT--
+7

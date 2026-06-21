@@ -439,6 +439,18 @@ static stmt_t *parse_while(parser_t *parser) {
   return ast_while_init(token, cond, body, parser->arena);
 }
 
+static stmt_t *parse_for(parser_t *parser) {
+  token_t token = expect(parser, TOKEN_FOR, "expected 'for'");
+  token_t id = expect(parser, TOKEN_ID, "expected identifier");
+  expect(parser, TOKEN_IN, "expected 'in'");
+
+  expr_t *start = parse_expr(parser);
+  expect(parser, TOKEN_DOT_DOT, "expected '..'");
+  expr_t *end = parse_expr(parser);
+  stmt_t *body = parse_block(parser);
+  return ast_for_init(token, id.value, start, end, body, parser->arena);
+}
+
 static stmt_t *parse_stmt(parser_t *parser) {
   if (check(parser, TOKEN_RETURN)) {
     return parse_return(parser);
@@ -454,6 +466,10 @@ static stmt_t *parse_stmt(parser_t *parser) {
 
   if (check(parser, TOKEN_WHILE)) {
     return parse_while(parser);
+  }
+
+  if (check(parser, TOKEN_FOR)) {
+    return parse_for(parser);
   }
 
   if (check(parser, TOKEN_BREAK)) {

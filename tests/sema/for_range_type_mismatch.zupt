@@ -1,0 +1,16 @@
+--TEST--
+the two range bounds must share the same integer type (no implicit widening)
+--FILE--
+fn run(n: i64): i32 {
+  for i in 0..n {
+  }
+  return 0;
+}
+
+pub fn main(): i32 {
+  return run(3);
+}
+--EXPECTERR--
+zup: error: range bounds must have the same type, got i32 and i64 [2:12]
+--EXIT--
+1
