@@ -150,6 +150,7 @@ typedef struct param param_t;
 struct param {
   char *name;
   type_t type;
+  bool mutable;
   param_t *next;
 };
 

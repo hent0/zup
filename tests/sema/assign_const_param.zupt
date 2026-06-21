@@ -1,0 +1,16 @@
+--TEST--
+a const parameter rejects assignment while a bare parameter does not
+--FILE--
+fn f(a: i32, const b: i32): i32 {
+  a = 0;
+  b = 0;
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return f(1, 2);
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'b' [3:3]
+--EXIT--
+1

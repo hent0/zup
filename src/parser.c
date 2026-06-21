@@ -505,6 +505,7 @@ static type_t parse_return_type(parser_t *parser) {
 }
 
 static param_t *parse_param(parser_t *parser) {
+  bool mutable = !match(parser, TOKEN_CONST);
   token_t id = expect(parser, TOKEN_ID, "expected identifier");
   expect(parser, TOKEN_COLON, "expected ':' after identifier");
   type_t type = parse_type(parser);
@@ -515,6 +516,7 @@ static param_t *parse_param(parser_t *parser) {
   param_t *param = ast_param_init(parser->arena);
   param->name = id.value;
   param->type = type;
+  param->mutable = mutable;
   return param;
 }
 

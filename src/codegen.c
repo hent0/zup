@@ -466,6 +466,32 @@ static bool block_terminates(stmt_t *body) {
 
 static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 
+static bool stmt_assigns(stmt_t *body, const char *name) {
+  for (stmt_t *s = body; s != NULL; s = s->next) {
+    switch (s->kind) {
+    case STMT_ASSIGN:
+      if (strcmp(s->assign.name, name) == 0) {
+        return true;
+      }
+      break;
+    case STMT_IF:
+      if (stmt_assigns(s->if_stmt.then_body, name) ||
+          stmt_assigns(s->if_stmt.else_body, name)) {
+        return true;
+      }
+      break;
+    case STMT_WHILE:
+      if (stmt_assigns(s->while_loop.body, name)) {
+        return true;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  return false;
+}
+
 static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
   for (stmt_t *stmt = body; stmt != NULL; stmt = stmt->next) {
     switch (stmt->kind) {
@@ -627,6 +653,18 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     }
 
     fprintf(ctx->out, ") {\nentry:\n");
+
+    for (const param_t *param = decl->fn.params; param != NULL;
+         param = param->next) {
+      if (!param->mutable || !stmt_assigns(decl->fn.body, param->name)) {
+        continue;
+      }
+      const char *slot = arena_format(ctx->arena, "%%%s.addr", param->name);
+      const char *type = type_kind_to_ir(param->type.kind);
+      fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
+      fprintf(ctx->out, "  store %s %%%s, ptr %s\n", type, param->name, slot);
+      add_local(ctx, param->name, param->type, slot);
+    }
 
     if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
       return 1;

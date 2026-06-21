@@ -1,0 +1,13 @@
+--TEST--
+a bare parameter is mutable and can be reassigned
+--FILE--
+fn dbl(n: i32): i32 {
+  n = n + n;
+  return n;
+}
+
+pub fn main(): i32 {
+  return dbl(5);
+}
+--EXIT--
+10

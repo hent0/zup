@@ -462,6 +462,7 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
     scope.items[scope.count++] = (local_t){
         .name = param->name,
         .type = param->type,
+        .mutable = param->mutable,
     };
   }
 

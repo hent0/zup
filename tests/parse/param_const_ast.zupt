@@ -1,0 +1,24 @@
+--TEST--
+a const parameter parses with the immutable marker; bare params stay mutable
+--ARGS--
+--ast
+--FILE--
+fn f(const x: i32, y: i64): i32 {
+  return x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> i32
+    param const x: i32
+    param y: i64
+    Return
+      Id x
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0
