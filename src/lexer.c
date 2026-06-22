@@ -30,6 +30,8 @@ const keyword_t keywords[] = {
     {"u32", TOKEN_U32},
     {"i64", TOKEN_I64},
     {"u64", TOKEN_U64},
+    {"f32", TOKEN_F32},
+    {"f64", TOKEN_F64},
     {"void", TOKEN_VOID},
     {"bool", TOKEN_BOOL},
     {"true", TOKEN_TRUE},
@@ -201,7 +203,6 @@ static token_t string_literal(lexer_t *lexer) {
                     .value = id, .length = out);
 }
 
-// TODO: Add support for floats
 static token_t number_literal(lexer_t *lexer) {
   const char *start = lexer->current;
   unsigned int start_line = lexer->line;
@@ -216,6 +217,28 @@ static token_t number_literal(lexer_t *lexer) {
   } else {
     while (isdigit(*lexer->current)) {
       advance(lexer);
+    }
+
+    if (*lexer->current == '.' && isdigit(peek(lexer))) {
+      advance(lexer);
+      while (isdigit(*lexer->current)) {
+        advance(lexer);
+      }
+    }
+
+    if (*lexer->current == 'e' || *lexer->current == 'E') {
+      char s = peek(lexer);
+      bool sign = (s == '+' || s == '-');
+      if (isdigit(sign ? npeek(lexer, 2) : s)) {
+        advance(lexer);
+        if (sign) {
+          advance(lexer);
+        }
+
+        while (isdigit(*lexer->current)) {
+          advance(lexer);
+        }
+      }
     }
   }
 

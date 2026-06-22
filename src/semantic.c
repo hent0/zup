@@ -197,6 +197,13 @@ static bool check_literal_fit(sema_t *sema, expr_t *expr, TypeKind type) {
   return false;
 }
 
+static bool number_is_float(const char *s) {
+  if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    return false;
+  }
+  return strpbrk(s, ".eE") != NULL;
+}
+
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   exprty_t result;
   switch (expr->kind) {
@@ -204,11 +211,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     break;
   case EXPR_NUMBER: {
-    TypeKind type = type_is_integer(expected) ? expected : TYPE_I32;
-    if (check_literal_fit(sema, expr, type)) {
-      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
-    } else {
+    if (number_is_float(expr->number.value)) {
+      TypeKind type = type_is_float(expected) ? expected : TYPE_F64;
       result = (exprty_t){.kind = type, .ok = true};
+    } else {
+      TypeKind type = type_is_integer(expected) ? expected : TYPE_I32;
+      if (check_literal_fit(sema, expr, type)) {
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      } else {
+        result = (exprty_t){.kind = type, .ok = true};
+      }
     }
     break;
   }
@@ -257,11 +269,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     exprty_t lhs, rhs;
     if (rhs_lit && !lhs_lit) {
       lhs = check_expr(sema, expr->binary.lhs, expected);
-      TypeKind hint = type_is_integer(lhs.kind) ? lhs.kind : expected;
+      TypeKind hint = type_is_numeric(lhs.kind) ? lhs.kind : expected;
       rhs = check_expr(sema, expr->binary.rhs, hint);
     } else if (lhs_lit && !rhs_lit) {
       rhs = check_expr(sema, expr->binary.rhs, expected);
-      TypeKind hint = type_is_integer(rhs.kind) ? rhs.kind : expected;
+      TypeKind hint = type_is_numeric(rhs.kind) ? rhs.kind : expected;
       lhs = check_expr(sema, expr->binary.lhs, hint);
     } else {
       lhs = check_expr(sema, expr->binary.lhs, expected);
@@ -284,7 +296,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       } else {
         result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
       }
-    } else if (!type_is_integer(lhs.kind) || lhs.kind != rhs.kind) {
+    } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
+               (type_is_float(lhs.kind) &&
+                !binop_is_arithmetic(expr->binary.op))) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot apply '%s' to %s and %s",
                  binop_to_str(expr->binary.op), type_kind_to_str(lhs.kind),
@@ -306,7 +320,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     exprty_t operand = check_expr(sema, expr->unary.operand, operand_expected);
 
     bool valid = is_not ? operand.kind == TYPE_BOOL
-                        : type_is_signed_integer(operand.kind);
+                        : type_is_signed_integer(operand.kind) ||
+                              type_is_float(operand.kind);
     if (!operand.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else if (!valid) {

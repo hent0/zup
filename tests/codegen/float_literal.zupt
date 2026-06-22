@@ -1,0 +1,22 @@
+--TEST--
+f64 literals lower to LLVM's hexadecimal double form (exact bit pattern)
+--ARGS--
+--ir -o -
+--FILE--
+fn one(): f64 {
+  return 1.5;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal double @one() {
+entry:
+  ret double 0x3FF8000000000000
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

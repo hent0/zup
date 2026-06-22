@@ -1,0 +1,23 @@
+--TEST--
+unary minus on f64 lowers to fneg
+--ARGS--
+--ir -o -
+--FILE--
+fn neg(x: f64): f64 {
+  return -x;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal double @neg(double %x) {
+entry:
+  %1 = fneg double %x
+  ret double %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

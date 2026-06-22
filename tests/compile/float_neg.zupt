@@ -1,0 +1,14 @@
+--TEST--
+unary minus on f64 negates at runtime: -x + 5.0 with x=2.5 is 2.5
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let x: f64 = 2.5;
+  printf("%g\n", -x + 5.0);
+  return 0;
+}
+--EXPECT--
+2.5
+--EXIT--
+0

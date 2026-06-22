@@ -1,0 +1,29 @@
+--TEST--
+the f64 type and float literals parse and dump under their own names
+--ARGS--
+--ast
+--FILE--
+fn add(a: f64, b: f64): f64 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  let x: f64 = 3.14;
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'add' -> f64
+    param a: f64
+    param b: f64
+    Return
+      Binary +
+        Id a
+        Id b
+  FnDecl pub 'main' -> i32
+    Let x: f64
+      Number literal 3.14
+    Return
+      Number literal 0
+--EXIT--
+0

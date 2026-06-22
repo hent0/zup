@@ -61,6 +61,8 @@ typedef enum {
   TOKEN_U32,
   TOKEN_I64,
   TOKEN_U64,
+  TOKEN_F32,
+  TOKEN_F64,
   TOKEN_STRING,
   TOKEN_BOOL,
   TOKEN_TRUE,

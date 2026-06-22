@@ -1,0 +1,15 @@
+--TEST--
+f64 let bindings round-trip through memory and multiply: 1.5 * 2.0 == 3
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let x: f64 = 1.5;
+  let y: f64 = 2.0;
+  printf("%g\n", x * y);
+  return 0;
+}
+--EXPECT--
+3
+--EXIT--
+0

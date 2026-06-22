@@ -22,6 +22,10 @@ char *type_kind_to_ir(TypeKind kind) {
   case TYPE_I64:
   case TYPE_U64:
     return "i64";
+  case TYPE_F32:
+    return "float";
+  case TYPE_F64:
+    return "double";
   case TYPE_STRING:
     return "ptr";
   default:
@@ -51,6 +55,10 @@ char *type_kind_to_str(TypeKind kind) {
     return "i64";
   case TYPE_U64:
     return "u64";
+  case TYPE_F32:
+    return "f32";
+  case TYPE_F64:
+    return "f64";
   case TYPE_STRING:
     return "cstr";
   default:
@@ -83,6 +91,44 @@ bool type_is_signed_integer(TypeKind kind) {
     return true;
   default:
     return false;
+  }
+}
+
+bool type_is_float(TypeKind kind) {
+  return kind == TYPE_F32 || kind == TYPE_F64;
+}
+
+bool type_is_numeric(TypeKind kind) {
+  return type_is_integer(kind) || type_is_float(kind);
+}
+
+bool binop_is_arithmetic(BinaryOp op) {
+  switch (op) {
+  case BINOP_ADD:
+  case BINOP_SUB:
+  case BINOP_MUL:
+  case BINOP_DIV:
+  case BINOP_REM:
+    return true;
+  default:
+    return false;
+  }
+}
+
+char *binop_to_ir_float(BinaryOp op) {
+  switch (op) {
+  case BINOP_ADD:
+    return "fadd";
+  case BINOP_SUB:
+    return "fsub";
+  case BINOP_MUL:
+    return "fmul";
+  case BINOP_DIV:
+    return "fdiv";
+  case BINOP_REM:
+    return "frem";
+  default:
+    return "?";
   }
 }
 

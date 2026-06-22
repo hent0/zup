@@ -5,6 +5,7 @@
 #include "diag.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CTX_REG_START 1
@@ -287,6 +288,15 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .ref = expr->boolean.value ? "true" : "false",
     };
   case EXPR_NUMBER:
+    if (type_is_float(expr->type.kind)) {
+      double d = strtod(expr->number.value, NULL);
+      unsigned long long bits;
+      memcpy(&bits, &d, sizeof(bits));
+      return (value_t){
+          .type = expr->type,
+          .ref = arena_format(ctx->arena, "0x%016llX", bits),
+      };
+    }
     return (value_t){
         .type = expr->type,
         .ref = expr->number.value,
@@ -353,11 +363,14 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     value_t left = emit_value(ctx, expr->binary.lhs);
     value_t right = emit_value(ctx, expr->binary.rhs);
 
+    const char *opcode =
+        type_is_float(left.type.kind)
+            ? binop_to_ir_float(expr->binary.op)
+            : binop_to_ir(expr->binary.op,
+                          type_is_signed_integer(left.type.kind));
     unsigned int reg = ctx->reg++;
-    fprintf(
-        ctx->out, "  %%%u = %s %s %s, %s\n", reg,
-        binop_to_ir(expr->binary.op, type_is_signed_integer(left.type.kind)),
-        type_kind_to_ir(left.type.kind), left.ref, right.ref);
+    fprintf(ctx->out, "  %%%u = %s %s %s, %s\n", reg, opcode,
+            type_kind_to_ir(left.type.kind), left.ref, right.ref);
     return (value_t){
         .type = expr->type,
         .ref = arena_format(ctx->arena, "%%%u", reg),
@@ -371,6 +384,15 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
       fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", reg, operand.ref);
       return (value_t){
           .type = (type_t){.kind = TYPE_BOOL},
+          .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+    if (type_is_float(operand.type.kind)) {
+      // -x  ->  fneg <ty> x
+      fprintf(ctx->out, "  %%%u = fneg %s %s\n", reg,
+              type_kind_to_ir(operand.type.kind), operand.ref);
+      return (value_t){
+          .type = operand.type,
           .ref = arena_format(ctx->arena, "%%%u", reg),
       };
     }

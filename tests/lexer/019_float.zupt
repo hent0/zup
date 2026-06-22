@@ -1,0 +1,14 @@
+--TEST--
+a float literal lexes as a single TOKEN_NUMBER (fraction and exponent forms); '..' still splits integers for ranges
+--ARGS--
+--tokenize
+--FILE--
+3.14 1e9 2.5e-3 1..10 42
+--EXPECT--
+TOKEN_NUMBER(3.14) [1:1]
+TOKEN_NUMBER(1e9) [1:6]
+TOKEN_NUMBER(2.5e-3) [1:10]
+TOKEN_NUMBER(1) [1:17]
+TOKEN_DOT_DOT [1:18]
+TOKEN_NUMBER(10) [1:20]
+TOKEN_NUMBER(42) [1:23]

@@ -1,0 +1,23 @@
+--TEST--
+f64 addition lowers to fadd
+--ARGS--
+--ir -o -
+--FILE--
+fn add(a: f64, b: f64): f64 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal double @add(double %a, double %b) {
+entry:
+  %1 = fadd double %a, %b
+  ret double %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

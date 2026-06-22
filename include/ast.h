@@ -18,6 +18,8 @@ typedef enum {
   TYPE_U32,
   TYPE_I64,
   TYPE_U64,
+  TYPE_F32,
+  TYPE_F64,
   TYPE_STRING,
 } TypeKind;
 
@@ -215,11 +217,15 @@ char *type_kind_to_ir(TypeKind kind);
 char *type_kind_to_str(TypeKind kind);
 bool type_is_integer(TypeKind kind);
 bool type_is_signed_integer(TypeKind kind);
+bool type_is_float(TypeKind kind);
+bool type_is_numeric(TypeKind kind);
 
 char *binop_to_ir(BinaryOp op, bool is_signed);
+char *binop_to_ir_float(BinaryOp op);
 char *binop_to_str(BinaryOp op);
 bool binop_is_comparison(BinaryOp op);
 bool binop_is_logical(BinaryOp op);
+bool binop_is_arithmetic(BinaryOp op);
 
 char *unop_to_ir(UnaryOp op);
 char *unop_to_str(UnaryOp op);

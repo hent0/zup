@@ -129,6 +129,10 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_I64";
   case TOKEN_U64:
     return "TOKEN_U64";
+  case TOKEN_F32:
+    return "TOKEN_F32";
+  case TOKEN_F64:
+    return "TOKEN_F64";
   case TOKEN_STRING:
     return "TOKEN_STRING";
   case TOKEN_BOOL:

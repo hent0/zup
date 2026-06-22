@@ -1,0 +1,11 @@
+--TEST--
+a float literal does not coerce to an integer binding type
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 3.14;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign f64 to variable 'x' of type i32 [2:3]
+--EXIT--
+1

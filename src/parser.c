@@ -78,6 +78,12 @@ static type_t parse_type(parser_t *parser) {
   case TOKEN_U64:
     advance(parser);
     return (type_t){.kind = TYPE_U64};
+  case TOKEN_F32:
+    advance(parser);
+    return (type_t){.kind = TYPE_F32};
+  case TOKEN_F64:
+    advance(parser);
+    return (type_t){.kind = TYPE_F64};
   case TOKEN_CSTR:
     advance(parser);
     return (type_t){.kind = TYPE_STRING};

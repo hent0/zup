@@ -1,0 +1,14 @@
+--TEST--
+floats support arithmetic only for now; comparison operators are not yet defined on f64
+--FILE--
+fn f(a: f64, b: f64): bool {
+  return a < b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '<' to f64 and f64 [2:10]
+--EXIT--
+1

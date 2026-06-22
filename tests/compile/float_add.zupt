@@ -1,0 +1,13 @@
+--TEST--
+f64 addition is computed at runtime: 1.5 + 2.5 == 4
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  printf("%g\n", 1.5 + 2.5);
+  return 0;
+}
+--EXPECT--
+4
+--EXIT--
+0
