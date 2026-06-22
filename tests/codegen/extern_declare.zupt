@@ -1,0 +1,19 @@
+--TEST--
+a fixed-arity extern lowers to a 'declare' with concrete parameter types and is called directly
+--ARGS--
+--ir -o -
+--FILE--
+extern fn puts(s: cstr): i32;
+
+pub fn main(): i32 {
+  puts("hi");
+  return 0;
+}
+--EXPECT--
+@.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
+declare i32 @puts(ptr)
+define i32 @main() {
+entry:
+  %1 = call i32 @puts(ptr @.str.0)
+  ret i32 0
+}

@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i1 @ge(i32 %a, i32 %b) {
 entry:
   %1 = icmp sge i32 %a, %b

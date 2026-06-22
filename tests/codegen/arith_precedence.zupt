@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i32 @f(i32 %a, i32 %b, i32 %c) {
 entry:
   %1 = mul i32 %b, %c

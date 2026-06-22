@@ -3,16 +3,16 @@ hello world lowers to printf calls and a constant return
 --ARGS--
 --ir -o -
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn test() {}
 pub fn main(): i32 {
   printf("Hello, %s!\n", "world");
   return 123;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 @.str.0 = private unnamed_addr constant [12 x i8] c"Hello, %s!\0A\00"
 @.str.1 = private unnamed_addr constant [6 x i8] c"world\00"
+declare i32 @printf(ptr, ...)
 define internal void @test() {
 entry:
   ret void

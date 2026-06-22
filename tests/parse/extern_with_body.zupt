@@ -1,0 +1,14 @@
+--TEST--
+an extern declaration cannot have a body; it must end at ';'
+--FILE--
+extern fn printf(fmt: cstr, ...): i32 {
+  return 0;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: expected ';' after extern declaration (got TOKEN_LBRACE) [1:39]
+--EXIT--
+1

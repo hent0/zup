@@ -3,6 +3,7 @@ a parameter passed to printf lowers as a typed operand
 --ARGS--
 --ir -o -
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn show(n: i32): void {
   printf("%d\n", n);
 }
@@ -12,9 +13,8 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 @.str.0 = private unnamed_addr constant [4 x i8] c"%d\0A\00"
+declare i32 @printf(ptr, ...)
 define internal void @show(i32 %n) {
 entry:
   %1 = call i32 @printf(ptr @.str.0, i32 %n)

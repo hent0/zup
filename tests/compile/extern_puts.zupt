@@ -1,0 +1,13 @@
+--TEST--
+an extern declaration links against libc at runtime (puts writes its argument plus a newline)
+--FILE--
+extern fn puts(s: cstr): i32;
+
+pub fn main(): i32 {
+  puts("hello from puts");
+  return 0;
+}
+--EXPECT--
+hello from puts
+--EXIT--
+0

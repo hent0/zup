@@ -1,6 +1,7 @@
 --TEST--
 multiple printf calls emit in order
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 pub fn main(): i32 {
   printf("first\n");
   printf("second\n");

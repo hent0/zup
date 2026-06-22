@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i32 @same(i32 %x) {
 entry:
   ret i32 %x

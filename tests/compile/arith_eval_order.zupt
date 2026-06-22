@@ -1,6 +1,7 @@
 --TEST--
 binary operands are evaluated left-to-right (side effects observable)
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn one(): i32 {
   printf("one\n");
   return 10;

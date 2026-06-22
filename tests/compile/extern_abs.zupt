@@ -1,0 +1,10 @@
+--TEST--
+the return value of an extern libc function flows back into zup (abs of a negative)
+--FILE--
+extern fn abs(n: i32): i32;
+
+pub fn main(): i32 {
+  return abs(0 - 42);
+}
+--EXIT--
+42

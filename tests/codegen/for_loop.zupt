@@ -15,8 +15,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i32 @count(i32 %n) {
 entry:
   %total = alloca i32

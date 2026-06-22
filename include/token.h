@@ -44,11 +44,13 @@ typedef enum {
   TOKEN_IN,
   TOKEN_DOT,
   TOKEN_DOT_DOT,
+  TOKEN_DOT_DOT_DOT,
   TOKEN_AMPERSAND,
   TOKEN_AMPERSAND_AMPERSAND,
   TOKEN_PIPE,
   TOKEN_PIPE_PIPE,
   TOKEN_CARET,
+  TOKEN_EXTERN,
   // Types
   TOKEN_VOID,
   TOKEN_I8,
@@ -59,6 +61,7 @@ typedef enum {
   TOKEN_BOOL,
   TOKEN_TRUE,
   TOKEN_FALSE,
+  TOKEN_CSTR,
 } TokenKind;
 
 typedef struct {

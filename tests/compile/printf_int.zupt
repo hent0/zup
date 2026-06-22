@@ -1,6 +1,7 @@
 --TEST--
 integer arguments to printf are formatted at runtime (literal and parameter)
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn show(n: i32): void {
   printf("n=%d\n", n);
 }

@@ -96,6 +96,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_DOT";
   case TOKEN_DOT_DOT:
     return "TOKEN_DOT_DOT";
+  case TOKEN_DOT_DOT_DOT:
+    return "TOKEN_DOT_DOT_DOT";
   case TOKEN_AMPERSAND:
     return "TOKEN_AMPERSAND";
   case TOKEN_AMPERSAND_AMPERSAND:
@@ -106,6 +108,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_PIPE_PIPE";
   case TOKEN_CARET:
     return "TOKEN_CARET";
+  case TOKEN_EXTERN:
+    return "TOKEN_EXTERN";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
@@ -125,6 +129,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_TRUE";
   case TOKEN_FALSE:
     return "TOKEN_FALSE";
+  case TOKEN_CSTR:
+    return "TOKEN_CSTR";
   }
   return "UNKNOWN TOKEN TYPE";
 }

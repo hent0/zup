@@ -1,0 +1,13 @@
+--TEST--
+a fixed extern parameter is type-checked like any other (printf's format must be a cstr)
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  printf(42);
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot pass i32 as argument 'fmt' of 'printf' (expected cstr) [4:3]
+--EXIT--
+1

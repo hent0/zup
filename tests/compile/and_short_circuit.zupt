@@ -1,6 +1,7 @@
 --TEST--
 && does not evaluate its right operand when the left is false
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn rhs(): bool {
   printf("rhs\n");
   return true;

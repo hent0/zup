@@ -1,0 +1,16 @@
+--TEST--
+every declared extern emits a 'declare' even when never called (void return lowers too)
+--ARGS--
+--ir -o -
+--FILE--
+extern fn exit(code: i32): void;
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+declare void @exit(i32)
+define i32 @main() {
+entry:
+  ret i32 0
+}

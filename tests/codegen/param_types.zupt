@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i64 @widen(i8 %a, i64 %b) {
 entry:
   ret i64 %b

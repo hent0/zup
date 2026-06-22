@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i1 @f(i1 %x) {
 entry:
   %1 = xor i1 %x, true

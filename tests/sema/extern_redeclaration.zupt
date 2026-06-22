@@ -1,0 +1,16 @@
+--TEST--
+an extern declaration shares the function namespace; a later definition of the same name is a redefinition
+--FILE--
+extern fn foo(): i32;
+
+fn foo(): i32 {
+  return 1;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: redefinition of function 'foo' [3:1]
+--EXIT--
+1

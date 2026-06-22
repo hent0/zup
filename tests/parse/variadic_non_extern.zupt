@@ -1,0 +1,14 @@
+--TEST--
+the variadic '...' is only allowed in extern declarations, not ordinary functions
+--FILE--
+fn add(a: i32, ...): i32 {
+  return a;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: variadic '...' is only allowed in extern declarations [1:16]
+--EXIT--
+1

@@ -66,7 +66,7 @@ static type_t parse_type(parser_t *parser) {
   case TOKEN_I64:
     advance(parser);
     return (type_t){.kind = TYPE_I64};
-  case TOKEN_STRING:
+  case TOKEN_CSTR:
     advance(parser);
     return (type_t){.kind = TYPE_STRING};
   default:
@@ -561,22 +561,30 @@ static param_t *parse_param(parser_t *parser) {
   return param;
 }
 
-static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
-  token_t kw = expect(parser, TOKEN_FN, "expected 'fn'");
-  token_t name = expect(parser, TOKEN_ID, "expected function name");
-
-  decl_t *fn = ast_fn_init(parser->arena);
-  fn->visibility = visibility;
-  fn->name = name.value;
-  fn->line = kw.line;
-  fn->col = kw.col;
-
+static void parse_param_list(parser_t *parser, decl_t *fn,
+                             bool allow_variadic) {
   expect(parser, TOKEN_LPAREN, "expected '(' after function name");
   param_t *p_tail = NULL;
   while (!check(parser, TOKEN_RPAREN)) {
     if (p_tail != NULL) {
       expect(parser, TOKEN_COMMA, "expected ',' between arguments");
     }
+
+    if (check(parser, TOKEN_DOT_DOT_DOT)) {
+      token_t dots = advance(parser);
+      if (!allow_variadic) {
+        diag_error(parser->src, dots.line, dots.col,
+                   "variadic '...' is only allowed in extern declarations");
+        parser->had_error = true;
+      } else if (fn->fn.params_count == 0) {
+        diag_error(parser->src, dots.line, dots.col,
+                   "a variadic function requires at least one fixed parameter");
+        parser->had_error = true;
+      }
+      fn->fn.variadic = true;
+      break;
+    }
+
     param_t *param = parse_param(parser);
     if (param == NULL) {
       break;
@@ -591,9 +599,44 @@ static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
     fn->fn.params_count++;
   }
   expect(parser, TOKEN_RPAREN, "expected ')' after parameters");
+}
+
+static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
+  token_t kw = expect(parser, TOKEN_FN, "expected 'fn'");
+  token_t name = expect(parser, TOKEN_ID, "expected function name");
+
+  decl_t *fn = ast_fn_init(parser->arena);
+  fn->visibility = visibility;
+  fn->name = name.value;
+  fn->line = kw.line;
+  fn->col = kw.col;
+
+  parse_param_list(parser, fn, false);
 
   fn->fn.return_type = parse_return_type(parser);
   fn->fn.body = parse_block(parser);
+  return fn;
+}
+
+static decl_t *parse_extern(parser_t *parser) {
+  token_t kw = expect(parser, TOKEN_EXTERN, "expected 'extern'");
+  expect(parser, TOKEN_FN, "expected 'fn' after 'extern'");
+  token_t name = expect(parser, TOKEN_ID, "expected function name");
+
+  decl_t *fn = ast_fn_init(parser->arena);
+  fn->visibility = VISIBILITY_PRIVATE;
+  fn->name = name.value;
+  fn->line = kw.line;
+  fn->col = kw.col;
+  fn->fn.is_extern = true;
+
+  parse_param_list(parser, fn, true);
+
+  fn->fn.return_type = parse_return_type(parser);
+  expect(parser, TOKEN_SEMICOLON, "expected ';' after extern declaration");
+  if (check(parser, TOKEN_LBRACE)) {
+    parse_block(parser);
+  }
   return fn;
 }
 
@@ -605,6 +648,10 @@ static Visibility parse_visibility(parser_t *parser) {
 }
 
 static decl_t *parse_decl(parser_t *parser) {
+  if (check(parser, TOKEN_EXTERN)) {
+    return parse_extern(parser);
+  }
+
   Visibility visibility = parse_visibility(parser);
 
   switch (parser->current.kind) {

@@ -20,6 +20,7 @@ const keyword_t keywords[] = {
     {"break", TOKEN_BREAK},
     {"continue", TOKEN_CONTINUE},
     {"in", TOKEN_IN},
+    {"extern", TOKEN_EXTERN},
     // Types
     {"i8", TOKEN_I8},
     {"i16", TOKEN_I16},
@@ -29,6 +30,7 @@ const keyword_t keywords[] = {
     {"bool", TOKEN_BOOL},
     {"true", TOKEN_TRUE},
     {"false", TOKEN_FALSE},
+    {"cstr", TOKEN_CSTR},
     {NULL, TOKEN_EOF},
 };
 
@@ -60,13 +62,15 @@ static token_t advance_with(lexer_t *lexer, token_t token) {
   return token;
 }
 
-static char peek(lexer_t *lexer) {
+static char npeek(lexer_t *lexer, unsigned int n) {
   if (at_eof(lexer)) {
     return '\0';
   }
 
-  return lexer->current[1];
+  return lexer->current[n];
 }
+
+static char peek(lexer_t *lexer) { return npeek(lexer, 1); }
 
 static void skip_whitespace(lexer_t *lexer) {
   while (!at_eof(lexer) && (*lexer->current == ' ' || *lexer->current == '\t' ||
@@ -356,6 +360,15 @@ token_t lexer_next_token(lexer_t *lexer) {
         lexer, token_init(TOKEN_CARET, .line = lexer->line, .col = lexer->col));
   case '.':
     if (peek(lexer) == '.') {
+      if (npeek(lexer, 2) == '.') {
+        return advance_with(
+            lexer,
+            advance_with(lexer,
+                         advance_with(lexer, token_init(TOKEN_DOT_DOT_DOT,
+                                                        .line = lexer->line,
+                                                        lexer->col))));
+      }
+
       return advance_with(
           lexer,
           advance_with(lexer, token_init(TOKEN_DOT_DOT, .line = lexer->line,

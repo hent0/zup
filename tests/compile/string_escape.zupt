@@ -1,6 +1,7 @@
 --TEST--
 escape sequences are emitted as real bytes at runtime
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 pub fn main(): i32 {
   printf("tab\there\nline2\n");
   return 0;

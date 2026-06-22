@@ -1,0 +1,23 @@
+--TEST--
+extern declarations parse into bodyless ExternFn nodes (variadic and fixed arity)
+--ARGS--
+--ast
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+extern fn puts(s: cstr): i32;
+
+pub fn main(): i32 {
+  return puts("hi");
+}
+--EXPECT--
+Container (file) (3 members)
+  ExternFn 'printf' -> i32 (variadic)
+    param fmt: cstr
+  ExternFn 'puts' -> i32
+    param s: cstr
+  FnDecl pub 'main' -> i32
+    Return
+      Call 'puts' (1 args)
+        String literal "hi"
+--EXIT--
+0

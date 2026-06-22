@@ -3,14 +3,14 @@ integer literal arguments to printf lower as typed operands
 --ARGS--
 --ir -o -
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 pub fn main(): i32 {
   printf("%d %d\n", 7, 42);
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 @.str.0 = private unnamed_addr constant [7 x i8] c"%d %d\0A\00"
+declare i32 @printf(ptr, ...)
 define i32 @main() {
 entry:
   %1 = call i32 @printf(ptr @.str.0, i32 7, i32 42)

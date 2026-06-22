@@ -187,6 +187,8 @@ struct decl {
       type_t return_type;
       stmt_t *body;
       size_t stmt_count;
+      bool is_extern;
+      bool variadic;
     } fn;
     struct {
       decl_t *members;

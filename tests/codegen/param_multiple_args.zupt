@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return sub(7, 2);
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i32 @sub(i32 %a, i32 %b) {
 entry:
   ret i32 %a

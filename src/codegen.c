@@ -256,12 +256,6 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
   return 0;
 }
 
-static int emit_std(ctx_t *ctx) {
-  fprintf(ctx->out, "declare i32 @printf(ptr, ...)\n");
-  fprintf(ctx->out, "\n");
-  return 0;
-}
-
 static value_t emit_call(ctx_t *ctx, expr_t *call);
 
 static unsigned type_bits(TypeKind kind) {
@@ -744,6 +738,65 @@ static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
   return 0;
 }
 
+static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
+  fprintf(ctx->out, "declare %s @%s(",
+          type_kind_to_ir(decl->fn.return_type.kind), decl->name);
+
+  for (const param_t *param = decl->fn.params; param != NULL;
+       param = param->next) {
+    fprintf(ctx->out, "%s%s", type_kind_to_ir(param->type.kind),
+            param->next != NULL || decl->fn.variadic ? ", " : "");
+    if (param->next == NULL && decl->fn.variadic) {
+      fprintf(ctx->out, "...");
+    }
+  }
+
+  fprintf(ctx->out, ")\n");
+  return 0;
+}
+
+static int emit_fn(ctx_t *ctx, decl_t *decl) {
+  ctx->reg = CTX_REG_START;
+  ctx->label = CTX_LABEL_START;
+  ctx->loop_label = 0;
+  ctx->locals = NULL;
+  ctx->locals_tail = NULL;
+  fprintf(ctx->out, "define %s%s @%s(",
+          decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
+          type_kind_to_ir(decl->fn.return_type.kind), decl->name);
+  for (const param_t *param = decl->fn.params; param != NULL;
+       param = param->next) {
+    fprintf(ctx->out, "%s %%%s%s", type_kind_to_ir(param->type.kind),
+            param->name, param->next != NULL ? ", " : "");
+  }
+
+  fprintf(ctx->out, ") {\nentry:\n");
+
+  for (const param_t *param = decl->fn.params; param != NULL;
+       param = param->next) {
+    if (!param->mutable || !stmt_assigns(decl->fn.body, param->name)) {
+      continue;
+    }
+    const char *slot = arena_format(ctx->arena, "%%%s.addr", param->name);
+    const char *type = type_kind_to_ir(param->type.kind);
+    fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
+    fprintf(ctx->out, "  store %s %%%s, ptr %s\n", type, param->name, slot);
+    add_local(ctx, param->name, param->type, slot);
+  }
+
+  if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
+    return 1;
+  }
+
+  if (decl->fn.return_type.kind == TYPE_VOID &&
+      !block_terminates(decl->fn.body)) {
+    fprintf(ctx->out, "  ret void\n");
+  }
+
+  fprintf(ctx->out, "}\n\n");
+  return 0;
+}
+
 static int emit_decl(ctx_t *ctx, decl_t *decl) {
   if (decl == NULL) {
     return 1;
@@ -760,45 +813,7 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_FN: {
-    ctx->reg = CTX_REG_START;
-    ctx->label = CTX_LABEL_START;
-    ctx->loop_label = 0;
-    ctx->locals = NULL;
-    ctx->locals_tail = NULL;
-    fprintf(ctx->out, "define %s%s @%s(",
-            decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-            type_kind_to_ir(decl->fn.return_type.kind), decl->name);
-    for (const param_t *param = decl->fn.params; param != NULL;
-         param = param->next) {
-      fprintf(ctx->out, "%s %%%s%s", type_kind_to_ir(param->type.kind),
-              param->name, param->next != NULL ? ", " : "");
-    }
-
-    fprintf(ctx->out, ") {\nentry:\n");
-
-    for (const param_t *param = decl->fn.params; param != NULL;
-         param = param->next) {
-      if (!param->mutable || !stmt_assigns(decl->fn.body, param->name)) {
-        continue;
-      }
-      const char *slot = arena_format(ctx->arena, "%%%s.addr", param->name);
-      const char *type = type_kind_to_ir(param->type.kind);
-      fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
-      fprintf(ctx->out, "  store %s %%%s, ptr %s\n", type, param->name, slot);
-      add_local(ctx, param->name, param->type, slot);
-    }
-
-    if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
-      return 1;
-    }
-
-    if (decl->fn.return_type.kind == TYPE_VOID &&
-        !block_terminates(decl->fn.body)) {
-      fprintf(ctx->out, "  ret void\n");
-    }
-
-    fprintf(ctx->out, "}\n\n");
-    return 0;
+    return decl->fn.is_extern ? emit_extern_fn(ctx, decl) : emit_fn(ctx, decl);
   }
   case DECL_GLOBAL: {
     value_t value = emit_value(ctx, decl->global.init);
@@ -829,10 +844,6 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
     if (collect_decl(&ctx, decl) != 0) {
       return 1;
     }
-  }
-
-  if (emit_std(&ctx) != 0) {
-    return 1;
   }
 
   emit_string_globals(&ctx);

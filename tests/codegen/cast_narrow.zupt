@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i8 @narrow(i64 %x) {
 entry:
   %1 = trunc i64 %x to i8

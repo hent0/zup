@@ -1,3 +1,5 @@
+extern fn printf(fmt: cstr, ...);
+
 pub fn main(): i32 {
   let i: i32 = 1;
 

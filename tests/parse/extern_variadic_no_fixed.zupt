@@ -1,0 +1,12 @@
+--TEST--
+a variadic extern must declare at least one fixed parameter (the C varargs ABI needs it)
+--FILE--
+extern fn go(...): i32;
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: a variadic function requires at least one fixed parameter [1:14]
+--EXIT--
+1

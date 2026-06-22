@@ -1,3 +1,5 @@
+extern fn printf(fmt: cstr, ...);
+
 fn fib(n: i32, a: i32, b: i32): i32 {
   if n <= 0 {
     return 0;

@@ -7,8 +7,6 @@ pub fn main(): i32 {
   return 42;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define i32 @main() {
 entry:
   ret i32 42

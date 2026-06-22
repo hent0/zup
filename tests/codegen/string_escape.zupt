@@ -3,14 +3,14 @@ string escapes are decoded into the IR byte constant
 --ARGS--
 --ir -o -
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 pub fn main(): i32 {
   printf("tab\there\nline2\n");
   return 0;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 @.str.0 = private unnamed_addr constant [16 x i8] c"tab\09here\0Aline2\0A\00"
+declare i32 @printf(ptr, ...)
 define i32 @main() {
 entry:
   %1 = call i32 @printf(ptr @.str.0)

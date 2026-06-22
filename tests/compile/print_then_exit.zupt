@@ -1,6 +1,7 @@
 --TEST--
 a program can print and then exit with a nonzero code
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 pub fn main(): i32 {
   printf("bye\n");
   return 3;

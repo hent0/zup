@@ -15,8 +15,6 @@ pub fn main(): i32 {
   return MAX;
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 @MAX = constant i32 100
 @counter = internal global i32 0
 define internal i32 @bump() {

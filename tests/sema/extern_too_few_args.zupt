@@ -1,0 +1,13 @@
+--TEST--
+a variadic extern still requires its fixed parameters to be supplied
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  printf();
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'printf' expects at least 1 argument but got 0 [4:3]
+--EXIT--
+1

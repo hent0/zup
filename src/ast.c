@@ -40,7 +40,7 @@ char *type_kind_to_str(TypeKind kind) {
   case TYPE_I64:
     return "i64";
   case TYPE_STRING:
-    return "i8[]";
+    return "cstr";
   default:
     return "?";
   }
@@ -350,6 +350,8 @@ decl_t *ast_fn_init(arena_t *arena) {
   fn->fn.params_count = 0;
   fn->fn.body = NULL;
   fn->fn.stmt_count = 0;
+  fn->fn.is_extern = false;
+  fn->fn.variadic = false;
   return fn;
 }
 
@@ -531,9 +533,15 @@ static void dump_decl(const decl_t *decl, int depth) {
   print_indent(depth);
   switch (decl->kind) {
   case DECL_FN:
-    printf("FnDecl %s '%s' -> %s\n", visibility_to_str(decl->visibility),
-           decl->name ? decl->name : "(anonymous)",
-           type_kind_to_str(decl->fn.return_type.kind));
+    if (decl->fn.is_extern) {
+      printf("ExternFn '%s' -> %s%s\n", decl->name,
+             type_kind_to_str(decl->fn.return_type.kind),
+             decl->fn.variadic ? " (variadic)" : "");
+    } else {
+      printf("FnDecl %s '%s' -> %s\n", visibility_to_str(decl->visibility),
+             decl->name ? decl->name : "(anonymous)",
+             type_kind_to_str(decl->fn.return_type.kind));
+    }
     for (const param_t *param = decl->fn.params; param != NULL;
          param = param->next) {
       print_indent(depth + 1);
@@ -541,7 +549,9 @@ static void dump_decl(const decl_t *decl, int depth) {
              type_kind_to_str(param->type.kind));
     }
 
-    dump_block(decl->fn.body, depth);
+    if (!decl->fn.is_extern) {
+      dump_block(decl->fn.body, depth);
+    }
     break;
   case DECL_CONTAINER:
     printf("Container %s (%zu members)\n", decl->name ? decl->name : "(file)",

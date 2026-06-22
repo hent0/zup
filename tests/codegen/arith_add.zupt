@@ -11,8 +11,6 @@ pub fn main(): i32 {
   return add(1, 2);
 }
 --EXPECT--
-declare i32 @printf(ptr, ...)
-
 define internal i32 @add(i32 %a, i32 %b) {
 entry:
   %1 = add i32 %a, %b

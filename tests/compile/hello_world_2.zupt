@@ -1,6 +1,7 @@
 --TEST--
 compiled program prints to stdout and exits 0
 --FILE--
+extern fn printf(fmt: cstr, ...): i32;
 fn number(): i32 {
   return 2;
 }

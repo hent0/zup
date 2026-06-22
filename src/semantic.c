@@ -75,23 +75,6 @@ static bool is_const_init(const expr_t *expr) {
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
 
-// =============================STD============================
-// TODO: Refactor out later
-static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
-  expr_t *first = call->call.args;
-  if (first == NULL || first->kind != EXPR_STRING) {
-    diag_error(sema->src, call->line, call->col,
-               "'printf' expects a string literal as its first argument");
-    sema->had_error = true;
-  }
-
-  for (expr_t *arg = first; arg != NULL; arg = arg->next) {
-    check_expr(sema, arg, TYPE_UNKNOWN);
-  }
-  return (exprty_t){.kind = TYPE_I32, .ok = true};
-}
-// ============================================================
-
 static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   for (decl_t *member = root->container.members; member != NULL;
        member = member->next) {
@@ -139,11 +122,6 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
   expr_t *callee = call->call.callee;
   const char *name = callee->id.name;
 
-  // TODO: Refactor out later
-  if (strcmp(name, "printf") == 0) {
-    return check_printf_call(sema, call);
-  }
-
   decl_t *fn = symtab_lookup(sema->tab, name);
   if (fn == NULL) {
     diag_error(sema->src, call->line, call->col,
@@ -152,7 +130,15 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
-  if (call->call.arg_count != fn->fn.params_count) {
+  if (fn->fn.variadic) {
+    if (call->call.arg_count < fn->fn.params_count) {
+      diag_error(sema->src, call->line, call->col,
+                 "'%s' expects at least %zu argument%s but got %zu", name,
+                 fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
+                 call->call.arg_count);
+      sema->had_error = true;
+    }
+  } else if (call->call.arg_count != fn->fn.params_count) {
     diag_error(sema->src, call->line, call->col,
                "'%s' expects %zu argument%s but got %zu", name,
                fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
@@ -558,6 +544,10 @@ static size_t count_bindings(stmt_t *body) {
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
+  if (fn->fn.is_extern) {
+    return;
+  }
+
   size_t capacity = fn->fn.params_count + count_bindings(fn->fn.body);
   scope_t scope = {
       .items =
