@@ -1,0 +1,14 @@
+--TEST--
+an inferred literal is range-checked against the type it inferred (300 does not fit the u8 it took from 'count')
+--FILE--
+fn f(count: u8): bool {
+  return count > 300;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 300 out of range for u8 [2:18]
+--EXIT--
+1

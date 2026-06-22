@@ -1,0 +1,12 @@
+--TEST--
+the motivating case works end to end: comparing a u8 against a literal in an if-condition
+--FILE--
+pub fn main(): i32 {
+  let count: u8 = 200;
+  if count > 10 {
+    return 1;
+  }
+  return 0;
+}
+--EXIT--
+1

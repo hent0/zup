@@ -1,0 +1,23 @@
+--TEST--
+a literal on the right of a comparison infers the other operand's type (u8 -> i8 width, unsigned predicate)
+--ARGS--
+--ir -o -
+--FILE--
+fn f(count: u8): bool {
+  return count > 10;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i1 @f(i8 %count) {
+entry:
+  %1 = icmp ugt i8 %count, 10
+  ret i1 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

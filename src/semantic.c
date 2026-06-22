@@ -251,8 +251,22 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_BINARY: {
-    exprty_t lhs = check_expr(sema, expr->binary.lhs, expected);
-    exprty_t rhs = check_expr(sema, expr->binary.rhs, expected);
+    bool lhs_lit = expr->binary.lhs->kind == EXPR_NUMBER;
+    bool rhs_lit = expr->binary.rhs->kind == EXPR_NUMBER;
+
+    exprty_t lhs, rhs;
+    if (rhs_lit && !lhs_lit) {
+      lhs = check_expr(sema, expr->binary.lhs, expected);
+      TypeKind hint = type_is_integer(lhs.kind) ? lhs.kind : expected;
+      rhs = check_expr(sema, expr->binary.rhs, hint);
+    } else if (lhs_lit && !rhs_lit) {
+      rhs = check_expr(sema, expr->binary.rhs, expected);
+      TypeKind hint = type_is_integer(rhs.kind) ? rhs.kind : expected;
+      lhs = check_expr(sema, expr->binary.lhs, hint);
+    } else {
+      lhs = check_expr(sema, expr->binary.lhs, expected);
+      rhs = check_expr(sema, expr->binary.rhs, expected);
+    }
 
     if (!lhs.ok || !rhs.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};

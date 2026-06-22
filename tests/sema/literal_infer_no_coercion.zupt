@@ -1,0 +1,14 @@
+--TEST--
+inference only applies to literals: two operands with distinct concrete types are still a mismatch
+--FILE--
+fn f(a: u8, b: i32): bool {
+  return a > b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '>' to u8 and i32 [2:10]
+--EXIT--
+1

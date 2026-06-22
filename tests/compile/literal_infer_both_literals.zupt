@@ -1,0 +1,9 @@
+--TEST--
+when both operands are literals there is no other operand to infer from: the context type still applies
+--FILE--
+pub fn main(): i32 {
+  let x: u8 = 1 + 2;
+  return x as i32;
+}
+--EXIT--
+3
