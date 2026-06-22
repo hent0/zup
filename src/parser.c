@@ -6,6 +6,14 @@
 #include "token.h"
 #include <stdlib.h>
 
+typedef struct {
+  token_t token;
+  char *name;
+  type_t type;
+  bool mutable;
+  expr_t *init;
+} binding_t;
+
 static void parse_error(parser_t *parser, const char *msg) {
   diag_error(parser->src, parser->current.line, parser->current.col,
              "%s (got %s)", msg, token_kind_to_str(parser->current.kind));
@@ -409,7 +417,7 @@ static stmt_t *parse_if(parser_t *parser) {
   return ast_if_init(token, cond, then_body, else_body, parser->arena);
 }
 
-static stmt_t *parse_binding(parser_t *parser) {
+static binding_t parse_binding(parser_t *parser) {
   bool mutable = check(parser, TOKEN_LET);
   token_t token = mutable ? expect(parser, TOKEN_LET, "expected 'let'")
                           : expect(parser, TOKEN_CONST, "expected 'const'");
@@ -428,8 +436,25 @@ static stmt_t *parse_binding(parser_t *parser) {
   }
 
   expect(parser, TOKEN_SEMICOLON, "expected ';' after binding");
+  return (binding_t){
+      .token = token,
+      .name = id.value,
+      .type = type,
+      .mutable = mutable,
+      .init = init,
+  };
+}
 
-  return ast_binding_init(token, id.value, type, mutable, init, parser->arena);
+static decl_t *parse_global_binding(parser_t *parser, Visibility visibility) {
+  binding_t binding = parse_binding(parser);
+  return ast_global_init(binding.token, visibility, binding.name, binding.type,
+                         binding.mutable, binding.init, parser->arena);
+}
+
+static stmt_t *parse_local_binding(parser_t *parser) {
+  binding_t binding = parse_binding(parser);
+  return ast_binding_init(binding.token, binding.name, binding.type,
+                          binding.mutable, binding.init, parser->arena);
 }
 
 static stmt_t *parse_while(parser_t *parser) {
@@ -461,7 +486,7 @@ static stmt_t *parse_stmt(parser_t *parser) {
   }
 
   if (check(parser, TOKEN_LET) || check(parser, TOKEN_CONST)) {
-    return parse_binding(parser);
+    return parse_local_binding(parser);
   }
 
   if (check(parser, TOKEN_WHILE)) {
@@ -581,11 +606,17 @@ static Visibility parse_visibility(parser_t *parser) {
 
 static decl_t *parse_decl(parser_t *parser) {
   Visibility visibility = parse_visibility(parser);
-  if (check(parser, TOKEN_FN)) {
+
+  switch (parser->current.kind) {
+  case TOKEN_FN:
     return parse_fn(parser, visibility);
+  case TOKEN_CONST:
+  case TOKEN_LET:
+    return parse_global_binding(parser, visibility);
+  default:
+    parse_error(parser, "expected a declaration");
+    return NULL;
   }
-  parse_error(parser, "expected 'fn'");
-  return NULL;
 }
 
 parser_t parser_init(lexer_t *lexer, source_t *src, arena_t *arena) {

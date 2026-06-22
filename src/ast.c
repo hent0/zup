@@ -366,6 +366,22 @@ decl_t *ast_container_init(char *name, arena_t *arena) {
   return container;
 }
 
+decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
+                        type_t type, bool mutable, expr_t *init,
+                        arena_t *arena) {
+  decl_t *global = arena_alloc(arena, sizeof(decl_t));
+  global->kind = DECL_GLOBAL;
+  global->visibility = visibility;
+  global->name = name;
+  global->line = token.line;
+  global->col = token.col;
+  global->next = NULL;
+  global->global.type = type;
+  global->global.mutable = mutable;
+  global->global.init = init;
+  return global;
+}
+
 unit_t *ast_unit_init(source_t *src, arena_t *arena) {
   unit_t *unit = arena_alloc(arena, sizeof(unit_t));
   unit->src = src;
@@ -534,6 +550,12 @@ static void dump_decl(const decl_t *decl, int depth) {
          member = member->next) {
       dump_decl(member, depth + 1);
     }
+    break;
+  case DECL_GLOBAL:
+    printf("GlobalDecl %s %s '%s': %s\n", visibility_to_str(decl->visibility),
+           decl->global.mutable ? "let" : "const", decl->name,
+           type_kind_to_str(decl->global.type.kind));
+    dump_expr(decl->global.init, depth + 1);
     break;
   }
 }

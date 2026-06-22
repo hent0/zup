@@ -1,0 +1,16 @@
+--TEST--
+a global initializer must be a compile-time constant
+--FILE--
+fn five(): i32 {
+  return 5;
+}
+
+const X: i32 = five();
+
+pub fn main(): i32 {
+  return X;
+}
+--EXPECTERR--
+zup: error: global initializer must be a constant [5:16]
+--EXIT--
+1

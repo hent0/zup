@@ -1,0 +1,17 @@
+--TEST--
+a mutable global retains its value across function calls
+--FILE--
+let counter: i32 = 0;
+
+fn bump(): i32 {
+  counter = counter + 1;
+  return counter;
+}
+
+pub fn main(): i32 {
+  bump();
+  bump();
+  return counter;
+}
+--EXIT--
+2

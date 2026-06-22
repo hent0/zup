@@ -1,0 +1,13 @@
+--TEST--
+two globals with the same name are a redeclaration error
+--FILE--
+const X: i32 = 1;
+const X: i32 = 2;
+
+pub fn main(): i32 {
+  return X;
+}
+--EXPECTERR--
+zup: error: redeclaration of 'X' [2:1]
+--EXIT--
+1

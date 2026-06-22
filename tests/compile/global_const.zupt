@@ -1,0 +1,10 @@
+--TEST--
+a pub const global can be read from a function
+--FILE--
+pub const ANSWER: i32 = 42;
+
+pub fn main(): i32 {
+  return ANSWER;
+}
+--EXIT--
+42

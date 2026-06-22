@@ -1,0 +1,35 @@
+--TEST--
+globals lower to LLVM globals: pub/priv -> linkage, const/let -> constant/global
+--ARGS--
+--ir -o -
+--FILE--
+pub const MAX: i32 = 100;
+let counter: i32 = 0;
+
+fn bump(): i32 {
+  counter = counter + 1;
+  return counter;
+}
+
+pub fn main(): i32 {
+  return MAX;
+}
+--EXPECT--
+declare i32 @printf(ptr, ...)
+
+@MAX = constant i32 100
+@counter = internal global i32 0
+define internal i32 @bump() {
+entry:
+  %1 = load i32, ptr @counter
+  %2 = add i32 %1, 1
+  store i32 %2, ptr @counter
+  %3 = load i32, ptr @counter
+  ret i32 %3
+}
+
+define i32 @main() {
+entry:
+  %1 = load i32, ptr @MAX
+  ret i32 %1
+}

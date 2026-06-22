@@ -9,8 +9,8 @@ pub fn main(): i32 {
 }
 --EXPECT--
 declare i32 @printf(ptr, ...)
-@.str.0 = private unnamed_addr constant [7 x i8] c"%d %d\0A\00"
 
+@.str.0 = private unnamed_addr constant [7 x i8] c"%d %d\0A\00"
 define i32 @main() {
 entry:
   %1 = call i32 @printf(ptr @.str.0, i32 7, i32 42)

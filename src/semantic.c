@@ -47,6 +47,7 @@ static const local_t *scope_lookup(const scope_t *scope, const char *name) {
 typedef struct {
   const symtab_t *tab;
   const source_t *src;
+  scope_t *globals;
   scope_t *scope;
   arena_t *arena;
   unsigned int loop_depth;
@@ -63,6 +64,14 @@ static bool is_integer(TypeKind k) {
 }
 
 static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
+
+static bool is_const_init(const expr_t *expr) {
+  if (expr == NULL) {
+    return false;
+  }
+
+  return expr->kind == EXPR_NUMBER || expr->kind == EXPR_BOOLEAN;
+}
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
 
@@ -82,6 +91,49 @@ static exprty_t check_printf_call(sema_t *sema, expr_t *call) {
   return (exprty_t){.kind = TYPE_I32, .ok = true};
 }
 // ============================================================
+
+static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
+  for (decl_t *member = root->container.members; member != NULL;
+       member = member->next) {
+    if (member->kind != DECL_GLOBAL) {
+      continue;
+    }
+
+    if (scope_lookup(globals, member->name) != NULL ||
+        symtab_lookup(sema->tab, member->name)) {
+      diag_error(sema->src, member->line, member->col, "redeclaration of '%s'",
+                 member->name);
+      sema->had_error = true;
+      continue;
+    }
+
+    if (!is_const_init(member->global.init)) {
+      const expr_t *expr = member->global.init;
+      diag_error(sema->src, expr ? expr->line : member->line,
+                 expr ? expr->col : member->col,
+                 "global initializer must be a constant");
+      sema->had_error = true;
+    } else {
+      exprty_t init =
+          check_expr(sema, member->global.init, member->global.type.kind);
+      if (member->global.type.kind == TYPE_UNKNOWN) {
+        member->global.type.kind = init.kind;
+      } else if (init.ok &&
+                 !type_assignable(member->global.type.kind, init.kind)) {
+        diag_error(sema->src, member->line, member->col,
+                   "cannot assign %s to '%s' of type %s",
+                   type_kind_to_str(init.kind), member->name,
+                   type_kind_to_str(member->global.type.kind));
+        sema->had_error = true;
+      }
+    }
+    globals->items[globals->count++] = (local_t){
+        .name = member->name,
+        .type = member->global.type,
+        .mutable = member->global.mutable,
+    };
+  }
+}
 
 static exprty_t check_call(sema_t *sema, expr_t *call) {
   expr_t *callee = call->call.callee;
@@ -192,6 +244,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   case EXPR_ID: {
     const local_t *local =
         sema->scope ? scope_lookup(sema->scope, expr->id.name) : NULL;
+
+    if (local == NULL && sema->globals != NULL) {
+      local = scope_lookup(sema->globals, expr->id.name);
+    }
+
     if (local == NULL) {
       diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
                  expr->id.name);
@@ -350,6 +407,11 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_ASSIGN: {
     const local_t *local =
         sema->scope ? scope_lookup(sema->scope, stmt->assign.name) : NULL;
+
+    if (local == NULL && sema->globals != NULL) {
+      local = scope_lookup(sema->globals, stmt->assign.name);
+    }
+
     if (local == NULL) {
       diag_error(sema->src, stmt->line, stmt->col, "undefined name '%s'",
                  stmt->assign.name);
@@ -587,12 +649,22 @@ int semantic_check(unit_t *unit, arena_t *arena) {
     had_error = true;
   }
 
+  scope_t globals = {
+      .items = arena_alloc(arena, sizeof(local_t) * (capacity ? capacity : 1)),
+      .count = 0,
+  };
+
   sema_t sema = {
       .tab = &tab,
       .src = unit->src,
+      .globals = &globals,
+      .scope = NULL,
       .arena = arena,
       .had_error = false,
   };
+
+  check_globals(&sema, root, &globals);
+
   for (size_t i = 0; i < tab.count; i++) {
     check_fn(&sema, tab.fns[i]);
   }

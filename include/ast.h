@@ -169,9 +169,7 @@ typedef enum {
 typedef enum {
   DECL_FN,
   DECL_CONTAINER,
-  // DECL_CONST,
-  // DECL_IMPORT,
-  // DECL_ENUM,
+  DECL_GLOBAL,
 } DeclKind;
 
 typedef struct decl decl_t;
@@ -194,6 +192,11 @@ struct decl {
       decl_t *members;
       size_t member_count;
     } container;
+    struct {
+      type_t type;
+      bool mutable;
+      expr_t *init;
+    } global;
   };
 };
 
@@ -237,6 +240,9 @@ stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);
+decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
+                        type_t type, bool mutable, expr_t *init,
+                        arena_t *arena);
 unit_t *ast_unit_init(source_t *src, arena_t *arena);
 
 int ast_dump(unit_t *unit);

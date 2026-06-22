@@ -1,0 +1,10 @@
+--TEST--
+a function can reference a global declared later in the file
+--FILE--
+pub fn main(): i32 {
+  return LIMIT;
+}
+
+const LIMIT: i32 = 7;
+--EXIT--
+7

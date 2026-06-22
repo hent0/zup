@@ -1,0 +1,22 @@
+--TEST--
+module-level const and let bindings parse into global declarations with visibility
+--ARGS--
+--ast
+--FILE--
+pub const MAX: i32 = 100;
+let counter: i32 = 0;
+
+pub fn main(): i32 {
+  return MAX;
+}
+--EXPECT--
+Container (file) (3 members)
+  GlobalDecl pub const 'MAX': i32
+    Number literal 100
+  GlobalDecl priv let 'counter': i32
+    Number literal 0
+  FnDecl pub 'main' -> i32
+    Return
+      Id MAX
+--EXIT--
+0

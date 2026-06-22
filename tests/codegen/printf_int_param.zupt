@@ -13,8 +13,8 @@ pub fn main(): i32 {
 }
 --EXPECT--
 declare i32 @printf(ptr, ...)
-@.str.0 = private unnamed_addr constant [4 x i8] c"%d\0A\00"
 
+@.str.0 = private unnamed_addr constant [4 x i8] c"%d\0A\00"
 define internal void @show(i32 %n) {
 entry:
   %1 = call i32 @printf(ptr @.str.0, i32 %n)

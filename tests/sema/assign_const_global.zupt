@@ -1,0 +1,13 @@
+--TEST--
+assigning to a const global is an error
+--FILE--
+pub const MAX: i32 = 100;
+
+pub fn main(): i32 {
+  MAX = 5;
+  return MAX;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'MAX' [4:3]
+--EXIT--
+1

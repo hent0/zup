@@ -22,6 +22,13 @@ struct ctx_str {
   ctx_str_t *next;
 };
 
+typedef struct ctx_global ctx_global_t;
+struct ctx_global {
+  const char *name;
+  type_t type;
+  ctx_global_t *next;
+};
+
 typedef struct ctx_local ctx_local_t;
 struct ctx_local {
   const char *name;
@@ -33,6 +40,8 @@ struct ctx_local {
 typedef struct {
   FILE *out;
   arena_t *arena;
+  ctx_global_t *globals;
+  ctx_global_t *globals_tail;
   ctx_str_t *strings;
   ctx_str_t *strings_tail;
   int strings_count;
@@ -66,6 +75,29 @@ static int string_index(ctx_t *ctx, expr_t *node) {
   }
 
   return -1;
+}
+
+static ctx_global_t *find_global(ctx_t *ctx, const char *name) {
+  for (ctx_global_t *global = ctx->globals; global != NULL;
+       global = global->next) {
+    if (strcmp(global->name, name) == 0) {
+      return global;
+    }
+  }
+  return NULL;
+}
+
+static void add_global(ctx_t *ctx, const char *name, type_t type) {
+  ctx_global_t *global = arena_alloc(ctx->arena, sizeof(ctx_global_t));
+  global->name = name;
+  global->type = type;
+  global->next = NULL;
+  if (ctx->globals_tail == NULL) {
+    ctx->globals = global;
+  } else {
+    ctx->globals_tail->next = global;
+  }
+  ctx->globals_tail = global;
 }
 
 static ctx_local_t *find_local(ctx_t *ctx, const char *name) {
@@ -217,13 +249,15 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
       }
     }
     return 0;
+  case DECL_GLOBAL:
+    add_global(ctx, decl->name, decl->global.type);
+    return 0;
   }
   return 0;
 }
 
 static int emit_std(ctx_t *ctx) {
   fprintf(ctx->out, "declare i32 @printf(ptr, ...)\n");
-  emit_string_globals(ctx);
   fprintf(ctx->out, "\n");
   return 0;
 }
@@ -266,18 +300,30 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   case EXPR_ID: {
     ctx_local_t *local = find_local(ctx, expr->id.name);
-    if (local == NULL) {
+    if (local != NULL) {
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+              type_kind_to_ir(local->type.kind), local->ptr);
       return (value_t){
-          .type = expr->type,
-          .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
+          .type = local->type,
+          .ref = arena_format(ctx->arena, "%%%u", reg),
       };
     }
-    unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
-            type_kind_to_ir(local->type.kind), local->ptr);
+
+    ctx_global_t *global = find_global(ctx, expr->id.name);
+    if (global != NULL) {
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = load %s, ptr @%s\n", reg,
+              type_kind_to_ir(global->type.kind), global->name);
+      return (value_t){
+          .type = global->type,
+          .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+
     return (value_t){
-        .type = local->type,
-        .ref = arena_format(ctx->arena, "%%%u", reg),
+        .type = expr->type,
+        .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
     };
   }
   case EXPR_CALL:
@@ -537,13 +583,20 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     }
     case STMT_ASSIGN: {
       ctx_local_t *local = find_local(ctx, stmt->assign.name);
-      if (local == NULL) {
-        NOT_IMPLEMENTED; // assigning to a parameter has no slot
+      if (local != NULL) {
+        value_t value = emit_value(ctx, stmt->assign.value);
+        fprintf(ctx->out, "  store %s %s, ptr %s\n",
+                type_kind_to_ir(local->type.kind), value.ref, local->ptr);
         break;
       }
-      value_t value = emit_value(ctx, stmt->assign.value);
-      fprintf(ctx->out, "  store %s %s, ptr %s\n",
-              type_kind_to_ir(local->type.kind), value.ref, local->ptr);
+
+      ctx_global_t *global = find_global(ctx, stmt->assign.name);
+      if (global != NULL) {
+        value_t value = emit_value(ctx, stmt->assign.value);
+        fprintf(ctx->out, "  store %s %s, ptr @%s\n",
+                type_kind_to_ir(global->type.kind), value.ref, global->name);
+        break;
+      }
       break;
     }
     case STMT_WHILE: {
@@ -697,7 +750,7 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
   }
 
   switch (decl->kind) {
-  case DECL_CONTAINER:
+  case DECL_CONTAINER: {
     for (decl_t *member = decl->container.members; member != NULL;
          member = member->next) {
       if (emit_decl(ctx, member) != 0) {
@@ -705,7 +758,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
       }
     }
     return 0;
-  case DECL_FN:
+  }
+  case DECL_FN: {
     ctx->reg = CTX_REG_START;
     ctx->label = CTX_LABEL_START;
     ctx->loop_label = 0;
@@ -746,6 +800,15 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     fprintf(ctx->out, "}\n\n");
     return 0;
   }
+  case DECL_GLOBAL: {
+    value_t value = emit_value(ctx, decl->global.init);
+    fprintf(ctx->out, "@%s = %s%s %s %s\n", decl->name,
+            decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
+            decl->global.mutable ? "global" : "constant",
+            type_kind_to_ir(decl->global.type.kind), value.ref);
+    return 0;
+  }
+  }
   return 0;
 }
 
@@ -771,6 +834,8 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
   if (emit_std(&ctx) != 0) {
     return 1;
   }
+
+  emit_string_globals(&ctx);
 
   for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {
     if (emit_decl(&ctx, decl) != 0) {

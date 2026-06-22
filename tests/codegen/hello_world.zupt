@@ -10,9 +10,9 @@ pub fn main(): i32 {
 }
 --EXPECT--
 declare i32 @printf(ptr, ...)
+
 @.str.0 = private unnamed_addr constant [12 x i8] c"Hello, %s!\0A\00"
 @.str.1 = private unnamed_addr constant [6 x i8] c"world\00"
-
 define internal void @test() {
 entry:
   ret void
