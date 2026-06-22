@@ -1,0 +1,23 @@
+--TEST--
+widening an unsigned value zero-extends (zext), not sign-extends
+--ARGS--
+--ir -o -
+--FILE--
+fn widen(x: u8): u64 {
+  return x as u64;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i64 @widen(i8 %x) {
+entry:
+  %1 = zext i8 %x to i64
+  ret i64 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

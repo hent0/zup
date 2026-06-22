@@ -1,0 +1,10 @@
+--TEST--
+right shift on an unsigned value shifts in zeros at runtime (200 >> 2 == 50, not the arithmetic 242)
+--FILE--
+pub fn main(): i32 {
+  let x: u8 = 200;
+  let r: u8 = x >> 2;
+  return r as i32;
+}
+--EXIT--
+50

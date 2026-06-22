@@ -1,0 +1,15 @@
+--TEST--
+the u16/u32/u64 maximum literals fit (each exceeds its signed counterpart's range)
+--FILE--
+pub fn main(): i32 {
+  let a: u16 = 65535;
+  let b: u32 = 4294967295;
+  let c: u64 = 18446744073709551615;
+  let i64_max: u64 = 9223372036854775807;
+  if c > i64_max {
+    return 1;
+  }
+  return 0;
+}
+--EXIT--
+1

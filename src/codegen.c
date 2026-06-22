@@ -261,12 +261,16 @@ static value_t emit_call(ctx_t *ctx, expr_t *call);
 static unsigned type_bits(TypeKind kind) {
   switch (kind) {
   case TYPE_I8:
+  case TYPE_U8:
     return 8;
   case TYPE_I16:
+  case TYPE_U16:
     return 16;
   case TYPE_I32:
+  case TYPE_U32:
     return 32;
   case TYPE_I64:
+  case TYPE_U64:
     return 64;
   default:
     return 0;
@@ -331,7 +335,9 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
       return (value_t){.type = expr->cast.target, .ref = operand.ref};
     }
 
-    const char *op = type_bits(to) < type_bits(from) ? "trunc" : "sext";
+    const char *op = type_bits(to) < type_bits(from) ? "trunc"
+                     : type_is_signed_integer(from)  ? "sext"
+                                                     : "zext";
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
             type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
@@ -348,9 +354,10 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     value_t right = emit_value(ctx, expr->binary.rhs);
 
     unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = %s %s %s, %s\n", reg,
-            binop_to_ir(expr->binary.op), type_kind_to_ir(left.type.kind),
-            left.ref, right.ref);
+    fprintf(
+        ctx->out, "  %%%u = %s %s %s, %s\n", reg,
+        binop_to_ir(expr->binary.op, type_is_signed_integer(left.type.kind)),
+        type_kind_to_ir(left.type.kind), left.ref, right.ref);
     return (value_t){
         .type = expr->type,
         .ref = arena_format(ctx->arena, "%%%u", reg),
@@ -386,7 +393,8 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
 static value_t emit_logical(ctx_t *ctx, expr_t *expr) {
   unsigned int id = ctx->label++;
   unsigned int slot = ctx->reg++;
-  const char *kw = binop_to_ir(expr->binary.op);
+  const char *kw = binop_to_ir(
+      expr->binary.op, type_is_signed_integer(expr->binary.lhs->type.kind));
 
   fprintf(ctx->out, "  %%%u = alloca i1\n", slot);
 

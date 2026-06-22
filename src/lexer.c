@@ -23,9 +23,13 @@ const keyword_t keywords[] = {
     {"extern", TOKEN_EXTERN},
     // Types
     {"i8", TOKEN_I8},
+    {"u8", TOKEN_U8},
     {"i16", TOKEN_I16},
+    {"u16", TOKEN_U16},
     {"i32", TOKEN_I32},
+    {"u32", TOKEN_U32},
     {"i64", TOKEN_I64},
+    {"u64", TOKEN_U64},
     {"void", TOKEN_VOID},
     {"bool", TOKEN_BOOL},
     {"true", TOKEN_TRUE},

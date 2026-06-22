@@ -1,0 +1,10 @@
+--TEST--
+unsigned division is computed unsigned at runtime (200 / 3 == 66, not the signed interpretation)
+--FILE--
+pub fn main(): i32 {
+  let x: u8 = 200;
+  let q: u8 = x / 3;
+  return q as i32;
+}
+--EXIT--
+66

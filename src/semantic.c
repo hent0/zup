@@ -59,10 +59,6 @@ typedef struct {
   bool ok;
 } exprty_t;
 
-static bool is_integer(TypeKind k) {
-  return k == TYPE_I8 || k == TYPE_I16 || k == TYPE_I32 || k == TYPE_I64;
-}
-
 static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
 
 static bool is_const_init(const expr_t *expr) {
@@ -169,12 +165,20 @@ static unsigned long long type_int_max(TypeKind k) {
   switch (k) {
   case TYPE_I8:
     return 127ULL;
+  case TYPE_U8:
+    return 255ULL;
   case TYPE_I16:
     return 32767ULL;
+  case TYPE_U16:
+    return 65535ULL;
   case TYPE_I32:
     return 2147483647ULL;
+  case TYPE_U32:
+    return 4294967295ULL;
   case TYPE_I64:
     return 9223372036854775807ULL;
+  case TYPE_U64:
+    return 18446744073709551615ULL;
   default:
     return 0;
   }
@@ -200,7 +204,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     break;
   case EXPR_NUMBER: {
-    TypeKind type = is_integer(expected) ? expected : TYPE_I32;
+    TypeKind type = type_is_integer(expected) ? expected : TYPE_I32;
     if (check_literal_fit(sema, expr, type)) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
@@ -217,7 +221,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   case EXPR_CAST: {
     exprty_t operand = check_expr(sema, expr->cast.operand, TYPE_UNKNOWN);
     TypeKind target = expr->cast.target.kind;
-    if (operand.ok && (!is_integer(operand.kind) || !is_integer(target))) {
+    if (operand.ok &&
+        (!type_is_integer(operand.kind) || !type_is_integer(target))) {
       diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
                  type_kind_to_str(operand.kind), type_kind_to_str(target));
       sema->had_error = true;
@@ -265,7 +270,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       } else {
         result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
       }
-    } else if (!is_integer(lhs.kind) || lhs.kind != rhs.kind) {
+    } else if (!type_is_integer(lhs.kind) || lhs.kind != rhs.kind) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot apply '%s' to %s and %s",
                  binop_to_str(expr->binary.op), type_kind_to_str(lhs.kind),
@@ -286,7 +291,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     TypeKind operand_expected = is_not ? TYPE_BOOL : expected;
     exprty_t operand = check_expr(sema, expr->unary.operand, operand_expected);
 
-    bool valid = is_not ? operand.kind == TYPE_BOOL : is_integer(operand.kind);
+    bool valid = is_not ? operand.kind == TYPE_BOOL
+                        : type_is_signed_integer(operand.kind);
     if (!operand.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else if (!valid) {
@@ -445,13 +451,13 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     exprty_t end = check_expr(sema, stmt->for_loop.end, TYPE_UNKNOWN);
 
     TypeKind var_type = TYPE_I32;
-    if (start.ok && !is_integer(start.kind)) {
+    if (start.ok && !type_is_integer(start.kind)) {
       diag_error(sema->src, stmt->for_loop.start->line,
                  stmt->for_loop.start->col,
                  "range bound must be an integer, got %s",
                  type_kind_to_str(start.kind));
       sema->had_error = true;
-    } else if (end.ok && !is_integer(end.kind)) {
+    } else if (end.ok && !type_is_integer(end.kind)) {
       diag_error(sema->src, stmt->for_loop.end->line, stmt->for_loop.end->col,
                  "range bound must be an integer, got %s",
                  type_kind_to_str(end.kind));

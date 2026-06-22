@@ -1,0 +1,30 @@
+--TEST--
+the unsigned integer width keywords each tokenize to their own token
+--ARGS--
+--tokenize
+--FILE--
+fn f(a: u8, b: u16, c: u32, d: u64): u32 {}
+--EXPECT--
+TOKEN_FN [1:1]
+TOKEN_ID('f') [1:4]
+TOKEN_LPAREN [1:5]
+TOKEN_ID('a') [1:6]
+TOKEN_COLON [1:7]
+TOKEN_U8 [1:9]
+TOKEN_COMMA [1:11]
+TOKEN_ID('b') [1:13]
+TOKEN_COLON [1:14]
+TOKEN_U16 [1:16]
+TOKEN_COMMA [1:19]
+TOKEN_ID('c') [1:21]
+TOKEN_COLON [1:22]
+TOKEN_U32 [1:24]
+TOKEN_COMMA [1:27]
+TOKEN_ID('d') [1:29]
+TOKEN_COLON [1:30]
+TOKEN_U64 [1:32]
+TOKEN_RPAREN [1:35]
+TOKEN_COLON [1:36]
+TOKEN_U32 [1:38]
+TOKEN_LBRACE [1:42]
+TOKEN_RBRACE [1:43]

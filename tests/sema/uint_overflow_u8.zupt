@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in u8 is rejected (u8 max is 255)
+--FILE--
+fn bad(): u8 {
+  return 256;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 256 out of range for u8 [2:10]
+--EXIT--
+1

@@ -1,0 +1,9 @@
+--TEST--
+the u8 boundary literal 255 fits (it would overflow i8's max of 127) and survives a widening cast
+--FILE--
+pub fn main(): i32 {
+  let x: u8 = 255;
+  return x as i32;
+}
+--EXIT--
+255

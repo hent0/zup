@@ -1,0 +1,26 @@
+--TEST--
+unsigned width types parse and dump under their own names (u8/u16/u32/u64)
+--ARGS--
+--ast
+--FILE--
+fn widths(a: u8, b: u16, c: u32, d: u64): u32 {
+  return c;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'widths' -> u32
+    param a: u8
+    param b: u16
+    param c: u32
+    param d: u64
+    Return
+      Id c
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

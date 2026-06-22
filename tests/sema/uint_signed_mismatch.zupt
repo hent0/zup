@@ -1,0 +1,14 @@
+--TEST--
+signed and unsigned are distinct types; mixing them in arithmetic is an error (no implicit conversion)
+--FILE--
+fn f(a: u32, b: i32): u32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '+' to u32 and i32 [2:10]
+--EXIT--
+1

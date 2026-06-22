@@ -11,9 +11,13 @@ typedef enum {
   TYPE_VOID,
   TYPE_BOOL,
   TYPE_I8,
+  TYPE_U8,
   TYPE_I16,
+  TYPE_U16,
   TYPE_I32,
+  TYPE_U32,
   TYPE_I64,
+  TYPE_U64,
   TYPE_STRING,
 } TypeKind;
 
@@ -209,8 +213,10 @@ typedef struct {
 
 char *type_kind_to_ir(TypeKind kind);
 char *type_kind_to_str(TypeKind kind);
+bool type_is_integer(TypeKind kind);
+bool type_is_signed_integer(TypeKind kind);
 
-char *binop_to_ir(BinaryOp op);
+char *binop_to_ir(BinaryOp op, bool is_signed);
 char *binop_to_str(BinaryOp op);
 bool binop_is_comparison(BinaryOp op);
 bool binop_is_logical(BinaryOp op);

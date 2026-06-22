@@ -57,15 +57,27 @@ static type_t parse_type(parser_t *parser) {
   case TOKEN_I8:
     advance(parser);
     return (type_t){.kind = TYPE_I8};
+  case TOKEN_U8:
+    advance(parser);
+    return (type_t){.kind = TYPE_U8};
   case TOKEN_I16:
     advance(parser);
     return (type_t){.kind = TYPE_I16};
+  case TOKEN_U16:
+    advance(parser);
+    return (type_t){.kind = TYPE_U16};
   case TOKEN_I32:
     advance(parser);
     return (type_t){.kind = TYPE_I32};
+  case TOKEN_U32:
+    advance(parser);
+    return (type_t){.kind = TYPE_U32};
   case TOKEN_I64:
     advance(parser);
     return (type_t){.kind = TYPE_I64};
+  case TOKEN_U64:
+    advance(parser);
+    return (type_t){.kind = TYPE_U64};
   case TOKEN_CSTR:
     advance(parser);
     return (type_t){.kind = TYPE_STRING};

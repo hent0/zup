@@ -1,0 +1,14 @@
+--TEST--
+an integer literal that does not fit in u32 is rejected (u32 max is 4294967295)
+--FILE--
+fn bad(): u32 {
+  return 4294967296;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: integer literal 4294967296 out of range for u32 [2:10]
+--EXIT--
+1

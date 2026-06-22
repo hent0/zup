@@ -1,0 +1,23 @@
+--TEST--
+add/sub/mul and bitwise ops are sign-agnostic: unsigned addition still lowers to plain add
+--ARGS--
+--ir -o -
+--FILE--
+fn f(a: u32, b: u32): u32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i32 @f(i32 %a, i32 %b) {
+entry:
+  %1 = add i32 %a, %b
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

@@ -11,12 +11,16 @@ char *type_kind_to_ir(TypeKind kind) {
   case TYPE_BOOL:
     return "i1";
   case TYPE_I8:
+  case TYPE_U8:
     return "i8";
   case TYPE_I16:
+  case TYPE_U16:
     return "i16";
   case TYPE_I32:
+  case TYPE_U32:
     return "i32";
   case TYPE_I64:
+  case TYPE_U64:
     return "i64";
   case TYPE_STRING:
     return "ptr";
@@ -33,12 +37,20 @@ char *type_kind_to_str(TypeKind kind) {
     return "bool";
   case TYPE_I8:
     return "i8";
+  case TYPE_U8:
+    return "u8";
   case TYPE_I16:
     return "i16";
+  case TYPE_U16:
+    return "u16";
   case TYPE_I32:
     return "i32";
+  case TYPE_U32:
+    return "u32";
   case TYPE_I64:
     return "i64";
+  case TYPE_U64:
+    return "u64";
   case TYPE_STRING:
     return "cstr";
   default:
@@ -46,7 +58,35 @@ char *type_kind_to_str(TypeKind kind) {
   }
 }
 
-char *binop_to_ir(BinaryOp op) {
+bool type_is_integer(TypeKind kind) {
+  switch (kind) {
+  case TYPE_I8:
+  case TYPE_U8:
+  case TYPE_I16:
+  case TYPE_U16:
+  case TYPE_I32:
+  case TYPE_U32:
+  case TYPE_I64:
+  case TYPE_U64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool type_is_signed_integer(TypeKind kind) {
+  switch (kind) {
+  case TYPE_I8:
+  case TYPE_I16:
+  case TYPE_I32:
+  case TYPE_I64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+char *binop_to_ir(BinaryOp op, bool is_signed) {
   switch (op) {
   case BINOP_ADD:
     return "add";
@@ -55,21 +95,21 @@ char *binop_to_ir(BinaryOp op) {
   case BINOP_MUL:
     return "mul";
   case BINOP_DIV:
-    return "sdiv";
+    return is_signed ? "sdiv" : "udiv";
   case BINOP_REM:
-    return "srem";
+    return is_signed ? "srem" : "urem";
   case BINOP_EQ:
     return "icmp eq";
   case BINOP_NE:
     return "icmp ne";
   case BINOP_LT:
-    return "icmp slt";
+    return is_signed ? "icmp slt" : "icmp ult";
   case BINOP_LE:
-    return "icmp sle";
+    return is_signed ? "icmp sle" : "icmp ule";
   case BINOP_GT:
-    return "icmp sgt";
+    return is_signed ? "icmp sgt" : "icmp ugt";
   case BINOP_GE:
-    return "icmp sge";
+    return is_signed ? "icmp sge" : "icmp uge";
   case BINOP_AND:
     return "and";
   case BINOP_OR:
@@ -83,7 +123,7 @@ char *binop_to_ir(BinaryOp op) {
   case BINOP_SHL:
     return "shl";
   case BINOP_SHR:
-    return "ashr";
+    return is_signed ? "ashr" : "lshr";
   }
   return "?";
 }

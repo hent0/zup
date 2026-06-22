@@ -1,0 +1,22 @@
+--TEST--
+a same-width signed-to-unsigned cast is a no-op reinterpret (no conversion instruction)
+--ARGS--
+--ir -o -
+--FILE--
+fn reinterpret(x: i32): u32 {
+  return x as u32;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i32 @reinterpret(i32 %x) {
+entry:
+  ret i32 %x
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

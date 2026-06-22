@@ -54,9 +54,13 @@ typedef enum {
   // Types
   TOKEN_VOID,
   TOKEN_I8,
+  TOKEN_U8,
   TOKEN_I16,
+  TOKEN_U16,
   TOKEN_I32,
+  TOKEN_U32,
   TOKEN_I64,
+  TOKEN_U64,
   TOKEN_STRING,
   TOKEN_BOOL,
   TOKEN_TRUE,

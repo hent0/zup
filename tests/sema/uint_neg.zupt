@@ -1,0 +1,14 @@
+--TEST--
+unary minus requires a signed integer; negating an unsigned value is an error
+--FILE--
+fn f(a: u32): u32 {
+  return -a;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '-' to u32 [2:11]
+--EXIT--
+1
