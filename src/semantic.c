@@ -246,6 +246,71 @@ static bool number_is_float(const char *s) {
   return strpbrk(s, ".eE") != NULL;
 }
 
+static decl_t *struct_method(const decl_t *strukt, const char *name) {
+  for (decl_t *m = strukt->strct.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_FN && strcmp(m->name, name) == 0) {
+      return m;
+    }
+  }
+  return NULL;
+}
+
+static exprty_t check_method_call(sema_t *sema, expr_t *call) {
+  expr_t *field = call->call.callee;
+  exprty_t recv = check_expr(sema, field->field.base, TYPE_UNKNOWN);
+  if (!recv.ok) {
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+  if (recv.kind != TYPE_STRUCT) {
+    diag_error(sema->src, field->line, field->col,
+               "cannot call method '%s' on non-struct type %s",
+               field->field.name,
+               type_to_str((type_t){.kind = recv.kind, .name = recv.name}));
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+
+  decl_t *strukt = typetab_lookup(sema->types, recv.name);
+  decl_t *method = strukt ? struct_method(strukt, field->field.name) : NULL;
+  if (method == NULL) {
+    diag_error(sema->src, field->line, field->col,
+               "struct '%s' has no method '%s'", recv.name, field->field.name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+
+  param_t *param = method->fn.params;
+  bool has_self = param != NULL && param->is_self;
+  if (has_self) {
+    param = param->next;
+  }
+  size_t expected = method->fn.params_count - (has_self ? 1 : 0);
+  if (call->call.arg_count != expected) {
+    diag_error(sema->src, call->line, call->col,
+               "'%s' expects %zu argument%s but got %zu", field->field.name,
+               expected, expected == 1 ? "" : "s", call->call.arg_count);
+    sema->had_error = true;
+  }
+
+  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
+    exprty_t at = check_expr(sema, arg, param ? param->type.kind : TYPE_UNKNOWN);
+    if (param != NULL) {
+      if (at.ok && !assignable(param->type, at)) {
+        diag_error(sema->src, call->line, call->col,
+                   "cannot pass %s as argument '%s' of '%s' (expected %s)",
+                   type_to_str((type_t){.kind = at.kind, .name = at.name}),
+                   param->name, field->field.name, type_to_str(param->type));
+        sema->had_error = true;
+      }
+      param = param->next;
+    }
+  }
+
+  return (exprty_t){.kind = method->fn.return_type.kind,
+                    .name = method->fn.return_type.name,
+                    .ok = true};
+}
+
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
   exprty_t result;
   switch (expr->kind) {
@@ -270,7 +335,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     result = (exprty_t){.kind = TYPE_STRING, .ok = true};
     break;
   case EXPR_CALL:
-    result = check_call(sema, expr);
+    result = expr->call.callee->kind == EXPR_FIELD ? check_method_call(sema, expr)
+                                                   : check_call(sema, expr);
     break;
   case EXPR_CAST: {
     exprty_t operand = check_expr(sema, expr->cast.operand, TYPE_UNKNOWN);
@@ -723,6 +789,8 @@ static bool check_type(sema_t *sema, type_t type) {
   return true;
 }
 
+static void check_fn(sema_t *sema, const decl_t *fn);
+
 static void check_struct(sema_t *sema, const decl_t *strukt) {
   for (field_t *field = strukt->strct.fields; field != NULL;
        field = field->next) {
@@ -736,6 +804,10 @@ static void check_struct(sema_t *sema, const decl_t *strukt) {
         break;
       }
     }
+  }
+  for (decl_t *member = strukt->strct.members; member != NULL;
+       member = member->next) {
+    check_fn(sema, member);
   }
 }
 

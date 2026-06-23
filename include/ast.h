@@ -188,6 +188,7 @@ struct param {
   char *name;
   type_t type;
   bool mutable;
+  bool is_self;
   param_t *next;
 };
 
@@ -242,6 +243,8 @@ struct decl {
     struct {
       field_t *fields;
       size_t field_count;
+      decl_t *members;
+      size_t member_count;
     } strct;
   };
 };

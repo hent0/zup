@@ -1,0 +1,43 @@
+--TEST--
+a method declares inside the struct body with a bare self receiver; p.m() is a method call
+--ARGS--
+--ast
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+
+  fn sum(self): i32 {
+    return self.x + self.y;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 3, y: 4 };
+  return p.sum();
+}
+--EXPECT--
+Container (file) (2 members)
+  Struct priv 'Point'
+    field x: i32
+    field y: i32
+    FnDecl priv 'sum' -> i32
+      param self: Point
+      Return
+        Binary +
+          Field x
+            Id self
+          Field y
+            Id self
+  FnDecl pub 'main' -> i32
+    Let p: Point
+      StructLit 'Point'
+        field x
+          Number literal 3
+        field y
+          Number literal 4
+    Return
+      MethodCall 'sum' (0 args)
+        Id p
+--EXIT--
+0

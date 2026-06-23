@@ -1,0 +1,18 @@
+--TEST--
+a method takes ordinary arguments after the receiver
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+
+  fn add(self, n: i32): i32 {
+    return self.x + n;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 5, y: 0 };
+  return p.add(10);
+}
+--EXIT--
+15

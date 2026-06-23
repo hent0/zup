@@ -298,6 +298,14 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     s->decl = decl;
     s->next = ctx->structs;
     ctx->structs = s;
+    for (decl_t *member = decl->strct.members; member != NULL;
+         member = member->next) {
+      for (stmt_t *stmt = member->fn.body; stmt != NULL; stmt = stmt->next) {
+        if (collect_stmt(ctx, stmt) != 0) {
+          return 1;
+        }
+      }
+    }
     return 0;
   }
   }
@@ -535,7 +543,17 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr) {
 }
 
 static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
-  const char *name = call->call.callee->id.name;
+  bool is_method = call->call.callee->kind == EXPR_FIELD;
+  const char *name;
+  const char *self = NULL;
+  if (is_method) {
+    expr_t *recv = call->call.callee->field.base;
+    name = arena_format(ctx->arena, "%s.%s", recv->type.name,
+                        call->call.callee->field.name);
+    self = emit_addr(ctx, recv);
+  } else {
+    name = call->call.callee->id.name;
+  }
   bool ret_struct = call->type.kind == TYPE_STRUCT;
 
   size_t n = call->call.arg_count;
@@ -574,6 +592,10 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   const char *sep = "";
   if (ret_struct) {
     fprintf(ctx->out, "ptr sret(%s) %s", ir_type(ctx, call->type), dest);
+    sep = ", ";
+  }
+  if (is_method) {
+    fprintf(ctx->out, "%sptr %s", sep, self);
     sep = ", ";
   }
   for (i = 0; i < n; i++) {
@@ -947,7 +969,7 @@ static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
   return 0;
 }
 
-static int emit_fn(ctx_t *ctx, decl_t *decl) {
+static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->reg = CTX_REG_START;
   ctx->label = CTX_LABEL_START;
   ctx->loop_label = 0;
@@ -956,7 +978,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl) {
   bool sret = decl->fn.return_type.kind == TYPE_STRUCT;
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-          sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);
+          sret ? "void" : ir_type(ctx, decl->fn.return_type), name);
 
   const char *sep = "";
   if (sret) {
@@ -965,7 +987,9 @@ static int emit_fn(ctx_t *ctx, decl_t *decl) {
   }
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    if (param->type.kind == TYPE_STRUCT) {
+    if (param->is_self) {
+      fprintf(ctx->out, "%sptr %%%s", sep, param->name);
+    } else if (param->type.kind == TYPE_STRUCT) {
       fprintf(ctx->out, "%sptr byval(%s) %%%s", sep, ir_type(ctx, param->type),
               param->name);
     } else {
@@ -1023,7 +1047,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_FN: {
-    return decl->fn.is_extern ? emit_extern_fn(ctx, decl) : emit_fn(ctx, decl);
+    return decl->fn.is_extern ? emit_extern_fn(ctx, decl)
+                              : emit_fn(ctx, decl, decl->name);
   }
   case DECL_STRUCT: {
     fprintf(ctx->out, "%%%s = type {", decl->name);
@@ -1034,6 +1059,14 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
       first = false;
     }
     fprintf(ctx->out, first ? "}\n" : " }\n");
+    for (decl_t *member = decl->strct.members; member != NULL;
+         member = member->next) {
+      if (emit_fn(ctx, member,
+                  arena_format(ctx->arena, "%s.%s", decl->name, member->name)) !=
+          0) {
+        return 1;
+      }
+    }
     return 0;
   }
   case DECL_GLOBAL: {

@@ -452,6 +452,7 @@ param_t *ast_param_init(arena_t *arena) {
   param->name = NULL;
   param->type = (type_t){.kind = TYPE_UNKNOWN};
   param->mutable = true;
+  param->is_self = false;
   param->next = NULL;
   return param;
 }
@@ -504,6 +505,8 @@ decl_t *ast_struct_init(char *name, arena_t *arena) {
   decl->next = NULL;
   decl->strct.fields = NULL;
   decl->strct.field_count = 0;
+  decl->strct.members = NULL;
+  decl->strct.member_count = 0;
   return decl;
 }
 
@@ -571,8 +574,14 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Id %s\n", expr->id.name);
     break;
   case EXPR_CALL:
-    printf("Call '%s' (%zu args)\n", expr->call.callee->id.name,
-           expr->call.arg_count);
+    if (expr->call.callee->kind == EXPR_FIELD) {
+      printf("MethodCall '%s' (%zu args)\n", expr->call.callee->field.name,
+             expr->call.arg_count);
+      dump_expr(expr->call.callee->field.base, depth + 1);
+    } else {
+      printf("Call '%s' (%zu args)\n", expr->call.callee->id.name,
+             expr->call.arg_count);
+    }
     for (const expr_t *arg = expr->call.args; arg != NULL; arg = arg->next) {
       dump_expr(arg, depth + 1);
     }
@@ -724,6 +733,10 @@ static void dump_decl(const decl_t *decl, int depth) {
          field = field->next) {
       print_indent(depth + 1);
       printf("field %s: %s\n", field->name, type_to_str(field->type));
+    }
+    for (const decl_t *member = decl->strct.members; member != NULL;
+         member = member->next) {
+      dump_decl(member, depth + 1);
     }
     break;
   case DECL_GLOBAL:

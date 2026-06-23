@@ -1,0 +1,19 @@
+--TEST--
+calling a method the struct does not declare is an error, reported at the method name
+--FILE--
+struct Point {
+  x: i32,
+
+  fn get(self): i32 {
+    return self.x;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 1 };
+  return p.nope();
+}
+--EXPECTERR--
+zup: error: struct 'Point' has no method 'nope' [11:12]
+--EXIT--
+1

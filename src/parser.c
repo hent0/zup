@@ -5,6 +5,7 @@
 #include "lexer.h"
 #include "token.h"
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
   token_t token;
@@ -226,10 +227,16 @@ static expr_t *parse_postfix(parser_t *parser) {
   if (expr == NULL) {
     return NULL;
   }
-  while (check(parser, TOKEN_DOT)) {
-    advance(parser);
-    token_t name = expect(parser, TOKEN_ID, "expected field name after '.'");
-    expr = ast_field_access_init(expr, name, parser->arena);
+  for (;;) {
+    if (check(parser, TOKEN_DOT)) {
+      advance(parser);
+      token_t name = expect(parser, TOKEN_ID, "expected field name after '.'");
+      expr = ast_field_access_init(expr, name, parser->arena);
+    } else if (check(parser, TOKEN_LPAREN) && expr->kind == EXPR_FIELD) {
+      expr = parse_call_args(parser, expr);
+    } else {
+      break;
+    }
   }
   return expr;
 }
@@ -746,6 +753,57 @@ static decl_t *parse_extern(parser_t *parser) {
   return fn;
 }
 
+static decl_t *parse_method(parser_t *parser, char *struct_name) {
+  token_t kw = expect(parser, TOKEN_FN, "expected 'fn'");
+  token_t name = expect(parser, TOKEN_ID, "expected method name");
+
+  decl_t *fn = ast_fn_init(parser->arena);
+  fn->visibility = VISIBILITY_PRIVATE;
+  fn->name = name.value;
+  fn->line = kw.line;
+  fn->col = kw.col;
+
+  expect(parser, TOKEN_LPAREN, "expected '(' after method name");
+
+  param_t *tail = NULL;
+  if (check(parser, TOKEN_ID) && strcmp(parser->current.value, "self") == 0) {
+    token_t s = advance(parser);
+    param_t *self = ast_param_init(parser->arena);
+    self->name = s.value;
+    self->type = (type_t){
+        .kind = TYPE_STRUCT, .name = struct_name, .line = s.line, .col = s.col};
+    self->is_self = true;
+    fn->fn.params = self;
+    tail = self;
+    fn->fn.params_count++;
+    if (!check(parser, TOKEN_RPAREN)) {
+      expect(parser, TOKEN_COMMA, "expected ',' after self");
+    }
+  }
+
+  while (!check(parser, TOKEN_RPAREN)) {
+    param_t *p = parse_param(parser);
+    if (p == NULL) {
+      break;
+    }
+    if (tail == NULL) {
+      fn->fn.params = p;
+    } else {
+      tail->next = p;
+    }
+    tail = p;
+    fn->fn.params_count++;
+    if (!match(parser, TOKEN_COMMA)) {
+      break;
+    }
+  }
+  expect(parser, TOKEN_RPAREN, "expected ')' after parameters");
+
+  fn->fn.return_type = parse_return_type(parser);
+  fn->fn.body = parse_block(parser);
+  return fn;
+}
+
 static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
   token_t kw = expect(parser, TOKEN_STRUCT, "expected 'struct'");
   token_t name = expect(parser, TOKEN_ID, "expected struct name");
@@ -757,30 +815,42 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
 
   expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
 
-  field_t *tail = NULL;
-  if (!check(parser, TOKEN_RBRACE)) {
-    do {
-      if (check(parser, TOKEN_RBRACE)) {
-        break; // trailing comma
+  field_t *f_tail = NULL;
+  decl_t *m_tail = NULL;
+  while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    if (check(parser, TOKEN_FN)) {
+      decl_t *method = parse_method(parser, decl->name);
+      if (method == NULL) {
+        break;
       }
-      token_t name = expect(parser, TOKEN_ID, "expected field name");
-      expect(parser, TOKEN_COLON, "expected ':' after field name");
-      type_t type = parse_type(parser);
-
-      field_t *field = ast_field_init(parser->arena);
-      field->name = name.value;
-      field->type = type;
-      field->line = name.line;
-      field->col = name.col;
-
-      if (tail == NULL) {
-        decl->strct.fields = field;
+      if (m_tail == NULL) {
+        decl->strct.members = method;
       } else {
-        tail->next = field;
+        m_tail->next = method;
       }
-      tail = field;
-      decl->strct.field_count++;
-    } while (match(parser, TOKEN_COMMA));
+      m_tail = method;
+      decl->strct.member_count++;
+      continue;
+    }
+
+    token_t fname = expect(parser, TOKEN_ID, "expected field name");
+    expect(parser, TOKEN_COLON, "expected ':' after field name");
+    type_t ftype = parse_type(parser);
+
+    field_t *field = ast_field_init(parser->arena);
+    field->name = fname.value;
+    field->type = ftype;
+    field->line = fname.line;
+    field->col = fname.col;
+
+    if (f_tail == NULL) {
+      decl->strct.fields = field;
+    } else {
+      f_tail->next = field;
+    }
+    f_tail = field;
+    decl->strct.field_count++;
+    match(parser, TOKEN_COMMA);
   }
 
   expect(parser, TOKEN_RBRACE, "expected '}' after struct body");

@@ -1,0 +1,25 @@
+--TEST--
+the receiver passes by pointer, so a method mutates the caller's struct
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Counter {
+  n: i32,
+
+  fn bump(self): i32 {
+    self.n = self.n + 1;
+    return self.n;
+  }
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter { n: 0 };
+  let a: i32 = c.bump();
+  let b: i32 = c.bump();
+  printf("%d %d %d\n", a, b, c.n);
+  return 0;
+}
+--EXPECT--
+1 2 2
+--EXIT--
+0

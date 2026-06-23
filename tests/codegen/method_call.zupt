@@ -1,0 +1,40 @@
+--TEST--
+a method lowers to a mangled function taking the receiver as ptr %self; the call passes the address
+--ARGS--
+--ir -o -
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+
+  fn sum(self): i32 {
+    return self.x + self.y;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 3, y: 4 };
+  return p.sum();
+}
+--EXPECT--
+%Point = type { i32, i32 }
+define internal i32 @Point.sum(ptr %self) {
+entry:
+  %1 = getelementptr %Point, ptr %self, i32 0, i32 0
+  %2 = load i32, ptr %1
+  %3 = getelementptr %Point, ptr %self, i32 0, i32 1
+  %4 = load i32, ptr %3
+  %5 = add i32 %2, %4
+  ret i32 %5
+}
+
+define i32 @main() {
+entry:
+  %p = alloca %Point
+  %1 = getelementptr %Point, ptr %p, i32 0, i32 0
+  store i32 3, ptr %1
+  %2 = getelementptr %Point, ptr %p, i32 0, i32 1
+  store i32 4, ptr %2
+  %3 = call i32 @Point.sum(ptr %p)
+  ret i32 %3
+}

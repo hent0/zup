@@ -1,0 +1,18 @@
+--TEST--
+a method reads the receiver's fields
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+
+  fn sum(self): i32 {
+    return self.x + self.y;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 3, y: 4 };
+  return p.sum();
+}
+--EXIT--
+7
