@@ -21,10 +21,14 @@ typedef enum {
   TYPE_F32,
   TYPE_F64,
   TYPE_STRING,
+  TYPE_STRUCT,
 } TypeKind;
 
 typedef struct {
   TypeKind kind;
+  char *name;
+  unsigned int line;
+  unsigned int col;
 } type_t;
 
 typedef enum {
@@ -176,6 +180,7 @@ typedef enum {
   DECL_FN,
   DECL_CONTAINER,
   DECL_GLOBAL,
+  DECL_STRUCT,
 } DeclKind;
 
 typedef struct decl decl_t;
@@ -215,6 +220,7 @@ typedef struct {
 
 char *type_kind_to_ir(TypeKind kind);
 char *type_kind_to_str(TypeKind kind);
+char *type_to_str(type_t type);
 bool type_is_integer(TypeKind kind);
 bool type_is_signed_integer(TypeKind kind);
 bool type_is_float(TypeKind kind);

@@ -1,0 +1,13 @@
+--TEST--
+two structs with the same name are a redefinition error
+--FILE--
+struct Foo {}
+struct Foo {}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: redefinition of type 'Foo' [2:1]
+--EXIT--
+1

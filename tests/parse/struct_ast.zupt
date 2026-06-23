@@ -1,0 +1,23 @@
+--TEST--
+an empty struct declares a named type that can be used in type position
+--ARGS--
+--ast
+--FILE--
+struct Foo {}
+
+fn take(x: Foo) {
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (3 members)
+  Struct priv 'Foo'
+  FnDecl priv 'take' -> void
+    param x: Foo
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

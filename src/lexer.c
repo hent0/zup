@@ -37,6 +37,7 @@ const keyword_t keywords[] = {
     {"true", TOKEN_TRUE},
     {"false", TOKEN_FALSE},
     {"cstr", TOKEN_CSTR},
+    {"struct", TOKEN_STRUCT},
     {NULL, TOKEN_EOF},
 };
 

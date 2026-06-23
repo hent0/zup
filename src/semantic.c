@@ -24,6 +24,20 @@ static decl_t *symtab_lookup(const symtab_t *tab, const char *name) {
 }
 
 typedef struct {
+  decl_t **structs;
+  size_t count;
+} typetab_t;
+
+static decl_t *typetab_lookup(const typetab_t *tab, const char *name) {
+  for (size_t i = 0; i < tab->count; i++) {
+    if (strcmp(tab->structs[i]->name, name) == 0) {
+      return tab->structs[i];
+    }
+  }
+  return NULL;
+}
+
+typedef struct {
   const char *name;
   type_t type;
   bool mutable;
@@ -46,6 +60,7 @@ static const local_t *scope_lookup(const scope_t *scope, const char *name) {
 
 typedef struct {
   const symtab_t *tab;
+  const typetab_t *types;
   const source_t *src;
   scope_t *globals;
   scope_t *scope;
@@ -578,7 +593,22 @@ static size_t count_bindings(stmt_t *body) {
   return n;
 }
 
+static bool check_type(sema_t *sema, type_t type) {
+  if (type.kind == TYPE_STRUCT &&
+      typetab_lookup(sema->types, type.name) == NULL) {
+    diag_error(sema->src, type.line, type.col, "unknown type '%s'", type.name);
+    sema->had_error = true;
+    return false;
+  }
+  return true;
+}
+
 static void check_fn(sema_t *sema, const decl_t *fn) {
+  for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
+    check_type(sema, param->type);
+  }
+  check_type(sema, fn->fn.return_type);
+
   if (fn->fn.is_extern) {
     return;
   }
@@ -656,18 +686,38 @@ int semantic_check(unit_t *unit, arena_t *arena) {
       .fns = arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
       .count = 0,
   };
+  typetab_t types = {
+      .structs =
+          arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
+      .count = 0,
+  };
   for (decl_t *member = root->container.members; member != NULL;
        member = member->next) {
-    if (member->kind != DECL_FN) {
-      continue;
+    switch (member->kind) {
+    case DECL_FN: {
+      if (symtab_lookup(&tab, member->name) != NULL) {
+        diag_error(unit->src, member->line, member->col,
+                   "redefinition of function '%s'", member->name);
+        had_error = true;
+        break;
+      }
+      tab.fns[tab.count++] = member;
+      break;
     }
-    if (symtab_lookup(&tab, member->name) != NULL) {
-      diag_error(unit->src, member->line, member->col,
-                 "redefinition of function '%s'", member->name);
-      had_error = true;
-      continue;
+    case DECL_STRUCT: {
+      if (typetab_lookup(&types, member->name)) {
+        diag_error(unit->src, member->line, member->col,
+                   "redefinition of type '%s'", member->name);
+        had_error = true;
+        break;
+      }
+      types.structs[types.count++] = member;
+      break;
     }
-    tab.fns[tab.count++] = member;
+    case DECL_CONTAINER:
+    case DECL_GLOBAL:
+      break;
+    }
   }
 
   if (!check_entry_point(&tab, unit->src)) {
@@ -681,6 +731,7 @@ int semantic_check(unit_t *unit, arena_t *arena) {
 
   sema_t sema = {
       .tab = &tab,
+      .types = &types,
       .src = unit->src,
       .globals = &globals,
       .scope = NULL,

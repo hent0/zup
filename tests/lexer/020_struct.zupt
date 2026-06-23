@@ -1,0 +1,11 @@
+--TEST--
+the 'struct' keyword tokenizes to its own token; the name is an identifier
+--ARGS--
+--tokenize
+--FILE--
+struct Foo {}
+--EXPECT--
+TOKEN_STRUCT [1:1]
+TOKEN_ID('Foo') [1:8]
+TOKEN_LBRACE [1:12]
+TOKEN_RBRACE [1:13]

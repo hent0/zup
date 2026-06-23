@@ -1,0 +1,13 @@
+--TEST--
+a type name that does not resolve to a declared struct is an error, reported at the reference
+--FILE--
+fn take(x: Bar) {
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: unknown type 'Bar' [1:12]
+--EXIT--
+1

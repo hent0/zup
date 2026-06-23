@@ -253,6 +253,8 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
   case DECL_GLOBAL:
     add_global(ctx, decl->name, decl->global.type);
     return 0;
+  case DECL_STRUCT:
+    return 0;
   }
   return 0;
 }
@@ -768,13 +770,20 @@ static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
   return 0;
 }
 
+static const char *ir_type(ctx_t *ctx, type_t type) {
+  if (type.kind == TYPE_STRUCT) {
+    return arena_format(ctx->arena, "%%%s", type.name);
+  }
+  return type_kind_to_ir(type.kind);
+}
+
 static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
-  fprintf(ctx->out, "declare %s @%s(",
-          type_kind_to_ir(decl->fn.return_type.kind), decl->name);
+  fprintf(ctx->out, "declare %s @%s(", ir_type(ctx, decl->fn.return_type),
+          decl->name);
 
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    fprintf(ctx->out, "%s%s", type_kind_to_ir(param->type.kind),
+    fprintf(ctx->out, "%s%s", ir_type(ctx, param->type),
             param->next != NULL || decl->fn.variadic ? ", " : "");
     if (param->next == NULL && decl->fn.variadic) {
       fprintf(ctx->out, "...");
@@ -793,11 +802,11 @@ static int emit_fn(ctx_t *ctx, decl_t *decl) {
   ctx->locals_tail = NULL;
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-          type_kind_to_ir(decl->fn.return_type.kind), decl->name);
+          ir_type(ctx, decl->fn.return_type), decl->name);
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    fprintf(ctx->out, "%s %%%s%s", type_kind_to_ir(param->type.kind),
-            param->name, param->next != NULL ? ", " : "");
+    fprintf(ctx->out, "%s %%%s%s", ir_type(ctx, param->type), param->name,
+            param->next != NULL ? ", " : "");
   }
 
   fprintf(ctx->out, ") {\nentry:\n");
@@ -844,6 +853,10 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
   }
   case DECL_FN: {
     return decl->fn.is_extern ? emit_extern_fn(ctx, decl) : emit_fn(ctx, decl);
+  }
+  case DECL_STRUCT: {
+    fprintf(ctx->out, "%%%s = type {}\n", decl->name);
+    return 0;
   }
   case DECL_GLOBAL: {
     value_t value = emit_value(ctx, decl->global.init);

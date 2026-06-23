@@ -143,6 +143,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_FALSE";
   case TOKEN_CSTR:
     return "TOKEN_CSTR";
+  case TOKEN_STRUCT:
+    return "TOKEN_STRUCT";
   }
   return "UNKNOWN TOKEN TYPE";
 }

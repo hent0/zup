@@ -47,50 +47,76 @@ static token_t expect(parser_t *parser, TokenKind kind, const char *msg) {
 }
 
 static type_t parse_type(parser_t *parser) {
+  token_t token = parser->current;
+  type_t type = {
+      .kind = TYPE_UNKNOWN,
+      .line = token.line,
+      .col = token.col,
+  };
   switch (parser->current.kind) {
   case TOKEN_VOID:
     advance(parser);
-    return (type_t){.kind = TYPE_VOID};
+    type.kind = TYPE_VOID;
+    break;
   case TOKEN_BOOL:
     advance(parser);
-    return (type_t){.kind = TYPE_BOOL};
+    type.kind = TYPE_BOOL;
+    break;
   case TOKEN_I8:
     advance(parser);
-    return (type_t){.kind = TYPE_I8};
+    type.kind = TYPE_I8;
+    break;
   case TOKEN_U8:
     advance(parser);
-    return (type_t){.kind = TYPE_U8};
+    type.kind = TYPE_U8;
+    break;
   case TOKEN_I16:
     advance(parser);
-    return (type_t){.kind = TYPE_I16};
+    type.kind = TYPE_I16;
+    break;
   case TOKEN_U16:
     advance(parser);
-    return (type_t){.kind = TYPE_U16};
+    type.kind = TYPE_U16;
+    break;
   case TOKEN_I32:
     advance(parser);
-    return (type_t){.kind = TYPE_I32};
+    type.kind = TYPE_I32;
+    break;
   case TOKEN_U32:
     advance(parser);
-    return (type_t){.kind = TYPE_U32};
+    type.kind = TYPE_U32;
+    break;
   case TOKEN_I64:
     advance(parser);
-    return (type_t){.kind = TYPE_I64};
+    type.kind = TYPE_I64;
+    break;
   case TOKEN_U64:
     advance(parser);
-    return (type_t){.kind = TYPE_U64};
+    type.kind = TYPE_U64;
+    break;
   case TOKEN_F32:
     advance(parser);
-    return (type_t){.kind = TYPE_F32};
+    type.kind = TYPE_F32;
+    break;
   case TOKEN_F64:
     advance(parser);
-    return (type_t){.kind = TYPE_F64};
+    type.kind = TYPE_F64;
+    break;
   case TOKEN_CSTR:
     advance(parser);
-    return (type_t){.kind = TYPE_STRING};
+    type.kind = TYPE_STRING;
+    break;
+  case TOKEN_ID:
+    advance(parser);
+    type.kind = TYPE_STRUCT;
+    type.name = token.value;
+    break;
   default:
     parse_error(parser, "expected a type");
-    return (type_t){.kind = TYPE_UNKNOWN};
+    return type;
   }
+
+  return type;
 }
 
 static expr_t *parse_expr(parser_t *parser);
@@ -658,6 +684,22 @@ static decl_t *parse_extern(parser_t *parser) {
   return fn;
 }
 
+static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
+  token_t kw = expect(parser, TOKEN_STRUCT, "expected 'struct'");
+  token_t name = expect(parser, TOKEN_ID, "expected struct name");
+
+  decl_t *decl = ast_container_init(name.value, parser->arena);
+  decl->kind = DECL_STRUCT;
+  decl->visibility = visibility;
+  decl->line = kw.line;
+  decl->col = kw.col;
+
+  expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
+  // TODO: Parse body
+  expect(parser, TOKEN_RBRACE, "expected '}' after struct name");
+  return decl;
+}
+
 static Visibility parse_visibility(parser_t *parser) {
   if (match(parser, TOKEN_PUB)) {
     return VISIBILITY_PUBLIC;
@@ -678,6 +720,8 @@ static decl_t *parse_decl(parser_t *parser) {
   case TOKEN_CONST:
   case TOKEN_LET:
     return parse_global_binding(parser, visibility);
+  case TOKEN_STRUCT:
+    return parse_struct(parser, visibility);
   default:
     parse_error(parser, "expected a declaration");
     return NULL;

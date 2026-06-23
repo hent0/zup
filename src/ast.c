@@ -66,6 +66,13 @@ char *type_kind_to_str(TypeKind kind) {
   }
 }
 
+char *type_to_str(type_t type) {
+  if (type.kind == TYPE_STRUCT) {
+    return type.name;
+  }
+  return type_kind_to_str(type.kind);
+}
+
 bool type_is_integer(TypeKind kind) {
   switch (kind) {
   case TYPE_I8:
@@ -621,18 +628,18 @@ static void dump_decl(const decl_t *decl, int depth) {
   case DECL_FN:
     if (decl->fn.is_extern) {
       printf("ExternFn '%s' -> %s%s\n", decl->name,
-             type_kind_to_str(decl->fn.return_type.kind),
+             type_to_str(decl->fn.return_type),
              decl->fn.variadic ? " (variadic)" : "");
     } else {
       printf("FnDecl %s '%s' -> %s\n", visibility_to_str(decl->visibility),
              decl->name ? decl->name : "(anonymous)",
-             type_kind_to_str(decl->fn.return_type.kind));
+             type_to_str(decl->fn.return_type));
     }
     for (const param_t *param = decl->fn.params; param != NULL;
          param = param->next) {
       print_indent(depth + 1);
       printf("param %s%s: %s\n", !param->mutable ? "const " : "", param->name,
-             type_kind_to_str(param->type.kind));
+             type_to_str(param->type));
     }
 
     if (!decl->fn.is_extern) {
@@ -647,10 +654,13 @@ static void dump_decl(const decl_t *decl, int depth) {
       dump_decl(member, depth + 1);
     }
     break;
+  case DECL_STRUCT:
+    printf("Struct %s '%s'\n", visibility_to_str(decl->visibility), decl->name);
+    break;
   case DECL_GLOBAL:
     printf("GlobalDecl %s %s '%s': %s\n", visibility_to_str(decl->visibility),
            decl->global.mutable ? "let" : "const", decl->name,
-           type_kind_to_str(decl->global.type.kind));
+           type_to_str(decl->global.type));
     dump_expr(decl->global.init, depth + 1);
     break;
   }
