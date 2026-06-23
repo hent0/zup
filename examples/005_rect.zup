@@ -1,6 +1,7 @@
 extern fn printf(fmt: cstr, ...): i32;
 
 struct Rect {
+  label: str,
   w: i32,
   h: i32,
 
@@ -16,17 +17,16 @@ struct Rect {
 
 fn rect(w: i32, h: i32): Rect {
   return Rect{
+    label: "box",
     w: w,
     h: h,
   };
 }
 
 pub fn main(): i32 {
-  let name = "rectangle";
   let r = rect(3, 4);
 
-  printf("%s is %d chars\n", name.ptr, name.len as i32);
-  printf("area = %d\n", r.area());
+  printf("%s (%d chars): area = %d\n", r.label.ptr, r.label.len as i32, r.area());
 
   r.scale(2);
   printf("area = %d\n", r.area());
