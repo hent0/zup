@@ -1,0 +1,14 @@
+--TEST--
+a field read flows through as the function's return value
+--FILE--
+struct Pair {
+  a: i32,
+  b: i32
+}
+
+pub fn main(): i32 {
+  let p: Pair = Pair { a: 3, b: 4 };
+  return p.b;
+}
+--EXIT--
+4

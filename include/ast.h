@@ -66,9 +66,20 @@ typedef enum {
   EXPR_CAST,
   EXPR_BINARY,
   EXPR_UNARY,
+  EXPR_STRUCT_LITERAL,
+  EXPR_FIELD,
 } ExprKind;
 
 typedef struct expr expr_t;
+typedef struct field_init field_init_t;
+struct field_init {
+  char *name;
+  expr_t *value;
+  unsigned int line;
+  unsigned int col;
+  field_init_t *next;
+};
+
 struct expr {
   ExprKind kind;
   unsigned int line;
@@ -107,6 +118,15 @@ struct expr {
       UnaryOp op;
       expr_t *operand;
     } unary;
+    struct {
+      char *type_name;
+      field_init_t *inits;
+      size_t init_count;
+    } struct_literal;
+    struct {
+      expr_t *base;
+      char *name;
+    } field;
   };
 };
 
@@ -171,6 +191,15 @@ struct param {
   param_t *next;
 };
 
+typedef struct field field_t;
+struct field {
+  char *name;
+  type_t type;
+  unsigned int line;
+  unsigned int col;
+  field_t *next;
+};
+
 typedef enum {
   VISIBILITY_PRIVATE,
   VISIBILITY_PUBLIC,
@@ -210,6 +239,10 @@ struct decl {
       bool mutable;
       expr_t *init;
     } global;
+    struct {
+      field_t *fields;
+      size_t field_count;
+    } strct;
   };
 };
 
@@ -244,6 +277,8 @@ expr_t *ast_string_init(token_t token, arena_t *arena);
 expr_t *ast_id_init(token_t token, arena_t *arena);
 expr_t *ast_call_init(expr_t *callee, arena_t *arena);
 expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena);
+expr_t *ast_struct_literal_init(token_t token, arena_t *arena);
+expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
@@ -258,8 +293,10 @@ stmt_t *ast_for_init(token_t token, char *var, expr_t *start, expr_t *end,
                      stmt_t *body, arena_t *arena);
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);
 param_t *ast_param_init(arena_t *arena);
+field_t *ast_field_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);
+decl_t *ast_struct_init(char *name, arena_t *arena);
 decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
                         type_t type, bool mutable, expr_t *init,
                         arena_t *arena);

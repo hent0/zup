@@ -71,10 +71,29 @@ typedef struct {
 
 typedef struct {
   TypeKind kind;
+  char *name;
   bool ok;
 } exprty_t;
 
-static bool type_assignable(TypeKind to, TypeKind from) { return to == from; }
+static bool assignable(type_t to, exprty_t from) {
+  if (to.kind != from.kind) {
+    return false;
+  }
+  if (to.kind == TYPE_STRUCT) {
+    return from.name != NULL && strcmp(to.name, from.name) == 0;
+  }
+  return true;
+}
+
+static field_t *struct_field(const decl_t *strukt, const char *name) {
+  for (field_t *field = strukt->strct.fields; field != NULL;
+       field = field->next) {
+    if (strcmp(field->name, name) == 0) {
+      return field;
+    }
+  }
+  return NULL;
+}
 
 static bool is_const_init(const expr_t *expr) {
   if (expr == NULL) {
@@ -112,8 +131,7 @@ static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
           check_expr(sema, member->global.init, member->global.type.kind);
       if (member->global.type.kind == TYPE_UNKNOWN) {
         member->global.type.kind = init.kind;
-      } else if (init.ok &&
-                 !type_assignable(member->global.type.kind, init.kind)) {
+      } else if (init.ok && !assignable(member->global.type, init)) {
         diag_error(sema->src, member->line, member->col,
                    "cannot assign %s to '%s' of type %s",
                    type_kind_to_str(init.kind), member->name,
@@ -162,7 +180,7 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
     exprty_t at =
         check_expr(sema, arg, param ? param->type.kind : TYPE_UNKNOWN);
     if (param != NULL) {
-      if (at.ok && !type_assignable(param->type.kind, at.kind)) {
+      if (at.ok && !assignable(param->type, at)) {
         diag_error(sema->src, call->line, call->col,
                    "cannot pass %s as argument '%s' of '%s' (expected %s)",
                    type_kind_to_str(at.kind), param->name, name,
@@ -273,7 +291,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){.kind = local->type.kind, .ok = true};
+      result = (exprty_t){
+          .kind = local->type.kind, .name = local->type.name, .ok = true};
     }
     break;
   }
@@ -350,12 +369,96 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     }
     break;
   }
+  case EXPR_STRUCT_LITERAL: {
+    decl_t *strukt =
+        typetab_lookup(sema->types, expr->struct_literal.type_name);
+    if (strukt == NULL) {
+      diag_error(sema->src, expr->line, expr->col, "unknown type '%s'",
+                 expr->struct_literal.type_name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+
+    bool ok = true;
+    for (field_init_t *init = expr->struct_literal.inits; init != NULL;
+         init = init->next) {
+      field_t *field = struct_field(strukt, init->name);
+      exprty_t value = check_expr(sema, init->value,
+                                  field ? field->type.kind : TYPE_UNKNOWN);
+      if (field == NULL) {
+        diag_error(sema->src, init->line, init->col,
+                   "struct '%s' has no field '%s'", strukt->name, init->name);
+        sema->had_error = true;
+        ok = false;
+        continue;
+      }
+      if (value.ok && !assignable(field->type, value)) {
+        diag_error(sema->src, init->value->line, init->value->col,
+                   "cannot assign %s to field '%s' of type %s",
+                   type_kind_to_str(value.kind), init->name,
+                   type_to_str(field->type));
+        sema->had_error = true;
+        ok = false;
+      }
+    }
+
+    for (field_t *field = strukt->strct.fields; field != NULL;
+         field = field->next) {
+      bool found = false;
+      for (field_init_t *init = expr->struct_literal.inits; init != NULL;
+           init = init->next) {
+        if (strcmp(init->name, field->name) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "missing field '%s' in initializer for '%s'", field->name,
+                   strukt->name);
+        sema->had_error = true;
+        ok = false;
+      }
+    }
+
+    result = (exprty_t){.kind = TYPE_STRUCT, .name = strukt->name, .ok = ok};
+    break;
+  }
+  case EXPR_FIELD: {
+    exprty_t base = check_expr(sema, expr->field.base, TYPE_UNKNOWN);
+    if (!base.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (base.kind != TYPE_STRUCT) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "cannot access field '%s' of non-struct type %s",
+                 expr->field.name, type_kind_to_str(base.kind));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    decl_t *strukt = typetab_lookup(sema->types, base.name);
+    field_t *field = strukt ? struct_field(strukt, expr->field.name) : NULL;
+    if (field == NULL) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "struct '%s' has no field '%s'", base.name, expr->field.name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    result = (exprty_t){
+        .kind = field->type.kind, .name = field->type.name, .ok = true};
+    break;
+  }
   default:
     result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     break;
   }
 
   expr->type.kind = result.kind;
+  expr->type.name = result.name;
   return result;
 }
 
@@ -380,7 +483,7 @@ static void check_return(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     return;
   }
 
-  if (value.ok && !type_assignable(ret, value.kind)) {
+  if (value.ok && !assignable(fn->fn.return_type, value)) {
     diag_error(sema->src, stmt->line, stmt->col,
                "cannot return %s from function returning %s",
                type_kind_to_str(value.kind), type_kind_to_str(ret));
@@ -418,8 +521,8 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
           check_expr(sema, stmt->binding.init, stmt->binding.type.kind);
       if (stmt->binding.type.kind == TYPE_UNKNOWN) {
         stmt->binding.type.kind = init.kind;
-      } else if (init.ok &&
-                 !type_assignable(stmt->binding.type.kind, init.kind)) {
+        stmt->binding.type.name = init.name;
+      } else if (init.ok && !assignable(stmt->binding.type, init)) {
         diag_error(sema->src, stmt->line, stmt->col,
                    "cannot assign %s to variable '%s' of type %s",
                    type_kind_to_str(init.kind), stmt->binding.name,
@@ -466,7 +569,7 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       break;
     }
     exprty_t value = check_expr(sema, stmt->assign.value, local->type.kind);
-    if (value.ok && !type_assignable(local->type.kind, value.kind)) {
+    if (value.ok && !assignable(local->type, value)) {
       diag_error(sema->src, stmt->line, stmt->col,
                  "cannot assign %s to variable '%s' of type %s",
                  type_kind_to_str(value.kind), stmt->assign.name,
@@ -601,6 +704,22 @@ static bool check_type(sema_t *sema, type_t type) {
     return false;
   }
   return true;
+}
+
+static void check_struct(sema_t *sema, const decl_t *strukt) {
+  for (field_t *field = strukt->strct.fields; field != NULL;
+       field = field->next) {
+    check_type(sema, field->type);
+    for (field_t *prev = strukt->strct.fields; prev != field;
+         prev = prev->next) {
+      if (strcmp(prev->name, field->name) == 0) {
+        diag_error(sema->src, field->line, field->col, "duplicate field '%s'",
+                   field->name);
+        sema->had_error = true;
+        break;
+      }
+    }
+  }
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
@@ -738,6 +857,10 @@ int semantic_check(unit_t *unit, arena_t *arena) {
       .arena = arena,
       .had_error = false,
   };
+
+  for (size_t i = 0; i < types.count; i++) {
+    check_struct(&sema, types.structs[i]);
+  }
 
   check_globals(&sema, root, &globals);
 

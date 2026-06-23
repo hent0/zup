@@ -1,11 +1,16 @@
 --TEST--
-an empty struct declares a named type that can be used in type position
+a struct declares fields; a struct literal constructs one and '.' reads a field
 --ARGS--
 --ast
 --FILE--
-struct Foo {}
+struct Point {
+  x: i32,
+  y: i32,
+}
 
-fn take(x: Foo) {
+fn dist(): i32 {
+  let p: Point = Point { x: 1, y: 2 };
+  return p.x;
 }
 
 pub fn main(): i32 {
@@ -13,9 +18,19 @@ pub fn main(): i32 {
 }
 --EXPECT--
 Container (file) (3 members)
-  Struct priv 'Foo'
-  FnDecl priv 'take' -> void
-    param x: Foo
+  Struct priv 'Point'
+    field x: i32
+    field y: i32
+  FnDecl priv 'dist' -> i32
+    Let p: Point
+      StructLit 'Point'
+        field x
+          Number literal 1
+        field y
+          Number literal 2
+    Return
+      Field x
+        Id p
   FnDecl pub 'main' -> i32
     Return
       Number literal 0

@@ -1,0 +1,27 @@
+--TEST--
+a struct local lowers to alloca + per-field store; a field read lowers to getelementptr + load
+--ARGS--
+--ir -o -
+--FILE--
+struct Pair {
+  a: i32,
+  b: i32
+}
+
+pub fn main(): i32 {
+  let p: Pair = Pair { a: 3, b: 4 };
+  return p.b;
+}
+--EXPECT--
+%Pair = type { i32, i32 }
+define i32 @main() {
+entry:
+  %p = alloca %Pair
+  %1 = getelementptr %Pair, ptr %p, i32 0, i32 0
+  store i32 3, ptr %1
+  %2 = getelementptr %Pair, ptr %p, i32 0, i32 1
+  store i32 4, ptr %2
+  %3 = getelementptr %Pair, ptr %p, i32 0, i32 1
+  %4 = load i32, ptr %3
+  ret i32 %4
+}

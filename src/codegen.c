@@ -38,6 +38,12 @@ struct ctx_local {
   ctx_local_t *next;
 };
 
+typedef struct ctx_struct ctx_struct_t;
+struct ctx_struct {
+  const decl_t *decl;
+  ctx_struct_t *next;
+};
+
 typedef struct {
   FILE *out;
   arena_t *arena;
@@ -48,6 +54,7 @@ typedef struct {
   int strings_count;
   ctx_local_t *locals;
   ctx_local_t *locals_tail;
+  ctx_struct_t *structs;
 
   unsigned int reg;
   unsigned int label;
@@ -125,6 +132,26 @@ static void add_local(ctx_t *ctx, const char *name, type_t type,
   ctx->locals_tail = local;
 }
 
+static const decl_t *find_struct(ctx_t *ctx, const char *name) {
+  for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
+    if (strcmp(s->decl->name, name) == 0) {
+      return s->decl;
+    }
+  }
+  return NULL;
+}
+
+static int field_index(const decl_t *strukt, const char *name) {
+  int i = 0;
+  for (field_t *field = strukt->strct.fields; field != NULL;
+       field = field->next, i++) {
+    if (strcmp(field->name, name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // Re-encode decoded bytes into LLVM's c"..." form.
 static void emit_escaped(FILE *out, const char *bytes, size_t len) {
   for (size_t i = 0; i < len; i++) {
@@ -174,6 +201,16 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return collect_expr(ctx, expr->binary.rhs);
   case EXPR_UNARY:
     return collect_expr(ctx, expr->unary.operand);
+  case EXPR_STRUCT_LITERAL:
+    for (field_init_t *init = expr->struct_literal.inits; init != NULL;
+         init = init->next) {
+      if (collect_expr(ctx, init->value) != 0) {
+        return 1;
+      }
+    }
+    return 0;
+  case EXPR_FIELD:
+    return collect_expr(ctx, expr->field.base);
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -253,8 +290,13 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
   case DECL_GLOBAL:
     add_global(ctx, decl->name, decl->global.type);
     return 0;
-  case DECL_STRUCT:
+  case DECL_STRUCT: {
+    ctx_struct_t *s = arena_alloc(ctx->arena, sizeof(ctx_struct_t));
+    s->decl = decl;
+    s->next = ctx->structs;
+    ctx->structs = s;
     return 0;
+  }
   }
   return 0;
 }
@@ -281,6 +323,37 @@ static unsigned type_bits(TypeKind kind) {
 }
 
 static value_t emit_logical(ctx_t *ctx, expr_t *expr);
+static const char *ir_type(ctx_t *ctx, type_t type);
+
+// Address of an lvalue: a local's stack slot, a global, or a field within an
+// aggregate (via getelementptr). Used by field reads and struct construction.
+static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
+  switch (expr->kind) {
+  case EXPR_ID: {
+    ctx_local_t *local = find_local(ctx, expr->id.name);
+    if (local != NULL) {
+      return local->ptr;
+    }
+    ctx_global_t *global = find_global(ctx, expr->id.name);
+    if (global != NULL) {
+      return arena_format(ctx->arena, "@%s", global->name);
+    }
+    return arena_format(ctx->arena, "%%%s", expr->id.name);
+  }
+  case EXPR_FIELD: {
+    const char *base = emit_addr(ctx, expr->field.base);
+    type_t base_type = expr->field.base->type;
+    const decl_t *strukt = find_struct(ctx, base_type.name);
+    int index = field_index(strukt, expr->field.name);
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
+            reg, base_type.name, base, index);
+    return arena_format(ctx->arena, "%%%u", reg);
+  }
+  default:
+    return NULL;
+  }
+}
 
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
@@ -403,6 +476,16 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
             type_kind_to_ir(operand.type.kind), operand.ref);
     return (value_t){
         .type = operand.type,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+  case EXPR_FIELD: {
+    const char *addr = emit_addr(ctx, expr);
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+            ir_type(ctx, expr->type), addr);
+    return (value_t){
+        .type = expr->type,
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }
@@ -600,11 +683,30 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     case STMT_BINDING: {
       const char *ptr = arena_format(ctx->arena, "%%%s", stmt->binding.name);
       fprintf(ctx->out, "  %s = alloca %s\n", ptr,
-              type_kind_to_ir(stmt->binding.type.kind));
-      value_t value = emit_value(ctx, stmt->binding.init);
-      fprintf(ctx->out, "  store %s %s, ptr %s\n",
-              type_kind_to_ir(stmt->binding.type.kind), value.ref, ptr);
+              ir_type(ctx, stmt->binding.type));
       add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
+
+      expr_t *init = stmt->binding.init;
+      if (stmt->binding.type.kind == TYPE_STRUCT && init != NULL &&
+          init->kind == EXPR_STRUCT_LITERAL) {
+        // Construct in place: store each field through its GEP.
+        for (field_init_t *fi = init->struct_literal.inits; fi != NULL;
+             fi = fi->next) {
+          int index = field_index(find_struct(ctx, stmt->binding.type.name),
+                                  fi->name);
+          unsigned int reg = ctx->reg++;
+          fprintf(ctx->out,
+                  "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n", reg,
+                  stmt->binding.type.name, ptr, index);
+          value_t value = emit_value(ctx, fi->value);
+          fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, value.type),
+                  value.ref, reg);
+        }
+      } else {
+        value_t value = emit_value(ctx, init);
+        fprintf(ctx->out, "  store %s %s, ptr %s\n",
+                type_kind_to_ir(stmt->binding.type.kind), value.ref, ptr);
+      }
       break;
     }
     case STMT_ASSIGN: {
@@ -855,7 +957,14 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return decl->fn.is_extern ? emit_extern_fn(ctx, decl) : emit_fn(ctx, decl);
   }
   case DECL_STRUCT: {
-    fprintf(ctx->out, "%%%s = type {}\n", decl->name);
+    fprintf(ctx->out, "%%%s = type {", decl->name);
+    bool first = true;
+    for (field_t *field = decl->strct.fields; field != NULL;
+         field = field->next) {
+      fprintf(ctx->out, "%s%s", first ? " " : ", ", ir_type(ctx, field->type));
+      first = false;
+    }
+    fprintf(ctx->out, first ? "}\n" : " }\n");
     return 0;
   }
   case DECL_GLOBAL: {

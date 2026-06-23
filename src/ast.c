@@ -356,6 +356,31 @@ expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_struct_literal_init(token_t token, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_STRUCT_LITERAL;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->struct_literal.type_name = token.value;
+  expr->struct_literal.inits = NULL;
+  expr->struct_literal.init_count = 0;
+  return expr;
+}
+
+expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_FIELD;
+  expr->line = name.line;
+  expr->col = name.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->field.base = base;
+  expr->field.name = name.value;
+  return expr;
+}
+
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena) {
   stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
   stmt->kind = kind;
@@ -431,6 +456,14 @@ param_t *ast_param_init(arena_t *arena) {
   return param;
 }
 
+field_t *ast_field_init(arena_t *arena) {
+  field_t *field = arena_alloc(arena, sizeof(field_t));
+  field->name = NULL;
+  field->type = (type_t){.kind = TYPE_UNKNOWN};
+  field->next = NULL;
+  return field;
+}
+
 decl_t *ast_fn_init(arena_t *arena) {
   decl_t *fn = arena_alloc(arena, sizeof(decl_t));
   fn->kind = DECL_FN;
@@ -459,6 +492,19 @@ decl_t *ast_container_init(char *name, arena_t *arena) {
   container->container.members = NULL;
   container->container.member_count = 0;
   return container;
+}
+
+decl_t *ast_struct_init(char *name, arena_t *arena) {
+  decl_t *decl = arena_alloc(arena, sizeof(decl_t));
+  decl->kind = DECL_STRUCT;
+  decl->visibility = VISIBILITY_PRIVATE;
+  decl->name = name;
+  decl->line = 0;
+  decl->col = 0;
+  decl->next = NULL;
+  decl->strct.fields = NULL;
+  decl->strct.field_count = 0;
+  return decl;
 }
 
 decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
@@ -541,6 +587,19 @@ static void dump_expr(const expr_t *expr, int depth) {
   case EXPR_UNARY:
     dump_unary(expr, depth);
     break;
+  case EXPR_STRUCT_LITERAL:
+    printf("StructLit '%s'\n", expr->struct_literal.type_name);
+    for (const field_init_t *init = expr->struct_literal.inits; init != NULL;
+         init = init->next) {
+      print_indent(depth + 1);
+      printf("field %s\n", init->name);
+      dump_expr(init->value, depth + 2);
+    }
+    break;
+  case EXPR_FIELD:
+    printf("Field %s\n", expr->field.name);
+    dump_expr(expr->field.base, depth + 1);
+    break;
   }
 }
 
@@ -579,7 +638,7 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
     break;
   case STMT_BINDING:
     printf("%s %s: %s\n", stmt->binding.mutable ? "Let" : "Const",
-           stmt->binding.name, type_kind_to_str(stmt->binding.type.kind));
+           stmt->binding.name, type_to_str(stmt->binding.type));
     dump_expr(stmt->binding.init, depth + 1);
     break;
   case STMT_ASSIGN:
@@ -656,6 +715,11 @@ static void dump_decl(const decl_t *decl, int depth) {
     break;
   case DECL_STRUCT:
     printf("Struct %s '%s'\n", visibility_to_str(decl->visibility), decl->name);
+    for (const field_t *field = decl->strct.fields; field != NULL;
+         field = field->next) {
+      print_indent(depth + 1);
+      printf("field %s: %s\n", field->name, type_to_str(field->type));
+    }
     break;
   case DECL_GLOBAL:
     printf("GlobalDecl %s %s '%s': %s\n", visibility_to_str(decl->visibility),

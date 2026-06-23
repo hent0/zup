@@ -1,0 +1,11 @@
+--TEST--
+field access on a non-struct value is an error
+--FILE--
+pub fn main(): i32 {
+  let n: i32 = 5;
+  return n.x;
+}
+--EXPECTERR--
+zup: error: cannot access field 'x' of non-struct type i32 [3:12]
+--EXIT--
+1

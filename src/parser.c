@@ -152,6 +152,44 @@ static expr_t *parse_call_args(parser_t *parser, expr_t *callee) {
   return call;
 }
 
+static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
+  expr_t *lit = ast_struct_literal_init(type_name, parser->arena);
+  expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
+
+  field_init_t *tail = NULL;
+  if (!check(parser, TOKEN_RBRACE)) {
+    do {
+      if (check(parser, TOKEN_RBRACE)) {
+        break;
+      }
+      token_t name = expect(parser, TOKEN_ID, "expected field name");
+      expect(parser, TOKEN_COLON, "expected ':' after field name");
+      expr_t *value = parse_expr(parser);
+      if (value == NULL) {
+        return NULL;
+      }
+
+      field_init_t *init = arena_alloc(parser->arena, sizeof(field_init_t));
+      init->name = name.value;
+      init->value = value;
+      init->line = name.line;
+      init->col = name.col;
+      init->next = NULL;
+
+      if (tail == NULL) {
+        lit->struct_literal.inits = init;
+      } else {
+        tail->next = init;
+      }
+      tail = init;
+      lit->struct_literal.init_count++;
+    } while (match(parser, TOKEN_COMMA));
+  }
+
+  expect(parser, TOKEN_RBRACE, "expected '}' after struct fields");
+  return lit;
+}
+
 static expr_t *parse_primary(parser_t *parser) {
   token_t token = parser->current;
   switch (parser->current.kind) {
@@ -169,16 +207,31 @@ static expr_t *parse_primary(parser_t *parser) {
     return ast_string_init(token, parser->arena);
   case TOKEN_ID: {
     advance(parser);
-    expr_t *id = ast_id_init(token, parser->arena);
     if (check(parser, TOKEN_LPAREN)) {
-      return parse_call_args(parser, id);
+      return parse_call_args(parser, ast_id_init(token, parser->arena));
     }
-    return id;
+    if (check(parser, TOKEN_LBRACE) && !parser->no_struct_literal) {
+      return parse_struct_literal(parser, token);
+    }
+    return ast_id_init(token, parser->arena);
   }
   default:
     parse_error(parser, "expected an expression");
     return NULL;
   }
+}
+
+static expr_t *parse_postfix(parser_t *parser) {
+  expr_t *expr = parse_primary(parser);
+  if (expr == NULL) {
+    return NULL;
+  }
+  while (check(parser, TOKEN_DOT)) {
+    advance(parser);
+    token_t name = expect(parser, TOKEN_ID, "expected field name after '.'");
+    expr = ast_field_access_init(expr, name, parser->arena);
+  }
+  return expr;
 }
 
 static expr_t *parse_unary(parser_t *parser) {
@@ -190,7 +243,7 @@ static expr_t *parse_unary(parser_t *parser) {
     advance(parser);
     return ast_unary_init(UNOP_NEG, parse_unary(parser), parser->arena);
   default:
-    return parse_primary(parser);
+    return parse_postfix(parser);
   }
 }
 
@@ -451,7 +504,10 @@ static stmt_t *parse_return(parser_t *parser) {
 
 static stmt_t *parse_if(parser_t *parser) {
   token_t token = expect(parser, TOKEN_IF, "expected 'if'");
+  bool saved = parser->no_struct_literal;
+  parser->no_struct_literal = true;
   expr_t *cond = parse_expr(parser);
+  parser->no_struct_literal = saved;
   stmt_t *then_body = parse_block(parser);
   stmt_t *else_body = NULL;
   if (match(parser, TOKEN_ELSE)) {
@@ -503,7 +559,10 @@ static stmt_t *parse_local_binding(parser_t *parser) {
 
 static stmt_t *parse_while(parser_t *parser) {
   token_t token = expect(parser, TOKEN_WHILE, "expected 'while'");
+  bool saved = parser->no_struct_literal;
+  parser->no_struct_literal = true;
   expr_t *cond = parse_expr(parser);
+  parser->no_struct_literal = saved;
   stmt_t *body = parse_block(parser);
   return ast_while_init(token, cond, body, parser->arena);
 }
@@ -513,9 +572,12 @@ static stmt_t *parse_for(parser_t *parser) {
   token_t id = expect(parser, TOKEN_ID, "expected identifier");
   expect(parser, TOKEN_IN, "expected 'in'");
 
+  bool saved = parser->no_struct_literal;
+  parser->no_struct_literal = true;
   expr_t *start = parse_expr(parser);
   expect(parser, TOKEN_DOT_DOT, "expected '..'");
   expr_t *end = parse_expr(parser);
+  parser->no_struct_literal = saved;
   stmt_t *body = parse_block(parser);
   return ast_for_init(token, id.value, start, end, body, parser->arena);
 }
@@ -688,15 +750,40 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
   token_t kw = expect(parser, TOKEN_STRUCT, "expected 'struct'");
   token_t name = expect(parser, TOKEN_ID, "expected struct name");
 
-  decl_t *decl = ast_container_init(name.value, parser->arena);
-  decl->kind = DECL_STRUCT;
+  decl_t *decl = ast_struct_init(name.value, parser->arena);
   decl->visibility = visibility;
   decl->line = kw.line;
   decl->col = kw.col;
 
   expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
-  // TODO: Parse body
-  expect(parser, TOKEN_RBRACE, "expected '}' after struct name");
+
+  field_t *tail = NULL;
+  if (!check(parser, TOKEN_RBRACE)) {
+    do {
+      if (check(parser, TOKEN_RBRACE)) {
+        break; // trailing comma
+      }
+      token_t name = expect(parser, TOKEN_ID, "expected field name");
+      expect(parser, TOKEN_COLON, "expected ':' after field name");
+      type_t type = parse_type(parser);
+
+      field_t *field = ast_field_init(parser->arena);
+      field->name = name.value;
+      field->type = type;
+      field->line = name.line;
+      field->col = name.col;
+
+      if (tail == NULL) {
+        decl->strct.fields = field;
+      } else {
+        tail->next = field;
+      }
+      tail = field;
+      decl->strct.field_count++;
+    } while (match(parser, TOKEN_COMMA));
+  }
+
+  expect(parser, TOKEN_RBRACE, "expected '}' after struct body");
   return decl;
 }
 
@@ -747,8 +834,6 @@ unit_t *parser_parse(parser_t *parser) {
   while (parser->current.kind != TOKEN_EOF) {
     decl_t *decl = parse_decl(parser);
     if (decl == NULL) {
-      // Could not start a declaration; the stuck-token diagnostic has been
-      // reported. Stop rather than re-reporting it forever.
       break;
     }
 

@@ -1,15 +1,18 @@
 --TEST--
-a declared struct lowers to a named LLVM type, even when unused
+a struct lowers to a named LLVM type whose body is its fields in order, even when unused
 --ARGS--
 --ir -o -
 --FILE--
-struct Foo {}
+struct Point {
+  x: i32,
+  y: i32
+}
 
 pub fn main(): i32 {
   return 0;
 }
 --EXPECT--
-%Foo = type {}
+%Point = type { i32, i32 }
 define i32 @main() {
 entry:
   ret i32 0

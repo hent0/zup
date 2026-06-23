@@ -1,0 +1,19 @@
+--TEST--
+struct fields are constructed and read back at runtime
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Point {
+  x: i32,
+  y: i32
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 7, y: 9 };
+  printf("%d %d\n", p.x, p.y);
+  return 0;
+}
+--EXPECT--
+7 9
+--EXIT--
+0
