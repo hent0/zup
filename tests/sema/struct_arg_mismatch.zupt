@@ -1,0 +1,23 @@
+--TEST--
+passing the wrong struct type as an argument is an error (structs match by name)
+--FILE--
+struct A {
+  x: i32,
+}
+
+struct B {
+  y: i32,
+}
+
+fn take(a: A): i32 {
+  return a.x;
+}
+
+pub fn main(): i32 {
+  let b: B = B { y: 1 };
+  return take(b);
+}
+--EXPECTERR--
+zup: error: cannot pass B as argument 'a' of 'take' (expected A) [15:10]
+--EXIT--
+1

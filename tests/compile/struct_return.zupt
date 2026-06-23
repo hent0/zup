@@ -1,0 +1,18 @@
+--TEST--
+a function returns a struct by value; the caller reads its fields
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+fn make(): Point {
+  return Point { x: 5, y: 6 };
+}
+
+pub fn main(): i32 {
+  let p: Point = make();
+  return p.y;
+}
+--EXIT--
+6

@@ -1,0 +1,23 @@
+--TEST--
+a struct passes to a function and its fields are read in the callee
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+fn sum(p: Point): i32 {
+  return p.x + p.y;
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 3, y: 4 };
+  printf("%d\n", sum(p));
+  return 0;
+}
+--EXPECT--
+7
+--EXIT--
+0

@@ -1,0 +1,37 @@
+--TEST--
+returning a struct uses a caller-allocated sret out-parameter; the body builds into it
+--ARGS--
+--ir -o -
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+fn make(): Point {
+  return Point { x: 5, y: 6 };
+}
+
+pub fn main(): i32 {
+  let p: Point = make();
+  return p.y;
+}
+--EXPECT--
+%Point = type { i32, i32 }
+define internal void @make(ptr sret(%Point) %sret) {
+entry:
+  %1 = getelementptr %Point, ptr %sret, i32 0, i32 0
+  store i32 5, ptr %1
+  %2 = getelementptr %Point, ptr %sret, i32 0, i32 1
+  store i32 6, ptr %2
+  ret void
+}
+
+define i32 @main() {
+entry:
+  %p = alloca %Point
+  call void @make(ptr sret(%Point) %p)
+  %1 = getelementptr %Point, ptr %p, i32 0, i32 1
+  %2 = load i32, ptr %1
+  ret i32 %2
+}

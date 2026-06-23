@@ -190,15 +190,17 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
       if (at.ok && !assignable(param->type, at)) {
         diag_error(sema->src, call->line, call->col,
                    "cannot pass %s as argument '%s' of '%s' (expected %s)",
-                   type_kind_to_str(at.kind), param->name, name,
-                   type_kind_to_str(param->type.kind));
+                   type_to_str((type_t){.kind = at.kind, .name = at.name}),
+                   param->name, name, type_to_str(param->type));
         sema->had_error = true;
       }
       param = param->next;
     }
   }
 
-  return (exprty_t){.kind = fn->fn.return_type.kind, .ok = true};
+  return (exprty_t){.kind = fn->fn.return_type.kind,
+                    .name = fn->fn.return_type.name,
+                    .ok = true};
 }
 
 static unsigned long long type_int_max(TypeKind k) {
@@ -493,7 +495,8 @@ static void check_return(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   if (value.ok && !assignable(fn->fn.return_type, value)) {
     diag_error(sema->src, stmt->line, stmt->col,
                "cannot return %s from function returning %s",
-               type_kind_to_str(value.kind), type_kind_to_str(ret));
+               type_to_str((type_t){.kind = value.kind, .name = value.name}),
+               type_to_str(fn->fn.return_type));
     sema->had_error = true;
   }
 }

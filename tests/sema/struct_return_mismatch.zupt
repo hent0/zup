@@ -1,0 +1,22 @@
+--TEST--
+returning the wrong struct type is an error
+--FILE--
+struct A {
+  x: i32,
+}
+
+struct B {
+  y: i32,
+}
+
+fn make(): A {
+  return B { y: 1 };
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot return B from function returning A [10:3]
+--EXIT--
+1

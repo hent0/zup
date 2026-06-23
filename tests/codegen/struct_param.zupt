@@ -13,7 +13,7 @@ pub fn main(): i32 {
 }
 --EXPECT--
 %Foo = type {}
-define internal void @take(%Foo %x) {
+define internal void @take(ptr byval(%Foo) %x) {
 entry:
   ret void
 }

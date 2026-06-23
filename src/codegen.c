@@ -304,7 +304,7 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
   return 0;
 }
 
-static value_t emit_call(ctx_t *ctx, expr_t *call);
+static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest);
 
 static unsigned type_bits(TypeKind kind) {
   switch (kind) {
@@ -413,7 +413,7 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   }
   case EXPR_CALL:
-    return emit_call(ctx, expr);
+    return emit_call(ctx, expr, NULL);
   case EXPR_CAST: {
     value_t operand = emit_value(ctx, expr->cast.operand);
     TypeKind from = operand.type.kind;
@@ -534,39 +534,86 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr) {
   };
 }
 
-static value_t emit_call(ctx_t *ctx, expr_t *call) {
+static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   const char *name = call->call.callee->id.name;
+  bool ret_struct = call->type.kind == TYPE_STRUCT;
 
   size_t n = call->call.arg_count;
-  value_t *argv = arena_alloc(ctx->arena, sizeof(value_t) * (n ? n : 1));
+  const char **argref = arena_alloc(ctx->arena, sizeof(char *) * (n ? n : 1));
+  type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (n ? n : 1));
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    argv[i++] = emit_value(ctx, arg);
+    if (arg->type.kind == TYPE_STRUCT) {
+      argref[i] = emit_addr(ctx, arg);
+    } else {
+      argref[i] = emit_value(ctx, arg).ref;
+    }
+    argtype[i] = arg->type;
+    i++;
+  }
+
+  const char *dest = sret_dest;
+  if (ret_struct && dest == NULL) {
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, call->type));
+    dest = arena_format(ctx->arena, "%%%u", slot);
   }
 
   value_t result;
-  if (call->type.kind == TYPE_VOID) {
+  if (ret_struct || call->type.kind == TYPE_VOID) {
     fprintf(ctx->out, "  call void @%s(", name);
-    result = (value_t){
-        .type = call->type,
-        .ref = NULL,
-    };
+    result = (value_t){.type = call->type, .ref = ret_struct ? dest : NULL};
   } else {
     unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = call %s @%s(", reg,
-            type_kind_to_ir(call->type.kind), name);
-    result = (value_t){
-        .type = call->type,
-        .ref = arena_format(ctx->arena, "%%%u", reg),
-    };
+    fprintf(ctx->out, "  %%%u = call %s @%s(", reg, ir_type(ctx, call->type),
+            name);
+    result =
+        (value_t){.type = call->type, .ref = arena_format(ctx->arena, "%%%u", reg)};
   }
 
+  const char *sep = "";
+  if (ret_struct) {
+    fprintf(ctx->out, "ptr sret(%s) %s", ir_type(ctx, call->type), dest);
+    sep = ", ";
+  }
   for (i = 0; i < n; i++) {
-    fprintf(ctx->out, "%s%s %s", i ? ", " : "",
-            type_kind_to_ir(argv[i].type.kind), argv[i].ref);
+    if (argtype[i].kind == TYPE_STRUCT) {
+      fprintf(ctx->out, "%sptr byval(%s) %s", sep, ir_type(ctx, argtype[i]),
+              argref[i]);
+    } else {
+      fprintf(ctx->out, "%s%s %s", sep, ir_type(ctx, argtype[i]), argref[i]);
+    }
+    sep = ", ";
   }
   fprintf(ctx->out, ")\n");
   return result;
+}
+
+static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
+  if (expr->kind == EXPR_STRUCT_LITERAL) {
+    const decl_t *strukt = find_struct(ctx, expr->type.name);
+    for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
+         fi = fi->next) {
+      int index = field_index(strukt, fi->name);
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
+              reg, expr->type.name, dest, index);
+      value_t value = emit_value(ctx, fi->value);
+      fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, value.type),
+              value.ref, reg);
+    }
+    return;
+  }
+  if (expr->kind == EXPR_CALL) {
+    emit_call(ctx, expr, dest);
+    return;
+  }
+  const char *src = emit_addr(ctx, expr);
+  unsigned int reg = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg, ir_type(ctx, expr->type),
+          src);
+  fprintf(ctx->out, "  store %s %%%u, ptr %s\n", ir_type(ctx, expr->type), reg,
+          dest);
 }
 
 static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
@@ -583,8 +630,14 @@ static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
     return 0;
   }
 
+  if (type.kind == TYPE_STRUCT) {
+    emit_struct_into(ctx, "%sret", value);
+    fprintf(ctx->out, "  ret void\n");
+    return 0;
+  }
+
   value_t val = emit_value(ctx, value);
-  fprintf(ctx->out, "  ret %s %s\n", type_kind_to_ir(type.kind), val.ref);
+  fprintf(ctx->out, "  ret %s %s\n", ir_type(ctx, type), val.ref);
   return 0;
 }
 
@@ -595,7 +648,7 @@ static int emit_expr(ctx_t *ctx, expr_t *expr) {
 
   switch (expr->kind) {
   case EXPR_CALL:
-    emit_call(ctx, expr);
+    emit_call(ctx, expr, NULL);
     return 0;
   default:
     NOT_IMPLEMENTED;
@@ -699,21 +752,8 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
 
       expr_t *init = stmt->binding.init;
-      if (stmt->binding.type.kind == TYPE_STRUCT && init != NULL &&
-          init->kind == EXPR_STRUCT_LITERAL) {
-        // Construct in place: store each field through its GEP.
-        for (field_init_t *fi = init->struct_literal.inits; fi != NULL;
-             fi = fi->next) {
-          int index = field_index(find_struct(ctx, stmt->binding.type.name),
-                                  fi->name);
-          unsigned int reg = ctx->reg++;
-          fprintf(ctx->out,
-                  "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n", reg,
-                  stmt->binding.type.name, ptr, index);
-          value_t value = emit_value(ctx, fi->value);
-          fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, value.type),
-                  value.ref, reg);
-        }
+      if (stmt->binding.type.kind == TYPE_STRUCT) {
+        emit_struct_into(ctx, ptr, init);
       } else {
         value_t value = emit_value(ctx, init);
         fprintf(ctx->out, "  store %s %s, ptr %s\n",
@@ -881,16 +921,26 @@ static const char *ir_type(ctx_t *ctx, type_t type) {
 }
 
 static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
-  fprintf(ctx->out, "declare %s @%s(", ir_type(ctx, decl->fn.return_type),
-          decl->name);
+  bool sret = decl->fn.return_type.kind == TYPE_STRUCT;
+  fprintf(ctx->out, "declare %s @%s(",
+          sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);
 
+  const char *sep = "";
+  if (sret) {
+    fprintf(ctx->out, "ptr sret(%s)", ir_type(ctx, decl->fn.return_type));
+    sep = ", ";
+  }
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    fprintf(ctx->out, "%s%s", ir_type(ctx, param->type),
-            param->next != NULL || decl->fn.variadic ? ", " : "");
-    if (param->next == NULL && decl->fn.variadic) {
-      fprintf(ctx->out, "...");
+    if (param->type.kind == TYPE_STRUCT) {
+      fprintf(ctx->out, "%sptr byval(%s)", sep, ir_type(ctx, param->type));
+    } else {
+      fprintf(ctx->out, "%s%s", sep, ir_type(ctx, param->type));
     }
+    sep = ", ";
+  }
+  if (decl->fn.variadic) {
+    fprintf(ctx->out, "%s...", sep);
   }
 
   fprintf(ctx->out, ")\n");
@@ -903,19 +953,37 @@ static int emit_fn(ctx_t *ctx, decl_t *decl) {
   ctx->loop_label = 0;
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
+  bool sret = decl->fn.return_type.kind == TYPE_STRUCT;
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-          ir_type(ctx, decl->fn.return_type), decl->name);
+          sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);
+
+  const char *sep = "";
+  if (sret) {
+    fprintf(ctx->out, "ptr sret(%s) %%sret", ir_type(ctx, decl->fn.return_type));
+    sep = ", ";
+  }
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    fprintf(ctx->out, "%s %%%s%s", ir_type(ctx, param->type), param->name,
-            param->next != NULL ? ", " : "");
+    if (param->type.kind == TYPE_STRUCT) {
+      fprintf(ctx->out, "%sptr byval(%s) %%%s", sep, ir_type(ctx, param->type),
+              param->name);
+    } else {
+      fprintf(ctx->out, "%s%s %%%s", sep, ir_type(ctx, param->type),
+              param->name);
+    }
+    sep = ", ";
   }
 
   fprintf(ctx->out, ") {\nentry:\n");
 
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
+    if (param->type.kind == TYPE_STRUCT) {
+      add_local(ctx, param->name, param->type,
+                arena_format(ctx->arena, "%%%s", param->name));
+      continue;
+    }
     if (!param->mutable || !stmt_assigns(decl->fn.body, param->name)) {
       continue;
     }

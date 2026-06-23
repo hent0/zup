@@ -1,0 +1,24 @@
+--TEST--
+structs pass by value: mutating a parameter does not affect the caller's struct
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Box {
+  v: i32,
+}
+
+fn bump(b: Box): i32 {
+  b.v = 999;
+  return b.v;
+}
+
+pub fn main(): i32 {
+  let b: Box = Box { v: 1 };
+  let inner: i32 = bump(b);
+  printf("%d %d\n", inner, b.v);
+  return 0;
+}
+--EXPECT--
+999 1
+--EXIT--
+0

@@ -1,0 +1,40 @@
+--TEST--
+struct parameters pass by pointer with byval; the callee reads fields through it
+--ARGS--
+--ir -o -
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+fn sum(p: Point): i32 {
+  return p.x + p.y;
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 3, y: 4 };
+  return sum(p);
+}
+--EXPECT--
+%Point = type { i32, i32 }
+define internal i32 @sum(ptr byval(%Point) %p) {
+entry:
+  %1 = getelementptr %Point, ptr %p, i32 0, i32 0
+  %2 = load i32, ptr %1
+  %3 = getelementptr %Point, ptr %p, i32 0, i32 1
+  %4 = load i32, ptr %3
+  %5 = add i32 %2, %4
+  ret i32 %5
+}
+
+define i32 @main() {
+entry:
+  %p = alloca %Point
+  %1 = getelementptr %Point, ptr %p, i32 0, i32 0
+  store i32 3, ptr %1
+  %2 = getelementptr %Point, ptr %p, i32 0, i32 1
+  store i32 4, ptr %2
+  %3 = call i32 @sum(ptr byval(%Point) %p)
+  ret i32 %3
+}
