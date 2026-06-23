@@ -68,6 +68,7 @@ typedef enum {
   TOKEN_TRUE,
   TOKEN_FALSE,
   TOKEN_CSTR,
+  TOKEN_STR,
   TOKEN_STRUCT,
 } TokenKind;
 

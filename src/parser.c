@@ -105,7 +105,11 @@ static type_t parse_type(parser_t *parser) {
     break;
   case TOKEN_CSTR:
     advance(parser);
-    type.kind = TYPE_STRING;
+    type.kind = TYPE_CSTR;
+    break;
+  case TOKEN_STR:
+    advance(parser);
+    type.kind = TYPE_STR;
     break;
   case TOKEN_ID:
     advance(parser);

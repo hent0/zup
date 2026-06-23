@@ -26,8 +26,10 @@ char *type_kind_to_ir(TypeKind kind) {
     return "float";
   case TYPE_F64:
     return "double";
-  case TYPE_STRING:
+  case TYPE_CSTR:
     return "ptr";
+  case TYPE_STR:
+    return "{ ptr, i64 }";
   default:
     return "?";
   }
@@ -59,8 +61,10 @@ char *type_kind_to_str(TypeKind kind) {
     return "f32";
   case TYPE_F64:
     return "f64";
-  case TYPE_STRING:
+  case TYPE_CSTR:
     return "cstr";
+  case TYPE_STR:
+    return "str";
   default:
     return "?";
   }

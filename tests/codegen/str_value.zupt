@@ -1,0 +1,23 @@
+--TEST--
+a str literal lowers to a fat { ptr, i64 } value; .len reads field 1
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  let s: str = "hello";
+  return s.len as i32;
+}
+--EXPECT--
+@.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
+define i32 @main() {
+entry:
+  %s = alloca { ptr, i64 }
+  %1 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0
+  store ptr @.str.0, ptr %1
+  %2 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1
+  store i64 5, ptr %2
+  %3 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1
+  %4 = load i64, ptr %3
+  %5 = trunc i64 %4 to i32
+  ret i32 %5
+}

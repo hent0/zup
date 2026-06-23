@@ -1,0 +1,11 @@
+--TEST--
+str exposes only ptr and len; other fields are an error
+--FILE--
+pub fn main(): i32 {
+  let s: str = "hi";
+  return s.bogus;
+}
+--EXPECTERR--
+zup: error: str has no field 'bogus' [3:12]
+--EXIT--
+1

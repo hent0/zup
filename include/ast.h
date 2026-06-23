@@ -20,7 +20,8 @@ typedef enum {
   TYPE_U64,
   TYPE_F32,
   TYPE_F64,
-  TYPE_STRING,
+  TYPE_CSTR,
+  TYPE_STR,
   TYPE_STRUCT,
 } TypeKind;
 

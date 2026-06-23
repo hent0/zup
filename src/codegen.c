@@ -132,6 +132,10 @@ static void add_local(ctx_t *ctx, const char *name, type_t type,
   ctx->locals_tail = local;
 }
 
+static bool is_aggregate(TypeKind kind) {
+  return kind == TYPE_STRUCT || kind == TYPE_STR;
+}
+
 static const decl_t *find_struct(ctx_t *ctx, const char *name) {
   for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
     if (strcmp(s->decl->name, name) == 0) {
@@ -354,6 +358,14 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   case EXPR_FIELD: {
     const char *base = emit_addr(ctx, expr->field.base);
     type_t base_type = expr->field.base->type;
+    if (base_type.kind == TYPE_STR) {
+      int index = strcmp(expr->field.name, "ptr") == 0 ? 0 : 1;
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out,
+              "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 %d\n",
+              reg, base, index);
+      return arena_format(ctx->arena, "%%%u", reg);
+    }
     const decl_t *strukt = find_struct(ctx, base_type.name);
     int index = field_index(strukt, expr->field.name);
     unsigned int reg = ctx->reg++;
@@ -389,7 +401,7 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   case EXPR_STRING:
     return (value_t){
-        .type = expr->type,
+        .type = (type_t){.kind = TYPE_CSTR},
         .ref = arena_format(ctx->arena, "@.str.%d", string_index(ctx, expr)),
     };
   case EXPR_ID: {
@@ -554,19 +566,24 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   } else {
     name = call->call.callee->id.name;
   }
-  bool ret_struct = call->type.kind == TYPE_STRUCT;
+  bool ret_struct = is_aggregate(call->type.kind);
 
   size_t n = call->call.arg_count;
   const char **argref = arena_alloc(ctx->arena, sizeof(char *) * (n ? n : 1));
   type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (n ? n : 1));
+  bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (n ? n : 1));
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    if (arg->type.kind == TYPE_STRUCT) {
+    if (is_aggregate(arg->type.kind) && arg->kind != EXPR_STRING) {
       argref[i] = emit_addr(ctx, arg);
+      argtype[i] = arg->type;
+      argbyval[i] = true;
     } else {
-      argref[i] = emit_value(ctx, arg).ref;
+      value_t v = emit_value(ctx, arg);
+      argref[i] = v.ref;
+      argtype[i] = v.type;
+      argbyval[i] = false;
     }
-    argtype[i] = arg->type;
     i++;
   }
 
@@ -599,7 +616,7 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     sep = ", ";
   }
   for (i = 0; i < n; i++) {
-    if (argtype[i].kind == TYPE_STRUCT) {
+    if (argbyval[i]) {
       fprintf(ctx->out, "%sptr byval(%s) %s", sep, ir_type(ctx, argtype[i]),
               argref[i]);
     } else {
@@ -612,6 +629,20 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
 }
 
 static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
+  if (expr->kind == EXPR_STRING) {
+    unsigned int p = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n", p,
+            dest);
+    fprintf(ctx->out, "  store ptr @.str.%d, ptr %%%u\n", string_index(ctx, expr),
+            p);
+    unsigned int l = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n", l,
+            dest);
+    fprintf(ctx->out, "  store i64 %zu, ptr %%%u\n", expr->string.length, l);
+    return;
+  }
   if (expr->kind == EXPR_STRUCT_LITERAL) {
     const decl_t *strukt = find_struct(ctx, expr->type.name);
     for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
@@ -652,7 +683,7 @@ static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
     return 0;
   }
 
-  if (type.kind == TYPE_STRUCT) {
+  if (is_aggregate(type.kind)) {
     emit_struct_into(ctx, "%sret", value);
     fprintf(ctx->out, "  ret void\n");
     return 0;
@@ -774,7 +805,7 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
 
       expr_t *init = stmt->binding.init;
-      if (stmt->binding.type.kind == TYPE_STRUCT) {
+      if (is_aggregate(stmt->binding.type.kind)) {
         emit_struct_into(ctx, ptr, init);
       } else {
         value_t value = emit_value(ctx, init);
@@ -943,7 +974,7 @@ static const char *ir_type(ctx_t *ctx, type_t type) {
 }
 
 static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
-  bool sret = decl->fn.return_type.kind == TYPE_STRUCT;
+  bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "declare %s @%s(",
           sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);
 
@@ -954,7 +985,7 @@ static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
   }
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    if (param->type.kind == TYPE_STRUCT) {
+    if (is_aggregate(param->type.kind)) {
       fprintf(ctx->out, "%sptr byval(%s)", sep, ir_type(ctx, param->type));
     } else {
       fprintf(ctx->out, "%s%s", sep, ir_type(ctx, param->type));
@@ -975,7 +1006,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->loop_label = 0;
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
-  bool sret = decl->fn.return_type.kind == TYPE_STRUCT;
+  bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
           sret ? "void" : ir_type(ctx, decl->fn.return_type), name);
@@ -989,7 +1020,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
        param = param->next) {
     if (param->is_self) {
       fprintf(ctx->out, "%sptr %%%s", sep, param->name);
-    } else if (param->type.kind == TYPE_STRUCT) {
+    } else if (is_aggregate(param->type.kind)) {
       fprintf(ctx->out, "%sptr byval(%s) %%%s", sep, ir_type(ctx, param->type),
               param->name);
     } else {
@@ -1003,7 +1034,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
 
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    if (param->type.kind == TYPE_STRUCT) {
+    if (is_aggregate(param->type.kind)) {
       add_local(ctx, param->name, param->type,
                 arena_format(ctx->arena, "%%%s", param->name));
       continue;

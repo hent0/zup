@@ -9,6 +9,6 @@ pub fn main(): i32 {
   return one("hi");
 }
 --EXPECTERR--
-zup: error: cannot pass cstr as argument 'x' of 'one' (expected i32) [6:10]
+zup: error: cannot pass str as argument 'x' of 'one' (expected i32) [6:10]
 --EXIT--
 1

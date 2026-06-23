@@ -1,0 +1,18 @@
+--TEST--
+a str passes by value to a zup function, which reads its length
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+fn length(s: str): i32 {
+  return s.len as i32;
+}
+
+pub fn main(): i32 {
+  let s: str = "hello";
+  printf("%d\n", length(s));
+  return 0;
+}
+--EXPECT--
+5
+--EXIT--
+0

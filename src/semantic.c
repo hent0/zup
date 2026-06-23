@@ -76,6 +76,9 @@ typedef struct {
 } exprty_t;
 
 static bool assignable(type_t to, exprty_t from) {
+  if (to.kind == TYPE_CSTR && from.kind == TYPE_STR) {
+    return true;
+  }
   if (to.kind != from.kind) {
     return false;
   }
@@ -332,7 +335,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_STRING:
-    result = (exprty_t){.kind = TYPE_STRING, .ok = true};
+    result = (exprty_t){.kind = TYPE_STR, .ok = true};
     break;
   case EXPR_CALL:
     result = expr->call.callee->kind == EXPR_FIELD ? check_method_call(sema, expr)
@@ -504,6 +507,19 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     exprty_t base = check_expr(sema, expr->field.base, TYPE_UNKNOWN);
     if (!base.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (base.kind == TYPE_STR) {
+      if (strcmp(expr->field.name, "ptr") == 0) {
+        result = (exprty_t){.kind = TYPE_CSTR, .ok = true};
+      } else if (strcmp(expr->field.name, "len") == 0) {
+        result = (exprty_t){.kind = TYPE_I64, .ok = true};
+      } else {
+        diag_error(sema->src, expr->line, expr->col, "str has no field '%s'",
+                   expr->field.name);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      }
       break;
     }
     if (base.kind != TYPE_STRUCT) {

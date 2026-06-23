@@ -1,0 +1,14 @@
+--TEST--
+str.ptr yields a cstr usable at a C call, so the bytes print
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let s: str = "hello";
+  printf("%s\n", s.ptr);
+  return 0;
+}
+--EXPECT--
+hello
+--EXIT--
+0

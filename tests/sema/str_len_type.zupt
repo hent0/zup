@@ -1,0 +1,12 @@
+--TEST--
+str.len is an i64
+--FILE--
+pub fn main(): i32 {
+  let s: str = "hi";
+  let n: i32 = s.len;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign i64 to variable 'n' of type i32 [3:3]
+--EXIT--
+1
