@@ -1,0 +1,20 @@
+--TEST--
+assigning to an aggregate field replaces the whole value
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Person {
+  name: str,
+  age: i32,
+}
+
+pub fn main(): i32 {
+  let p: Person = Person { name: "Al", age: 1 };
+  p.name = "Bob";
+  printf("%s\n", p.name.ptr);
+  return 0;
+}
+--EXPECT--
+Bob
+--EXIT--
+0

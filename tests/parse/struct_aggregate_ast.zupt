@@ -1,0 +1,48 @@
+--TEST--
+a field may be another struct; a literal nests struct literals, and access chains
+--ARGS--
+--ast
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+struct Line {
+  a: Point,
+  b: Point,
+}
+
+pub fn main(): i32 {
+  let l: Line = Line { a: Point { x: 1, y: 2 }, b: Point { x: 3, y: 4 } };
+  return l.a.x;
+}
+--EXPECT--
+Container (file) (3 members)
+  Struct priv 'Point'
+    field x: i32
+    field y: i32
+  Struct priv 'Line'
+    field a: Point
+    field b: Point
+  FnDecl pub 'main' -> i32
+    Let l: Line
+      StructLit 'Line'
+        field a
+          StructLit 'Point'
+            field x
+              Number literal 1
+            field y
+              Number literal 2
+        field b
+          StructLit 'Point'
+            field x
+              Number literal 3
+            field y
+              Number literal 4
+    Return
+      Field x
+        Field a
+          Id l
+--EXIT--
+0

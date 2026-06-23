@@ -156,6 +156,16 @@ static int field_index(const decl_t *strukt, const char *name) {
   return -1;
 }
 
+static field_t *find_field(const decl_t *strukt, const char *name) {
+  for (field_t *field = strukt->strct.fields; field != NULL;
+       field = field->next) {
+    if (strcmp(field->name, name) == 0) {
+      return field;
+    }
+  }
+  return NULL;
+}
+
 // Re-encode decoded bytes into LLVM's c"..." form.
 static void emit_escaped(FILE *out, const char *bytes, size_t len) {
   for (size_t i = 0; i < len; i++) {
@@ -647,13 +657,19 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     const decl_t *strukt = find_struct(ctx, expr->type.name);
     for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
          fi = fi->next) {
+      field_t *field = find_field(strukt, fi->name);
       int index = field_index(strukt, fi->name);
       unsigned int reg = ctx->reg++;
       fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
               reg, expr->type.name, dest, index);
-      value_t value = emit_value(ctx, fi->value);
-      fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, value.type),
-              value.ref, reg);
+      const char *slot = arena_format(ctx->arena, "%%%u", reg);
+      if (is_aggregate(field->type.kind)) {
+        emit_struct_into(ctx, slot, fi->value);
+      } else {
+        value_t value = emit_value(ctx, fi->value);
+        fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
+                value.ref, slot);
+      }
     }
     return;
   }
@@ -816,6 +832,10 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     }
     case STMT_ASSIGN: {
       const char *addr = emit_addr(ctx, stmt->assign.target);
+      if (is_aggregate(stmt->assign.target->type.kind)) {
+        emit_struct_into(ctx, addr, stmt->assign.value);
+        break;
+      }
       value_t value = emit_value(ctx, stmt->assign.value);
       fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
               value.ref, addr);

@@ -1,0 +1,19 @@
+--TEST--
+a struct field that is itself a struct is constructed and read through a chain
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+struct Line {
+  a: Point,
+  b: Point,
+}
+
+pub fn main(): i32 {
+  let l: Line = Line { a: Point { x: 1, y: 2 }, b: Point { x: 3, y: 4 } };
+  return l.a.x + l.b.y;
+}
+--EXIT--
+5

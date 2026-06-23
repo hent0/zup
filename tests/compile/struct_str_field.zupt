@@ -1,0 +1,19 @@
+--TEST--
+a struct holds a str field that is constructed and read back
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Person {
+  name: str,
+  age: i32,
+}
+
+pub fn main(): i32 {
+  let p: Person = Person { name: "Alice", age: 30 };
+  printf("%s is %d (%d chars)\n", p.name.ptr, p.age, p.name.len as i32);
+  return 0;
+}
+--EXPECT--
+Alice is 30 (5 chars)
+--EXIT--
+0

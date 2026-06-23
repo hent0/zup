@@ -1,0 +1,31 @@
+--TEST--
+constructing an aggregate field recurses: the str is built into the field slot
+--ARGS--
+--ir -o -
+--FILE--
+struct Person {
+  name: str,
+  age: i32,
+}
+
+pub fn main(): i32 {
+  let p: Person = Person { name: "Al", age: 7 };
+  return p.age;
+}
+--EXPECT--
+@.str.0 = private unnamed_addr constant [3 x i8] c"Al\00"
+%Person = type { { ptr, i64 }, i32 }
+define i32 @main() {
+entry:
+  %p = alloca %Person
+  %1 = getelementptr %Person, ptr %p, i32 0, i32 0
+  %2 = getelementptr { ptr, i64 }, ptr %1, i32 0, i32 0
+  store ptr @.str.0, ptr %2
+  %3 = getelementptr { ptr, i64 }, ptr %1, i32 0, i32 1
+  store i64 2, ptr %3
+  %4 = getelementptr %Person, ptr %p, i32 0, i32 1
+  store i32 7, ptr %4
+  %5 = getelementptr %Person, ptr %p, i32 0, i32 1
+  %6 = load i32, ptr %5
+  ret i32 %6
+}
