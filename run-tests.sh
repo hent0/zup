@@ -27,8 +27,8 @@
 #   * Otherwise the source is compiled (`zup <file> -o <bin>`) and the
 #     resulting binary is executed; its stdout/exit are checked.
 #
-# On FAIL, writes <test>.out and <test>.diff next to the test for inspection.
-# On PASS, removes any stale artifacts from previous runs.
+# On FAIL, the diff is printed inline. No files are written next to the test;
+# any stale .out/.err/.diff artifacts from older runs are removed at startup.
 
 set -u
 
@@ -102,7 +102,15 @@ tmp_expect=$(mktemp)
 tmp_list=$(mktemp)
 tmp_stdout=$(mktemp)
 tmp_stderr=$(mktemp)
-trap 'rm -f "$tmp_src" "$tmp_bin" "$tmp_bin.ll" "$tmp_expect" "$tmp_list" "$tmp_stdout" "$tmp_stderr"' EXIT INT TERM
+tmp_act=$(mktemp)
+tmp_aerr=$(mktemp)
+tmp_diff=$(mktemp)
+cleanup() {
+    rm -f "$tmp_src" "$tmp_bin" "$tmp_bin.ll" "$tmp_expect" "$tmp_list" \
+        "$tmp_stdout" "$tmp_stderr" "$tmp_act" "$tmp_aerr" "$tmp_diff"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 if [ $# -gt 0 ]; then
     arg=$1
@@ -213,42 +221,37 @@ while IFS= read -r test; do
     fi
     [ "$status" != "$exit_expect" ] && ok=false
 
-    out_file=${test%.zupt}.out
-    err_file=${test%.zupt}.err
-    diff_file=${test%.zupt}.diff
-
     should_stop=false
 
     if $ok; then
         $ONLY_FAILURES || { emit_header; printf "  ${GREEN}PASS${NC}  ${ITALIC}%s${NC} — %s\n" "$base" "$name"; }
-        rm -f "$out_file" "$err_file" "$diff_file"
         pass=$((pass + 1))
     else
         emit_header
         printf "  ${RED}FAIL${NC}  ${ITALIC}%s${NC} — %s\n" "$base" "$name"
-        printf '%s\n' "$actual" > "$out_file"
-        printf '%s\n' "$actual_err" > "$err_file"
-        : > "$diff_file"
+        printf '%s\n' "$actual" > "$tmp_act"
+        printf '%s\n' "$actual_err" > "$tmp_aerr"
+        : > "$tmp_diff"
         if $has_expect && [ "$actual" != "$expect" ]; then
             printf '%s\n' "$expect" > "$tmp_expect"
             {
                 echo "--- stdout"
-                diff --color -u "$tmp_expect" "$out_file" 2>/dev/null || true
-            } >> "$diff_file"
+                diff --color -u "$tmp_expect" "$tmp_act" 2>/dev/null || true
+            } >> "$tmp_diff"
         fi
         if $has_expecterr && [ "$actual_err" != "$expecterr" ]; then
             printf '%s\n' "$expecterr" > "$tmp_expect"
             {
                 echo "--- stderr"
-                diff --color -u "$tmp_expect" "$err_file" 2>/dev/null || true
-            } >> "$diff_file"
+                diff --color -u "$tmp_expect" "$tmp_aerr" 2>/dev/null || true
+            } >> "$tmp_diff"
         elif ! $has_expecterr && [ -n "$actual_err" ]; then
-            { echo "--- unexpected stderr (no --EXPECTERR-- section)"; cat "$err_file"; } >> "$diff_file"
+            { echo "--- unexpected stderr (no --EXPECTERR-- section)"; cat "$tmp_aerr"; } >> "$tmp_diff"
         fi
         if [ "$status" != "$exit_expect" ]; then
-            printf -- "--- exit: expected %s, got %s\n" "$exit_expect" "$status" >> "$diff_file"
+            printf -- "--- exit: expected %s, got %s\n" "$exit_expect" "$status" >> "$tmp_diff"
         fi
-        $NO_DIFF || sed 's/^/        /' "$diff_file"
+        $NO_DIFF || sed 's/^/        /' "$tmp_diff"
         fail=$((fail + 1))
         $FAIL_FIRST && should_stop=true
     fi
