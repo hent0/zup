@@ -1,0 +1,8 @@
+--TEST--
+parentheses override precedence at runtime: (2 + 3) * 4 = 20
+--FILE--
+pub fn main(): i32 {
+  return (2 + 3) * 4;
+}
+--EXIT--
+20

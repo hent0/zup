@@ -1,0 +1,15 @@
+--TEST--
+parentheses override precedence: the add is emitted before the mul
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  return (2 + 3) * 4;
+}
+--EXPECT--
+define i32 @main() {
+entry:
+  %1 = add i32 2, 3
+  %2 = mul i32 %1, 4
+  ret i32 %2
+}

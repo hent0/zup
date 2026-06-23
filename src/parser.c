@@ -220,6 +220,11 @@ static expr_t *parse_primary(parser_t *parser) {
     }
     return ast_id_init(token, parser->arena);
   }
+  case TOKEN_LPAREN:
+    advance(parser);
+    expr_t *inner = parse_expr(parser);
+    expect(parser, TOKEN_RPAREN, "expected ')'");
+    return inner;
   default:
     parse_error(parser, "expected an expression");
     return NULL;

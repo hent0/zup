@@ -1,0 +1,8 @@
+--TEST--
+grouping changes the result: (10 - 2) / 2 = 4, not 10 - 2 / 2 = 9
+--FILE--
+pub fn main(): i32 {
+  return (10 - 2) / 2;
+}
+--EXIT--
+4

@@ -1,0 +1,8 @@
+--TEST--
+nested parenthesized groups: (1 + 2) * (3 + 4) = 21
+--FILE--
+pub fn main(): i32 {
+  return (1 + 2) * (3 + 4);
+}
+--EXIT--
+21

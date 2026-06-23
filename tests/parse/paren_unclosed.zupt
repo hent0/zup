@@ -1,0 +1,10 @@
+--TEST--
+a parenthesized expression must be closed
+--FILE--
+pub fn main(): i32 {
+  return (2 + 3;
+}
+--EXPECTERR--
+zup: error: expected ')' (got TOKEN_SEMICOLON) [2:16]
+--EXIT--
+1

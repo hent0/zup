@@ -1,0 +1,19 @@
+--TEST--
+parentheses regroup an expression and do not appear as a node
+--ARGS--
+--ast
+--FILE--
+pub fn main(): i32 {
+  return (2 + 3) * 4;
+}
+--EXPECT--
+Container (file) (1 members)
+  FnDecl pub 'main' -> i32
+    Return
+      Binary *
+        Binary +
+          Number literal 2
+          Number literal 3
+        Number literal 4
+--EXIT--
+0
