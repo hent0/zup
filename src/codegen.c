@@ -242,6 +242,9 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
   case STMT_BINDING:
     return collect_expr(ctx, stmt->binding.init);
   case STMT_ASSIGN:
+    if (collect_expr(ctx, stmt->assign.target) != 0) {
+      return 1;
+    }
     return collect_expr(ctx, stmt->assign.value);
   case STMT_WHILE:
     collect_expr(ctx, stmt->while_loop.cond);
@@ -631,14 +634,23 @@ static bool block_terminates(stmt_t *body) {
 static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 
+static const char *lvalue_root_name(const expr_t *target) {
+  while (target->kind == EXPR_FIELD) {
+    target = target->field.base;
+  }
+  return target->kind == EXPR_ID ? target->id.name : NULL;
+}
+
 static bool stmt_assigns(stmt_t *body, const char *name) {
   for (stmt_t *s = body; s != NULL; s = s->next) {
     switch (s->kind) {
-    case STMT_ASSIGN:
-      if (strcmp(s->assign.name, name) == 0) {
+    case STMT_ASSIGN: {
+      const char *root = lvalue_root_name(s->assign.target);
+      if (root != NULL && strcmp(root, name) == 0) {
         return true;
       }
       break;
+    }
     case STMT_IF:
       if (stmt_assigns(s->if_stmt.then_body, name) ||
           stmt_assigns(s->if_stmt.else_body, name)) {
@@ -710,21 +722,10 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       break;
     }
     case STMT_ASSIGN: {
-      ctx_local_t *local = find_local(ctx, stmt->assign.name);
-      if (local != NULL) {
-        value_t value = emit_value(ctx, stmt->assign.value);
-        fprintf(ctx->out, "  store %s %s, ptr %s\n",
-                type_kind_to_ir(local->type.kind), value.ref, local->ptr);
-        break;
-      }
-
-      ctx_global_t *global = find_global(ctx, stmt->assign.name);
-      if (global != NULL) {
-        value_t value = emit_value(ctx, stmt->assign.value);
-        fprintf(ctx->out, "  store %s %s, ptr @%s\n",
-                type_kind_to_ir(global->type.kind), value.ref, global->name);
-        break;
-      }
+      const char *addr = emit_addr(ctx, stmt->assign.target);
+      value_t value = emit_value(ctx, stmt->assign.value);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
+              value.ref, addr);
       break;
     }
     case STMT_WHILE: {

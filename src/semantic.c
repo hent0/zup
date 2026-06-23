@@ -95,6 +95,13 @@ static field_t *struct_field(const decl_t *strukt, const char *name) {
   return NULL;
 }
 
+static const char *lvalue_root(const expr_t *target) {
+  while (target->kind == EXPR_FIELD) {
+    target = target->field.base;
+  }
+  return target->kind == EXPR_ID ? target->id.name : NULL;
+}
+
 static bool is_const_init(const expr_t *expr) {
   if (expr == NULL) {
     return false;
@@ -544,37 +551,44 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     break;
   }
   case STMT_ASSIGN: {
+    expr_t *target = stmt->assign.target;
+    exprty_t lhs = check_expr(sema, target, TYPE_UNKNOWN);
+
+    // Mutability is a property of the binding the lvalue is rooted at.
+    const char *root = lvalue_root(target);
     const local_t *local =
-        sema->scope ? scope_lookup(sema->scope, stmt->assign.name) : NULL;
-
-    if (local == NULL && sema->globals != NULL) {
-      local = scope_lookup(sema->globals, stmt->assign.name);
+        (root && sema->scope) ? scope_lookup(sema->scope, root) : NULL;
+    if (local == NULL && root && sema->globals != NULL) {
+      local = scope_lookup(sema->globals, root);
     }
 
-    if (local == NULL) {
-      diag_error(sema->src, stmt->line, stmt->col, "undefined name '%s'",
-                 stmt->assign.name);
-      sema->had_error = true;
-      check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
-      break;
-    }
-
-    if (!local->mutable) {
+    if (local != NULL && !local->mutable) {
       diag_error(sema->src, stmt->line, stmt->col,
                  local->is_loop_var ? "cannot assign to loop variable '%s'"
                                     : "cannot assign to const '%s'",
-                 stmt->assign.name);
+                 root);
       sema->had_error = true;
       check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
       break;
     }
-    exprty_t value = check_expr(sema, stmt->assign.value, local->type.kind);
-    if (value.ok && !assignable(local->type, value)) {
-      diag_error(sema->src, stmt->line, stmt->col,
-                 "cannot assign %s to variable '%s' of type %s",
-                 type_kind_to_str(value.kind), stmt->assign.name,
-                 type_kind_to_str(local->type.kind));
-      sema->had_error = true;
+
+    exprty_t value = check_expr(sema, stmt->assign.value, lhs.kind);
+    if (lhs.ok && value.ok) {
+      type_t to = {.kind = lhs.kind, .name = lhs.name};
+      if (!assignable(to, value)) {
+        if (target->kind == EXPR_FIELD) {
+          diag_error(sema->src, stmt->assign.value->line,
+                     stmt->assign.value->col,
+                     "cannot assign %s to field '%s' of type %s",
+                     type_kind_to_str(value.kind), target->field.name,
+                     type_to_str(to));
+        } else {
+          diag_error(sema->src, stmt->line, stmt->col,
+                     "cannot assign %s to variable '%s' of type %s",
+                     type_kind_to_str(value.kind), root, type_to_str(to));
+        }
+        sema->had_error = true;
+      }
     }
     break;
   }

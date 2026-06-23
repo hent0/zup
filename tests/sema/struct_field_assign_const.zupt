@@ -1,0 +1,17 @@
+--TEST--
+fields of a const struct binding cannot be mutated
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+pub fn main(): i32 {
+  const p: Point = Point { x: 1, y: 2 };
+  p.x = 5;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'p' [8:3]
+--EXIT--
+1

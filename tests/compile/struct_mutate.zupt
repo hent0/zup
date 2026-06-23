@@ -1,0 +1,21 @@
+--TEST--
+field assignments update the struct in place and are observable on read-back
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 1, y: 2 };
+  p.x = 7;
+  p.y = 9;
+  printf("%d %d\n", p.x, p.y);
+  return 0;
+}
+--EXPECT--
+7 9
+--EXIT--
+0

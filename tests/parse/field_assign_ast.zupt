@@ -1,0 +1,36 @@
+--TEST--
+assignment targets generalize to lvalues: a field path parses as the assign target
+--ARGS--
+--ast
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 1, y: 2 };
+  p.x = 5;
+  return p.x;
+}
+--EXPECT--
+Container (file) (2 members)
+  Struct priv 'Point'
+    field x: i32
+    field y: i32
+  FnDecl pub 'main' -> i32
+    Let p: Point
+      StructLit 'Point'
+        field x
+          Number literal 1
+        field y
+          Number literal 2
+    Assign
+      Field x
+        Id p
+      Number literal 5
+    Return
+      Field x
+        Id p
+--EXIT--
+0

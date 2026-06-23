@@ -167,7 +167,7 @@ struct stmt {
       expr_t *init;
     } binding;
     struct {
-      char *name;
+      expr_t *target;
       expr_t *value;
     } assign;
     struct {
@@ -283,7 +283,7 @@ stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
                     stmt_t *else_body, arena_t *arena);
-stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
+stmt_t *ast_assign_init(token_t token, expr_t *target, expr_t *value,
                         arena_t *arena);
 stmt_t *ast_binding_init(token_t token, char *name, type_t type, bool mutable,
                          expr_t *init, arena_t *arena);

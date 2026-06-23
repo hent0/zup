@@ -421,10 +421,10 @@ stmt_t *ast_binding_init(token_t token, char *name, type_t type, bool mutable,
   return stmt;
 }
 
-stmt_t *ast_assign_init(token_t token, char *name, expr_t *value,
+stmt_t *ast_assign_init(token_t token, expr_t *target, expr_t *value,
                         arena_t *arena) {
   stmt_t *stmt = ast_stmt_init(token, STMT_ASSIGN, arena);
-  stmt->assign.name = name;
+  stmt->assign.target = target;
   stmt->assign.value = value;
   return stmt;
 }
@@ -642,7 +642,12 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
     dump_expr(stmt->binding.init, depth + 1);
     break;
   case STMT_ASSIGN:
-    printf("Assign %s\n", stmt->assign.name);
+    if (stmt->assign.target->kind == EXPR_ID) {
+      printf("Assign %s\n", stmt->assign.target->id.name);
+    } else {
+      printf("Assign\n");
+      dump_expr(stmt->assign.target, depth + 1);
+    }
     dump_expr(stmt->assign.value, depth + 1);
     break;
   case STMT_WHILE:

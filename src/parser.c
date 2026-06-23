@@ -627,7 +627,7 @@ static stmt_t *parse_stmt(parser_t *parser) {
   }
 
   if (match(parser, TOKEN_EQUAL)) {
-    if (expr->kind != EXPR_ID) {
+    if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD) {
       parse_error(parser, "invalid assignment target");
       return NULL;
     }
@@ -636,7 +636,7 @@ static stmt_t *parse_stmt(parser_t *parser) {
       return NULL;
     }
     expect(parser, TOKEN_SEMICOLON, "expected ';' after assignment");
-    return ast_assign_init(start, expr->id.name, value, parser->arena);
+    return ast_assign_init(start, expr, value, parser->arena);
   }
 
   expect(parser, TOKEN_SEMICOLON, "expected ';' after expression statement");

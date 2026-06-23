@@ -1,0 +1,17 @@
+--TEST--
+a field assignment must match the field's declared type
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+pub fn main(): i32 {
+  let p: Point = Point { x: 1, y: 2 };
+  p.x = true;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign bool to field 'x' of type i32 [8:9]
+--EXIT--
+1
