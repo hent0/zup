@@ -1,0 +1,20 @@
+--TEST--
+arrays pass by value: mutating a parameter does not affect the caller's array
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+fn clobber(a: [2]i32): i32 {
+  a[0] = 0;
+  return a[0];
+}
+
+pub fn main(): i32 {
+  let a: [2]i32 = [5, 7];
+  let inner: i32 = clobber(a);
+  printf("%d %d\n", inner, a[0]);
+  return 0;
+}
+--EXPECT--
+0 5
+--EXIT--
+0

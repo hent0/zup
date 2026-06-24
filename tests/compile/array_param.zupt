@@ -1,0 +1,13 @@
+--TEST--
+an array passes to a function and its elements are summed in the callee
+--FILE--
+fn sum(a: [3]i32): i32 {
+  return a[0] + a[1] + a[2];
+}
+
+pub fn main(): i32 {
+  let a: [3]i32 = [1, 2, 3];
+  return sum(a);
+}
+--EXIT--
+6

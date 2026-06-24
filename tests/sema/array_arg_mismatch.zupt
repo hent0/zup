@@ -1,0 +1,15 @@
+--TEST--
+passing an array of the wrong length is an error
+--FILE--
+fn take(a: [3]i32): i32 {
+  return a[0];
+}
+
+pub fn main(): i32 {
+  let a: [2]i32 = [1, 2];
+  return take(a);
+}
+--EXPECTERR--
+zup: error: cannot pass [2]i32 as argument 'a' of 'take' (expected [3]i32) [7:10]
+--EXIT--
+1

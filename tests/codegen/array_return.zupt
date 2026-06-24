@@ -1,0 +1,33 @@
+--TEST--
+returning an array uses a caller-allocated sret out-parameter
+--ARGS--
+--ir -o -
+--FILE--
+fn make(): [3]i32 {
+  return [10, 20, 30];
+}
+
+pub fn main(): i32 {
+  let a: [3]i32 = make();
+  return a[1];
+}
+--EXPECT--
+define internal void @make(ptr sret([3 x i32]) %sret) {
+entry:
+  %1 = getelementptr [3 x i32], ptr %sret, i32 0, i32 0
+  store i32 10, ptr %1
+  %2 = getelementptr [3 x i32], ptr %sret, i32 0, i32 1
+  store i32 20, ptr %2
+  %3 = getelementptr [3 x i32], ptr %sret, i32 0, i32 2
+  store i32 30, ptr %3
+  ret void
+}
+
+define i32 @main() {
+entry:
+  %a = alloca [3 x i32]
+  call void @make(ptr sret([3 x i32]) %a)
+  %1 = getelementptr [3 x i32], ptr %a, i32 0, i32 1
+  %2 = load i32, ptr %1
+  ret i32 %2
+}

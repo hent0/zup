@@ -108,6 +108,13 @@ static bool assignable(type_t to, exprty_t from) {
   return true;
 }
 
+static type_t exprty_type(exprty_t e) {
+  return (type_t){.kind = e.kind,
+                  .name = e.name,
+                  .element = e.element,
+                  .array_length = e.array_length};
+}
+
 static field_t *struct_field(const decl_t *strukt, const char *name) {
   for (field_t *field = strukt->strct.fields; field != NULL;
        field = field->next) {
@@ -214,8 +221,8 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
       if (at.ok && !assignable(param->type, at)) {
         diag_error(sema->src, call->line, call->col,
                    "cannot pass %s as argument '%s' of '%s' (expected %s)",
-                   type_to_str((type_t){.kind = at.kind, .name = at.name}),
-                   param->name, name, type_to_str(param->type));
+                   type_to_str(exprty_type(at)), param->name, name,
+                   type_to_str(param->type));
         sema->had_error = true;
       }
       param = param->next;
@@ -224,6 +231,8 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
 
   return (exprty_t){.kind = fn->fn.return_type.kind,
                     .name = fn->fn.return_type.name,
+                    .element = fn->fn.return_type.element,
+                    .array_length = fn->fn.return_type.array_length,
                     .ok = true};
 }
 
@@ -678,8 +687,7 @@ static void check_return(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   if (value.ok && !assignable(fn->fn.return_type, value)) {
     diag_error(sema->src, stmt->line, stmt->col,
                "cannot return %s from function returning %s",
-               type_to_str((type_t){.kind = value.kind, .name = value.name}),
-               type_to_str(fn->fn.return_type));
+               type_to_str(exprty_type(value)), type_to_str(fn->fn.return_type));
     sema->had_error = true;
   }
 }

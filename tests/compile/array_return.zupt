@@ -1,0 +1,13 @@
+--TEST--
+a function returns an array by value; the caller reads an element
+--FILE--
+fn make(): [3]i32 {
+  return [10, 20, 30];
+}
+
+pub fn main(): i32 {
+  let a: [3]i32 = make();
+  return a[1];
+}
+--EXIT--
+20
