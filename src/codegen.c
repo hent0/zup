@@ -717,8 +717,7 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   const param_t *param = fn ? fn->fn.params : NULL;
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    type_t ptype =
-        param ? param->type : (type_t){.kind = TYPE_UNKNOWN};
+    type_t ptype = param ? param->type : (type_t){.kind = TYPE_UNKNOWN};
     if (ptype.kind == TYPE_SLICE && arg->type.kind == TYPE_ARRAY) {
       unsigned int slot = ctx->reg++;
       fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
@@ -787,7 +786,15 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
 static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr);
 
 static void emit_slice_from_array(ctx_t *ctx, const char *dest, expr_t *arr) {
-  const char *base = emit_addr(ctx, arr);
+  const char *base;
+  if (arr->kind == EXPR_ARRAY) {
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, arr->type));
+    base = arena_format(ctx->arena, "%%%u", slot);
+    emit_struct_into(ctx, base, arr);
+  } else {
+    base = emit_addr(ctx, arr);
+  }
   unsigned int p = ctx->reg++;
   fprintf(ctx->out,
           "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n", p,

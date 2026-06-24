@@ -1,0 +1,12 @@
+fn sum(items: []i32): i32 {
+  let sum = 0;
+  for i in 0..(items.len as i32) {
+    sum = sum + items[i];
+  }
+
+  return sum;
+}
+
+pub fn main(): i32 {
+  return sum([1, 2, 3]);
+}
