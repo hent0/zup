@@ -1,0 +1,10 @@
+--TEST--
+an indexed element can be assigned
+--FILE--
+pub fn main(): i32 {
+  let a: [2]i32 = [1, 2];
+  a[0] = 9;
+  return a[0] + a[1];
+}
+--EXIT--
+11

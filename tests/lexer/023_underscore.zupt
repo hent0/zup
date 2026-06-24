@@ -1,0 +1,11 @@
+--TEST--
+only a bare _ is the underscore token; identifiers starting with _ stay identifiers
+--ARGS--
+--tokenize
+--FILE--
+_ _foo __ a_1
+--EXPECT--
+TOKEN_UNDERSCORE [1:1]
+TOKEN_ID('_foo') [1:3]
+TOKEN_ID('__') [1:8]
+TOKEN_ID('a_1') [1:11]

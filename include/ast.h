@@ -23,14 +23,18 @@ typedef enum {
   TYPE_CSTR,
   TYPE_STR,
   TYPE_STRUCT,
+  TYPE_ARRAY,
 } TypeKind;
 
-typedef struct {
+typedef struct type type_t;
+struct type {
   TypeKind kind;
   char *name;
+  type_t *element;
+  size_t array_length;
   unsigned int line;
   unsigned int col;
-} type_t;
+};
 
 typedef enum {
   BINOP_ADD,
@@ -69,6 +73,8 @@ typedef enum {
   EXPR_UNARY,
   EXPR_STRUCT_LITERAL,
   EXPR_FIELD,
+  EXPR_ARRAY,
+  EXPR_INDEX,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -128,6 +134,14 @@ struct expr {
       expr_t *base;
       char *name;
     } field;
+    struct {
+      expr_t *elements;
+      size_t element_count;
+    } array;
+    struct {
+      expr_t *base;
+      expr_t *index;
+    } index;
   };
 };
 
@@ -283,6 +297,9 @@ expr_t *ast_call_init(expr_t *callee, arena_t *arena);
 expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena);
 expr_t *ast_struct_literal_init(token_t token, arena_t *arena);
 expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
+expr_t *ast_array_init(token_t token, arena_t *arena);
+expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena);
+
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_if_init(token_t token, expr_t *cond, stmt_t *then_body,
@@ -296,14 +313,18 @@ stmt_t *ast_while_init(token_t token, expr_t *cond, stmt_t *body,
 stmt_t *ast_for_init(token_t token, char *var, expr_t *start, expr_t *end,
                      stmt_t *body, arena_t *arena);
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena);
+
 param_t *ast_param_init(arena_t *arena);
+
 field_t *ast_field_init(arena_t *arena);
+
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);
 decl_t *ast_struct_init(char *name, arena_t *arena);
 decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
                         type_t type, bool mutable, expr_t *init,
                         arena_t *arena);
+
 unit_t *ast_unit_init(source_t *src, arena_t *arena);
 
 int ast_dump(unit_t *unit);

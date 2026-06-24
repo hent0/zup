@@ -1,0 +1,23 @@
+--TEST--
+an array type [N]T, an array literal, and indexing parse
+--ARGS--
+--ast
+--FILE--
+pub fn main(): i32 {
+  let a: [3]i32 = [10, 20, 30];
+  return a[1];
+}
+--EXPECT--
+Container (file) (1 members)
+  FnDecl pub 'main' -> i32
+    Let a: [3]i32
+      Array (3 elements)
+        Number literal 10
+        Number literal 20
+        Number literal 30
+    Return
+      Index
+        Id a
+        Number literal 1
+--EXIT--
+0

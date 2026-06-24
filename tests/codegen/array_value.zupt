@@ -1,0 +1,23 @@
+--TEST--
+an array literal lowers to alloca + per-element store; an index lowers to getelementptr + load
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  let a: [3]i32 = [10, 20, 30];
+  return a[1];
+}
+--EXPECT--
+define i32 @main() {
+entry:
+  %a = alloca [3 x i32]
+  %1 = getelementptr [3 x i32], ptr %a, i32 0, i32 0
+  store i32 10, ptr %1
+  %2 = getelementptr [3 x i32], ptr %a, i32 0, i32 1
+  store i32 20, ptr %2
+  %3 = getelementptr [3 x i32], ptr %a, i32 0, i32 2
+  store i32 30, ptr %3
+  %4 = getelementptr [3 x i32], ptr %a, i32 0, i32 1
+  %5 = load i32, ptr %4
+  ret i32 %5
+}

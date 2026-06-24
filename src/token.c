@@ -32,6 +32,10 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_LBRACE";
   case TOKEN_RBRACE:
     return "TOKEN_RBRACE";
+  case TOKEN_LBRACKET:
+    return "TOKEN_LBRACKET";
+  case TOKEN_RBRACKET:
+    return "TOKEN_RBRACKET";
   case TOKEN_RETURN:
     return "TOKEN_RETURN";
   case TOKEN_NUMBER:
@@ -74,6 +78,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_GREATER_GREATER";
   case TOKEN_GREATER_EQUAL:
     return "TOKEN_GREATER_EQUAL";
+  case TOKEN_UNDERSCORE:
+    return "TOKEN_UNDERSCORE";
   case TOKEN_IF:
     return "TOKEN_IF";
   case TOKEN_ELSE:

@@ -1,0 +1,21 @@
+--TEST--
+square brackets tokenize to their own tokens (array type, literal, index)
+--ARGS--
+--tokenize
+--FILE--
+let a: [2]i32 = [1, 2];
+--EXPECT--
+TOKEN_LET [1:1]
+TOKEN_ID('a') [1:5]
+TOKEN_COLON [1:6]
+TOKEN_LBRACKET [1:8]
+TOKEN_NUMBER(2) [1:9]
+TOKEN_RBRACKET [1:10]
+TOKEN_I32 [1:11]
+TOKEN_EQUAL [1:15]
+TOKEN_LBRACKET [1:17]
+TOKEN_NUMBER(1) [1:18]
+TOKEN_COMMA [1:19]
+TOKEN_NUMBER(2) [1:21]
+TOKEN_RBRACKET [1:22]
+TOKEN_SEMICOLON [1:23]

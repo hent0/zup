@@ -1,9 +1,12 @@
 #include "parser.h"
+#include "arena.h"
 #include "ast.h"
 #include "compiler.h"
+#include "debug.h"
 #include "diag.h"
 #include "lexer.h"
 #include "token.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -54,6 +57,31 @@ static type_t parse_type(parser_t *parser) {
       .line = token.line,
       .col = token.col,
   };
+
+  if (match(parser, TOKEN_LBRACKET)) {
+    type.kind = TYPE_ARRAY;
+
+    switch (parser->current.kind) {
+    case TOKEN_NUMBER:
+      type.array_length = (size_t)atoi(parser->current.value);
+      advance(parser);
+      break;
+    case TOKEN_UNDERSCORE:
+      type.array_length = 0;
+      advance(parser);
+      break;
+    default:
+      parse_error(parser, "expected an array size");
+      return type;
+    }
+
+    expect(parser, TOKEN_RBRACKET, "expected ']'");
+    type_t *element = arena_alloc(parser->arena, sizeof(type_t));
+    *element = parse_type(parser);
+    type.element = element;
+    return type;
+  }
+
   switch (parser->current.kind) {
   case TOKEN_VOID:
     advance(parser);
@@ -225,6 +253,28 @@ static expr_t *parse_primary(parser_t *parser) {
     expr_t *inner = parse_expr(parser);
     expect(parser, TOKEN_RPAREN, "expected ')'");
     return inner;
+  case TOKEN_LBRACKET: {
+    advance(parser);
+    expr_t *array = ast_array_init(token, parser->arena);
+    expr_t *tail = NULL;
+    if (!check(parser, TOKEN_RBRACKET)) {
+      do {
+        expr_t *elem = parse_expr(parser);
+        if (elem == NULL) {
+          break;
+        }
+        if (tail == NULL) {
+          array->array.elements = elem;
+        } else {
+          tail->next = elem;
+        }
+        tail = elem;
+        array->array.element_count++;
+      } while (match(parser, TOKEN_COMMA));
+    }
+    expect(parser, TOKEN_RBRACKET, "expected ']' after array elements");
+    return array;
+  }
   default:
     parse_error(parser, "expected an expression");
     return NULL;
@@ -243,6 +293,11 @@ static expr_t *parse_postfix(parser_t *parser) {
       expr = ast_field_access_init(expr, name, parser->arena);
     } else if (check(parser, TOKEN_LPAREN) && expr->kind == EXPR_FIELD) {
       expr = parse_call_args(parser, expr);
+    } else if (check(parser, TOKEN_LBRACKET)) {
+      advance(parser);
+      expr_t *index = parse_expr(parser);
+      expect(parser, TOKEN_RBRACKET, "expected ']' after index");
+      expr = ast_index_init(expr, index, parser->arena);
     } else {
       break;
     }
@@ -643,7 +698,8 @@ static stmt_t *parse_stmt(parser_t *parser) {
   }
 
   if (match(parser, TOKEN_EQUAL)) {
-    if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD) {
+    if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD &&
+        expr->kind != EXPR_INDEX) {
       parse_error(parser, "invalid assignment target");
       return NULL;
     }

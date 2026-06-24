@@ -72,8 +72,24 @@ typedef struct {
 typedef struct {
   TypeKind kind;
   char *name;
+  type_t *element;
+  size_t array_length;
   bool ok;
 } exprty_t;
+
+static bool types_equal(type_t a, type_t b) {
+  if (a.kind != b.kind) {
+    return false;
+  }
+  if (a.kind == TYPE_STRUCT) {
+    return a.name != NULL && b.name != NULL && strcmp(a.name, b.name) == 0;
+  }
+  if (a.kind == TYPE_ARRAY) {
+    return a.array_length == b.array_length &&
+           types_equal(*a.element, *b.element);
+  }
+  return true;
+}
 
 static bool assignable(type_t to, exprty_t from) {
   if (to.kind == TYPE_CSTR && from.kind == TYPE_STR) {
@@ -84,6 +100,10 @@ static bool assignable(type_t to, exprty_t from) {
   }
   if (to.kind == TYPE_STRUCT) {
     return from.name != NULL && strcmp(to.name, from.name) == 0;
+  }
+  if (to.kind == TYPE_ARRAY) {
+    return from.element != NULL && to.array_length == from.array_length &&
+           types_equal(*to.element, *from.element);
   }
   return true;
 }
@@ -99,8 +119,9 @@ static field_t *struct_field(const decl_t *strukt, const char *name) {
 }
 
 static const char *lvalue_root(const expr_t *target) {
-  while (target->kind == EXPR_FIELD) {
-    target = target->field.base;
+  while (target->kind == EXPR_FIELD || target->kind == EXPR_INDEX) {
+    target = target->kind == EXPR_FIELD ? target->field.base
+                                        : target->index.base;
   }
   return target->kind == EXPR_ID ? target->id.name : NULL;
 }
@@ -371,8 +392,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){
-          .kind = local->type.kind, .name = local->type.name, .ok = true};
+      result = (exprty_t){.kind = local->type.kind,
+                          .name = local->type.name,
+                          .element = local->type.element,
+                          .array_length = local->type.array_length,
+                          .ok = true};
     }
     break;
   }
@@ -524,6 +548,17 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       }
       break;
     }
+    if (base.kind == TYPE_ARRAY) {
+      if (strcmp(expr->field.name, "len") == 0) {
+        result = (exprty_t){.kind = TYPE_I64, .ok = true};
+      } else {
+        diag_error(sema->src, expr->line, expr->col, "array has no field '%s'",
+                   expr->field.name);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      }
+      break;
+    }
     if (base.kind != TYPE_STRUCT) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot access field '%s' of non-struct type %s",
@@ -541,8 +576,70 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    result = (exprty_t){
-        .kind = field->type.kind, .name = field->type.name, .ok = true};
+    result = (exprty_t){.kind = field->type.kind,
+                        .name = field->type.name,
+                        .element = field->type.element,
+                        .array_length = field->type.array_length,
+                        .ok = true};
+    break;
+  }
+  case EXPR_ARRAY: {
+    type_t elem = {.kind = TYPE_UNKNOWN};
+    size_t count = 0;
+    bool ok = true;
+    for (expr_t *e = expr->array.elements; e != NULL; e = e->next) {
+      exprty_t et = check_expr(sema, e, TYPE_UNKNOWN);
+      type_t ety = {.kind = et.kind,
+                    .name = et.name,
+                    .element = et.element,
+                    .array_length = et.array_length};
+      if (count == 0) {
+        elem = ety;
+      } else if (et.ok && !types_equal(elem, ety)) {
+        diag_error(sema->src, e->line, e->col,
+                   "array element has type %s, expected %s", type_to_str(ety),
+                   type_to_str(elem));
+        sema->had_error = true;
+        ok = false;
+      }
+      if (!et.ok) {
+        ok = false;
+      }
+      count++;
+    }
+    type_t *element = arena_alloc(sema->arena, sizeof(type_t));
+    *element = elem;
+    result = (exprty_t){.kind = TYPE_ARRAY,
+                        .element = element,
+                        .array_length = count,
+                        .ok = ok};
+    break;
+  }
+  case EXPR_INDEX: {
+    exprty_t base = check_expr(sema, expr->index.base, TYPE_UNKNOWN);
+    exprty_t idx = check_expr(sema, expr->index.index, TYPE_I32);
+    if (!base.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (base.kind != TYPE_ARRAY) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "cannot index non-array type %s", type_kind_to_str(base.kind));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (idx.ok && !type_is_integer(idx.kind)) {
+      diag_error(sema->src, expr->index.index->line, expr->index.index->col,
+                 "array index must be an integer, got %s",
+                 type_kind_to_str(idx.kind));
+      sema->had_error = true;
+    }
+    result = (exprty_t){.kind = base.element->kind,
+                        .name = base.element->name,
+                        .element = base.element->element,
+                        .array_length = base.element->array_length,
+                        .ok = true};
     break;
   }
   default:
@@ -552,6 +649,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
 
   expr->type.kind = result.kind;
   expr->type.name = result.name;
+  expr->type.element = result.element;
+  expr->type.array_length = result.array_length;
   return result;
 }
 
@@ -616,12 +715,24 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       if (stmt->binding.type.kind == TYPE_UNKNOWN) {
         stmt->binding.type.kind = init.kind;
         stmt->binding.type.name = init.name;
-      } else if (init.ok && !assignable(stmt->binding.type, init)) {
-        diag_error(sema->src, stmt->line, stmt->col,
-                   "cannot assign %s to variable '%s' of type %s",
-                   type_kind_to_str(init.kind), stmt->binding.name,
-                   type_kind_to_str(stmt->binding.type.kind));
-        sema->had_error = true;
+        stmt->binding.type.element = init.element;
+        stmt->binding.type.array_length = init.array_length;
+      } else {
+        if (stmt->binding.type.kind == TYPE_ARRAY &&
+            stmt->binding.type.array_length == 0 && init.kind == TYPE_ARRAY) {
+          stmt->binding.type.array_length = init.array_length;
+        }
+        if (init.ok && !assignable(stmt->binding.type, init)) {
+          type_t from = {.kind = init.kind,
+                         .name = init.name,
+                         .element = init.element,
+                         .array_length = init.array_length};
+          diag_error(sema->src, stmt->line, stmt->col,
+                     "cannot assign %s to variable '%s' of type %s",
+                     type_to_str(from), stmt->binding.name,
+                     type_to_str(stmt->binding.type));
+          sema->had_error = true;
+        }
       }
     }
     if (scope_lookup(sema->scope, stmt->binding.name) != NULL) {
@@ -798,6 +909,9 @@ static size_t count_bindings(stmt_t *body) {
 }
 
 static bool check_type(sema_t *sema, type_t type) {
+  if (type.kind == TYPE_ARRAY) {
+    return check_type(sema, *type.element);
+  }
   if (type.kind == TYPE_STRUCT &&
       typetab_lookup(sema->types, type.name) == NULL) {
     diag_error(sema->src, type.line, type.col, "unknown type '%s'", type.name);

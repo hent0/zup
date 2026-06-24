@@ -1,0 +1,11 @@
+--TEST--
+an array literal's length must match the declared array type
+--FILE--
+pub fn main(): i32 {
+  let a: [3]i32 = [1, 2];
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign [2]i32 to variable 'a' of type [3]i32 [2:3]
+--EXIT--
+1

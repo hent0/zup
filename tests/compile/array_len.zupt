@@ -1,0 +1,9 @@
+--TEST--
+a fixed array knows its length
+--FILE--
+pub fn main(): i32 {
+  let a: [5]i32 = [1, 2, 3, 4, 5];
+  return a.len as i32;
+}
+--EXIT--
+5

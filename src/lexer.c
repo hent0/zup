@@ -11,6 +11,7 @@ const keyword_t keywords[] = {
     {"fn", TOKEN_FN},
     {"return", TOKEN_RETURN},
     {"as", TOKEN_AS},
+    {"_", TOKEN_UNDERSCORE},
     {"if", TOKEN_IF},
     {"else", TOKEN_ELSE},
     {"const", TOKEN_CONST},
@@ -289,6 +290,12 @@ token_t lexer_next_token(lexer_t *lexer) {
                                           .col = lexer->col));
   case '}':
     return advance_with(lexer, token_init(TOKEN_RBRACE, .line = lexer->line,
+                                          .col = lexer->col));
+  case '[':
+    return advance_with(lexer, token_init(TOKEN_LBRACKET, .line = lexer->line,
+                                          .col = lexer->col));
+  case ']':
+    return advance_with(lexer, token_init(TOKEN_RBRACKET, .line = lexer->line,
                                           .col = lexer->col));
   case ';':
     return advance_with(lexer, token_init(TOKEN_SEMICOLON, .line = lexer->line,

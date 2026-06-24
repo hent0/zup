@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "arena.h"
+#include "debug.h"
 #include "token.h"
 #include "utils.h"
 #include <stdio.h>
@@ -71,10 +72,19 @@ char *type_kind_to_str(TypeKind kind) {
 }
 
 char *type_to_str(type_t type) {
-  if (type.kind == TYPE_STRUCT) {
+  switch (type.kind) {
+  case TYPE_STRUCT:
     return type.name;
+  case TYPE_ARRAY:
+    static char bufs[8][64];
+    static unsigned next = 0;
+    char *buf = bufs[next++ % 8];
+    snprintf(buf, sizeof(bufs[0]), "[%zu]%s", type.array_length,
+             type_to_str(*type.element));
+    return buf;
+  default:
+    return type_kind_to_str(type.kind);
   }
-  return type_kind_to_str(type.kind);
 }
 
 bool type_is_integer(TypeKind kind) {
@@ -385,6 +395,29 @@ expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_array_init(token_t token, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_ARRAY;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->array.elements = NULL;
+  expr->array.element_count = 0;
+  return expr;
+}
+expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_INDEX;
+  expr->line = base->line;
+  expr->col = base->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->index.base = base;
+  expr->index.index = index;
+  return expr;
+}
+
 stmt_t *ast_stmt_init(token_t token, StmtKind kind, arena_t *arena) {
   stmt_t *stmt = arena_alloc(arena, sizeof(stmt_t));
   stmt->kind = kind;
@@ -612,6 +645,18 @@ static void dump_expr(const expr_t *expr, int depth) {
   case EXPR_FIELD:
     printf("Field %s\n", expr->field.name);
     dump_expr(expr->field.base, depth + 1);
+    break;
+  case EXPR_ARRAY:
+    printf("Array (%zu elements)\n", expr->array.element_count);
+    for (const expr_t *element = expr->array.elements; element != NULL;
+         element = element->next) {
+      dump_expr(element, depth + 1);
+    }
+    break;
+  case EXPR_INDEX:
+    printf("Index\n");
+    dump_expr(expr->index.base, depth + 1);
+    dump_expr(expr->index.index, depth + 1);
     break;
   }
 }

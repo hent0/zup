@@ -133,7 +133,7 @@ static void add_local(ctx_t *ctx, const char *name, type_t type,
 }
 
 static bool is_aggregate(TypeKind kind) {
-  return kind == TYPE_STRUCT || kind == TYPE_STR;
+  return kind == TYPE_STRUCT || kind == TYPE_STR || kind == TYPE_ARRAY;
 }
 
 static const decl_t *find_struct(ctx_t *ctx, const char *name) {
@@ -225,6 +225,19 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return 0;
   case EXPR_FIELD:
     return collect_expr(ctx, expr->field.base);
+  case EXPR_ARRAY:
+    for (expr_t *element = expr->array.elements; element != NULL;
+         element = element->next) {
+      if (collect_expr(ctx, element) != 0) {
+        return 1;
+      }
+    }
+    return 0;
+  case EXPR_INDEX:
+    if (collect_expr(ctx, expr->index.base) != 0) {
+      return 1;
+    }
+    return collect_expr(ctx, expr->index.index);
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -351,6 +364,7 @@ static unsigned type_bits(TypeKind kind) {
 
 static value_t emit_logical(ctx_t *ctx, expr_t *expr);
 static const char *ir_type(ctx_t *ctx, type_t type);
+static value_t emit_value(ctx_t *ctx, expr_t *expr);
 
 // Address of an lvalue: a local's stack slot, a global, or a field within an
 // aggregate (via getelementptr). Used by field reads and struct construction.
@@ -383,6 +397,15 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
             reg, base_type.name, base, index);
+    return arena_format(ctx->arena, "%%%u", reg);
+  }
+  case EXPR_INDEX: {
+    const char *base = emit_addr(ctx, expr->index.base);
+    value_t idx = emit_value(ctx, expr->index.index);
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, %s %s\n", reg,
+            ir_type(ctx, expr->index.base->type), base,
+            type_kind_to_ir(idx.type.kind), idx.ref);
     return arena_format(ctx->arena, "%%%u", reg);
   }
   default:
@@ -561,6 +584,30 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   }
   case EXPR_FIELD: {
+    if (expr->field.base->type.kind == TYPE_ARRAY) {
+      return (value_t){
+          .type = (type_t){.kind = TYPE_I64},
+          .ref = arena_format(ctx->arena, "%zu",
+                              expr->field.base->type.array_length),
+      };
+    }
+    const char *addr = emit_addr(ctx, expr);
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+            ir_type(ctx, expr->type), addr);
+    return (value_t){
+        .type = expr->type,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+  case EXPR_ARRAY: {
+    NOT_IMPLEMENTED;
+    return (value_t){
+        .type = (type_t){.kind = TYPE_UNKNOWN},
+        .ref = NULL,
+    };
+  }
+  case EXPR_INDEX: {
     const char *addr = emit_addr(ctx, expr);
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
@@ -699,6 +746,24 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
             "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n", l,
             dest);
     fprintf(ctx->out, "  store i64 %zu, ptr %%%u\n", expr->string.length, l);
+    return;
+  }
+  if (expr->kind == EXPR_ARRAY) {
+    const char *arr = ir_type(ctx, expr->type);
+    size_t i = 0;
+    for (expr_t *e = expr->array.elements; e != NULL; e = e->next, i++) {
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 %zu\n",
+              reg, arr, dest, i);
+      const char *slot = arena_format(ctx->arena, "%%%u", reg);
+      if (is_aggregate(e->type.kind)) {
+        emit_struct_into(ctx, slot, e);
+      } else {
+        value_t value = emit_value(ctx, e);
+        fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
+                value.ref, slot);
+      }
+    }
     return;
   }
   if (expr->kind == EXPR_STRUCT_LITERAL) {
@@ -1037,6 +1102,10 @@ static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
 static const char *ir_type(ctx_t *ctx, type_t type) {
   if (type.kind == TYPE_STRUCT) {
     return arena_format(ctx->arena, "%%%s", type.name);
+  }
+  if (type.kind == TYPE_ARRAY) {
+    return arena_format(ctx->arena, "[%zu x %s]", type.array_length,
+                        ir_type(ctx, *type.element));
   }
   return type_kind_to_ir(type.kind);
 }
