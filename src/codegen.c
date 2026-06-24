@@ -338,9 +338,11 @@ static unsigned type_bits(TypeKind kind) {
     return 16;
   case TYPE_I32:
   case TYPE_U32:
+  case TYPE_F32:
     return 32;
   case TYPE_I64:
   case TYPE_U64:
+  case TYPE_F64:
     return 64;
   default:
     return 0;
@@ -386,6 +388,70 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   default:
     return NULL;
   }
+}
+
+static value_t emit_value(ctx_t *ctx, expr_t *expr);
+
+// TODO: Probably needs refatoring
+static value_t emit_cast(ctx_t *ctx, expr_t *expr) {
+  value_t operand = emit_value(ctx, expr->cast.operand);
+  TypeKind from = operand.type.kind;
+  TypeKind to = expr->cast.target.kind;
+  int from_bits = type_bits(from);
+  int to_bits = type_bits(to);
+
+  if (type_is_float(from)) {
+    if (type_is_integer(to)) {
+      unsigned int reg = ctx->reg++;
+      const char *op = type_is_signed_integer(to) ? "fptosi" : "fptoui";
+      fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
+              type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
+      return (value_t){.type = expr->cast.target,
+                       .ref = arena_format(ctx->arena, "%%%u", reg)};
+    }
+
+    if (type_is_float(to)) {
+      if (type_bits(from) == type_bits(to)) {
+        return (value_t){.type = expr->cast.target, .ref = operand.ref};
+      }
+
+      const char *op = from_bits > to_bits ? "fptrunc" : "fpext";
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
+              type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
+      return (value_t){
+          .type = expr->cast.target,
+          .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+  } else if (type_is_numeric(from)) {
+    if (type_is_float(to)) {
+      unsigned int reg = ctx->reg++;
+      const char *op = type_is_signed_integer(from) ? "sitofp" : "uitofp";
+      fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
+              type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
+      return (value_t){
+          .type = expr->cast.target,
+          .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+
+    if (from_bits == to_bits) {
+      return (value_t){.type = expr->cast.target, .ref = operand.ref};
+    }
+
+    const char *op = from_bits > to_bits            ? "trunc"
+                     : type_is_signed_integer(from) ? "sext"
+                                                    : "zext";
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
+            type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
+    return (value_t){
+        .type = expr->cast.target,
+        .ref = arena_format(ctx->arena, "%%%u", reg),
+    };
+  }
+  return (value_t){.type = expr->cast.target, .ref = operand.ref};
 }
 
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
@@ -444,26 +510,8 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   }
   case EXPR_CALL:
     return emit_call(ctx, expr, NULL);
-  case EXPR_CAST: {
-    value_t operand = emit_value(ctx, expr->cast.operand);
-    TypeKind from = operand.type.kind;
-    TypeKind to = expr->cast.target.kind;
-
-    if (type_bits(to) == type_bits(from)) {
-      return (value_t){.type = expr->cast.target, .ref = operand.ref};
-    }
-
-    const char *op = type_bits(to) < type_bits(from) ? "trunc"
-                     : type_is_signed_integer(from)  ? "sext"
-                                                     : "zext";
-    unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = %s %s %s to %s\n", reg, op,
-            type_kind_to_ir(from), operand.ref, type_kind_to_ir(to));
-    return (value_t){
-        .type = expr->cast.target,
-        .ref = arena_format(ctx->arena, "%%%u", reg),
-    };
-  }
+  case EXPR_CAST:
+    return emit_cast(ctx, expr);
   case EXPR_BINARY: {
     if (binop_is_logical(expr->binary.op)) {
       return emit_logical(ctx, expr);
@@ -612,8 +660,8 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = call %s @%s(", reg, ir_type(ctx, call->type),
             name);
-    result =
-        (value_t){.type = call->type, .ref = arena_format(ctx->arena, "%%%u", reg)};
+    result = (value_t){.type = call->type,
+                       .ref = arena_format(ctx->arena, "%%%u", reg)};
   }
 
   const char *sep = "";
@@ -644,8 +692,8 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     fprintf(ctx->out,
             "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n", p,
             dest);
-    fprintf(ctx->out, "  store ptr @.str.%d, ptr %%%u\n", string_index(ctx, expr),
-            p);
+    fprintf(ctx->out, "  store ptr @.str.%d, ptr %%%u\n",
+            string_index(ctx, expr), p);
     unsigned int l = ctx->reg++;
     fprintf(ctx->out,
             "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n", l,
@@ -1033,7 +1081,8 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
 
   const char *sep = "";
   if (sret) {
-    fprintf(ctx->out, "ptr sret(%s) %%sret", ir_type(ctx, decl->fn.return_type));
+    fprintf(ctx->out, "ptr sret(%s) %%sret",
+            ir_type(ctx, decl->fn.return_type));
     sep = ", ";
   }
   for (const param_t *param = decl->fn.params; param != NULL;
@@ -1113,8 +1162,8 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     for (decl_t *member = decl->strct.members; member != NULL;
          member = member->next) {
       if (emit_fn(ctx, member,
-                  arena_format(ctx->arena, "%s.%s", decl->name, member->name)) !=
-          0) {
+                  arena_format(ctx->arena, "%s.%s", decl->name,
+                               member->name)) != 0) {
         return 1;
       }
     }

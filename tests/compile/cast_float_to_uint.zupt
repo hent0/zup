@@ -1,0 +1,14 @@
+--TEST--
+a float to unsigned int cast truncates toward zero at runtime
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let n: u32 = 6.9 as u32;
+  printf("%d\n", n as i32);
+  return 0;
+}
+--EXPECT--
+6
+--EXIT--
+0

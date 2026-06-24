@@ -1,0 +1,23 @@
+--TEST--
+a signed int to float cast lowers to sitofp
+--ARGS--
+--ir -o -
+--FILE--
+fn to_float(n: i32): f64 {
+  return n as f64;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal double @to_float(i32 %n) {
+entry:
+  %1 = sitofp i32 %n to double
+  ret double %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

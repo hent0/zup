@@ -1,0 +1,10 @@
+--TEST--
+casting a numeric type to bool is rejected (the target must be numeric too)
+--FILE--
+pub fn main(): i32 {
+  return 5 as bool;
+}
+--EXPECTERR--
+zup: error: cannot cast i32 to bool [2:10]
+--EXIT--
+1

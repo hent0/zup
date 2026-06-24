@@ -1,0 +1,13 @@
+--TEST--
+a negative float to signed int truncates toward zero: -2.9 as i32 == -2
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  printf("%d\n", -2.9 as i32);
+  return 0;
+}
+--EXPECT--
+-2
+--EXIT--
+0

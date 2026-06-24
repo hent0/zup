@@ -1,0 +1,14 @@
+--TEST--
+an unsigned int casts to float via uitofp
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let n: u8 = 250;
+  printf("%g\n", n as f64);
+  return 0;
+}
+--EXPECT--
+250
+--EXIT--
+0

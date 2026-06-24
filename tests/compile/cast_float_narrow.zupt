@@ -1,0 +1,14 @@
+--TEST--
+narrowing f64 to f32 and widening back preserves the value
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let small: f32 = 3.5 as f32;
+  printf("%g\n", small as f64);
+  return 0;
+}
+--EXPECT--
+3.5
+--EXIT--
+0

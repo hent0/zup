@@ -1,0 +1,8 @@
+--TEST--
+a float to int cast truncates toward zero: 3.7 as i32 == 3
+--FILE--
+pub fn main(): i32 {
+  return 3.7 as i32;
+}
+--EXIT--
+3

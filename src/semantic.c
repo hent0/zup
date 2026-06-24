@@ -296,7 +296,8 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   }
 
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    exprty_t at = check_expr(sema, arg, param ? param->type.kind : TYPE_UNKNOWN);
+    exprty_t at =
+        check_expr(sema, arg, param ? param->type.kind : TYPE_UNKNOWN);
     if (param != NULL) {
       if (at.ok && !assignable(param->type, at)) {
         diag_error(sema->src, call->line, call->col,
@@ -338,14 +339,15 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     result = (exprty_t){.kind = TYPE_STR, .ok = true};
     break;
   case EXPR_CALL:
-    result = expr->call.callee->kind == EXPR_FIELD ? check_method_call(sema, expr)
-                                                   : check_call(sema, expr);
+    result = expr->call.callee->kind == EXPR_FIELD
+                 ? check_method_call(sema, expr)
+                 : check_call(sema, expr);
     break;
   case EXPR_CAST: {
     exprty_t operand = check_expr(sema, expr->cast.operand, TYPE_UNKNOWN);
     TypeKind target = expr->cast.target.kind;
     if (operand.ok &&
-        (!type_is_integer(operand.kind) || !type_is_integer(target))) {
+        (!type_is_numeric(operand.kind) || !type_is_numeric(target))) {
       diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
                  type_kind_to_str(operand.kind), type_kind_to_str(target));
       sema->had_error = true;

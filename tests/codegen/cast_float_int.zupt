@@ -1,0 +1,23 @@
+--TEST--
+a float to signed int cast lowers to fptosi
+--ARGS--
+--ir -o -
+--FILE--
+fn to_int(x: f64): i32 {
+  return x as i32;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i32 @to_int(double %x) {
+entry:
+  %1 = fptosi double %x to i32
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

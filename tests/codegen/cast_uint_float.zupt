@@ -1,0 +1,23 @@
+--TEST--
+an unsigned int to float cast lowers to uitofp
+--ARGS--
+--ir -o -
+--FILE--
+fn to_float(n: u32): f64 {
+  return n as f64;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal double @to_float(i32 %n) {
+entry:
+  %1 = uitofp i32 %n to double
+  ret double %1
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}
