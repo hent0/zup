@@ -59,14 +59,17 @@ static type_t parse_type(parser_t *parser) {
   };
 
   if (match(parser, TOKEN_LBRACKET)) {
-    type.kind = TYPE_ARRAY;
-
     switch (parser->current.kind) {
+    case TOKEN_RBRACKET:
+      type.kind = TYPE_SLICE;
+      break;
     case TOKEN_NUMBER:
+      type.kind = TYPE_ARRAY;
       type.array_length = (size_t)atoi(parser->current.value);
       advance(parser);
       break;
     case TOKEN_UNDERSCORE:
+      type.kind = TYPE_ARRAY;
       type.array_length = 0;
       advance(parser);
       break;

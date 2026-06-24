@@ -24,6 +24,7 @@ typedef enum {
   TYPE_STR,
   TYPE_STRUCT,
   TYPE_ARRAY,
+  TYPE_SLICE,
 } TypeKind;
 
 typedef struct type type_t;

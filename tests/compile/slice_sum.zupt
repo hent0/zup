@@ -1,0 +1,17 @@
+--TEST--
+a slice parameter accepts a fixed array of any length and iterates it via .len
+--FILE--
+fn sum(a: []i32): i32 {
+  let total: i32 = 0;
+  for i in 0..a.len as i32 {
+    total = total + a[i];
+  }
+  return total;
+}
+
+pub fn main(): i32 {
+  let xs: [4]i32 = [10, 20, 30, 40];
+  return sum(xs);
+}
+--EXIT--
+100

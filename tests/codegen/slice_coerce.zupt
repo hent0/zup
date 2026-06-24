@@ -1,0 +1,28 @@
+--TEST--
+a fixed array coerces to a slice by storing its base pointer and length
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  let xs: [2]i32 = [1, 2];
+  let s: []i32 = xs;
+  return s.len as i32;
+}
+--EXPECT--
+define i32 @main() {
+entry:
+  %xs = alloca [2 x i32]
+  %1 = getelementptr [2 x i32], ptr %xs, i32 0, i32 0
+  store i32 1, ptr %1
+  %2 = getelementptr [2 x i32], ptr %xs, i32 0, i32 1
+  store i32 2, ptr %2
+  %s = alloca { ptr, i64 }
+  %3 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0
+  store ptr %xs, ptr %3
+  %4 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1
+  store i64 2, ptr %4
+  %5 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1
+  %6 = load i64, ptr %5
+  %7 = trunc i64 %6 to i32
+  ret i32 %7
+}

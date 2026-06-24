@@ -30,6 +30,7 @@ char *type_kind_to_ir(TypeKind kind) {
   case TYPE_CSTR:
     return "ptr";
   case TYPE_STR:
+  case TYPE_SLICE:
     return "{ ptr, i64 }";
   default:
     return "?";
@@ -76,12 +77,18 @@ char *type_to_str(type_t type) {
   case TYPE_STRUCT:
     return type.name;
   case TYPE_ARRAY:
+  case TYPE_SLICE: {
     static char bufs[8][64];
     static unsigned next = 0;
     char *buf = bufs[next++ % 8];
-    snprintf(buf, sizeof(bufs[0]), "[%zu]%s", type.array_length,
-             type_to_str(*type.element));
+    if (type.kind == TYPE_SLICE) {
+      snprintf(buf, sizeof(bufs[0]), "[]%s", type_to_str(*type.element));
+    } else {
+      snprintf(buf, sizeof(bufs[0]), "[%zu]%s", type.array_length,
+               type_to_str(*type.element));
+    }
     return buf;
+  }
   default:
     return type_kind_to_str(type.kind);
   }

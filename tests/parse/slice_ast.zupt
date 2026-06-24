@@ -1,0 +1,20 @@
+--TEST--
+a slice type []T parses (here as a parameter)
+--ARGS--
+--ast
+--FILE--
+fn f(a: []i32) {
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'f' -> void
+    param a: []i32
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

@@ -1,0 +1,15 @@
+--TEST--
+an array only coerces to a slice when the element types match
+--FILE--
+fn take(a: []i64): i32 {
+  return 0;
+}
+
+pub fn main(): i32 {
+  let xs: [3]i32 = [1, 2, 3];
+  return take(xs);
+}
+--EXPECTERR--
+zup: error: cannot pass [3]i32 as argument 'a' of 'take' (expected []i64) [7:10]
+--EXIT--
+1

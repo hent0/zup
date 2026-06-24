@@ -88,12 +88,19 @@ static bool types_equal(type_t a, type_t b) {
     return a.array_length == b.array_length &&
            types_equal(*a.element, *b.element);
   }
+  if (a.kind == TYPE_SLICE) {
+    return types_equal(*a.element, *b.element);
+  }
   return true;
 }
 
 static bool assignable(type_t to, exprty_t from) {
   if (to.kind == TYPE_CSTR && from.kind == TYPE_STR) {
     return true;
+  }
+  if (to.kind == TYPE_SLICE &&
+      (from.kind == TYPE_ARRAY || from.kind == TYPE_SLICE)) {
+    return from.element != NULL && types_equal(*to.element, *from.element);
   }
   if (to.kind != from.kind) {
     return false;
@@ -568,6 +575,19 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       }
       break;
     }
+    if (base.kind == TYPE_SLICE) {
+      if (strcmp(expr->field.name, "len") == 0) {
+        result = (exprty_t){.kind = TYPE_I64, .ok = true};
+      } else if (strcmp(expr->field.name, "ptr") == 0) {
+        result = (exprty_t){.kind = TYPE_CSTR, .ok = true};
+      } else {
+        diag_error(sema->src, expr->line, expr->col, "slice has no field '%s'",
+                   expr->field.name);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      }
+      break;
+    }
     if (base.kind != TYPE_STRUCT) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot access field '%s' of non-struct type %s",
@@ -631,7 +651,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    if (base.kind != TYPE_ARRAY) {
+    if (base.kind != TYPE_ARRAY && base.kind != TYPE_SLICE) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot index non-array type %s", type_kind_to_str(base.kind));
       sema->had_error = true;
@@ -917,7 +937,7 @@ static size_t count_bindings(stmt_t *body) {
 }
 
 static bool check_type(sema_t *sema, type_t type) {
-  if (type.kind == TYPE_ARRAY) {
+  if (type.kind == TYPE_ARRAY || type.kind == TYPE_SLICE) {
     return check_type(sema, *type.element);
   }
   if (type.kind == TYPE_STRUCT &&
