@@ -1,0 +1,49 @@
+--TEST--
+indexing the entry-point argument list yields a str; 'args[0].len' reads the marshalled strlen of argv[0]
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(args: []str): i32 {
+  return args[0].len as i32;
+}
+--EXPECT--
+declare i64 @strlen(ptr)
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %args = alloca { ptr, i64 }
+  %1 = sext i32 %argc to i64
+  %2 = alloca { ptr, i64 }, i64 %1
+  %3 = alloca i64
+  store i64 0, ptr %3
+  br label %args.cond
+args.cond:
+  %4 = load i64, ptr %3
+  %5 = icmp slt i64 %4, %1
+  br i1 %5, label %args.body, label %args.done
+args.body:
+  %6 = load i64, ptr %3
+  %7 = getelementptr ptr, ptr %argv, i64 %6
+  %8 = load ptr, ptr %7
+  %9 = call i64 @strlen(ptr %8)
+  %10 = getelementptr { ptr, i64 }, ptr %2, i64 %6
+  %11 = getelementptr { ptr, i64 }, ptr %10, i32 0, i32 0
+  store ptr %8, ptr %11
+  %12 = getelementptr { ptr, i64 }, ptr %10, i32 0, i32 1
+  store i64 %9, ptr %12
+  %13 = load i64, ptr %3
+  %14 = add i64 %13, 1
+  store i64 %14, ptr %3
+  br label %args.cond
+args.done:
+  %15 = getelementptr { ptr, i64 }, ptr %args, i32 0, i32 0
+  store ptr %2, ptr %15
+  %16 = getelementptr { ptr, i64 }, ptr %args, i32 0, i32 1
+  store i64 %1, ptr %16
+  %17 = getelementptr { ptr, i64 }, ptr %args, i32 0, i32 0
+  %18 = load ptr, ptr %17
+  %19 = getelementptr { ptr, i64 }, ptr %18, i32 0
+  %20 = getelementptr { ptr, i64 }, ptr %19, i32 0, i32 1
+  %21 = load i64, ptr %20
+  %22 = trunc i64 %21 to i32
+  ret i32 %22
+}

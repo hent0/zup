@@ -1,10 +1,10 @@
 --TEST--
-'main' is not allowed to declare parameters
+'main' may only declare the argument list as '[]str'; any other parameter type is rejected
 --FILE--
 pub fn main(x: i32): i32 {
   return 0;
 }
 --EXPECTERR--
-zup: error: 'main' must take no parameters [1:5]
+zup: error: 'main' parameter must be of type '[]str' [1:5]
 --EXIT--
 1

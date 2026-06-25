@@ -134,8 +134,8 @@ static field_t *struct_field(const decl_t *strukt, const char *name) {
 
 static const char *lvalue_root(const expr_t *target) {
   while (target->kind == EXPR_FIELD || target->kind == EXPR_INDEX) {
-    target = target->kind == EXPR_FIELD ? target->field.base
-                                        : target->index.base;
+    target =
+        target->kind == EXPR_FIELD ? target->field.base : target->index.base;
   }
   return target->kind == EXPR_ID ? target->id.name : NULL;
 }
@@ -707,7 +707,8 @@ static void check_return(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   if (value.ok && !assignable(fn->fn.return_type, value)) {
     diag_error(sema->src, stmt->line, stmt->col,
                "cannot return %s from function returning %s",
-               type_to_str(exprty_type(value)), type_to_str(fn->fn.return_type));
+               type_to_str(exprty_type(value)),
+               type_to_str(fn->fn.return_type));
     sema->had_error = true;
   }
 }
@@ -1017,27 +1018,41 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
 }
 
 static bool check_entry_point(const symtab_t *tab, const source_t *src) {
-  decl_t *main_fn = symtab_lookup(tab, "main");
-  if (main_fn == NULL) {
+  decl_t *main = symtab_lookup(tab, "main");
+  if (main == NULL) {
     diag_error_nofile("no entry point: 'main' function is required");
     return false;
   }
 
   bool ok = true;
-  if (main_fn->visibility != VISIBILITY_PUBLIC) {
-    diag_error(src, main_fn->line, main_fn->col,
+  if (main->visibility != VISIBILITY_PUBLIC) {
+    diag_error(src, main->line, main->col,
                "'main' must be public (declared with 'pub')");
     ok = false;
   }
-  if (main_fn->fn.return_type.kind != TYPE_I32) {
-    diag_error(src, main_fn->line, main_fn->col, "'main' must return i32");
+  if (main->fn.return_type.kind != TYPE_I32) {
+    diag_error(src, main->line, main->col, "'main' must return i32");
     ok = false;
   }
-  if (main_fn->fn.params_count != 0) {
-    diag_error(src, main_fn->line, main_fn->col,
-               "'main' must take no parameters");
-    ok = false;
+
+  if (main->fn.params_count > 1) {
+    diag_error(
+        src, main->line, main->col,
+        "'main' takes at most one parameter (the argument list as '[]str')");
+    return false;
   }
+
+  if (main->fn.params == 0) {
+    return ok;
+  }
+
+  if (main->fn.params->type.kind != TYPE_SLICE ||
+      main->fn.params->type.element->kind != TYPE_STR) {
+    diag_error(src, main->line, main->col,
+               "'main' parameter must be of type '[]str'");
+    return false;
+  }
+
   return ok;
 }
 

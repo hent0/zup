@@ -1,6 +1,5 @@
 #include "ast.h"
 #include "arena.h"
-#include "debug.h"
 #include "token.h"
 #include "utils.h"
 #include <stdio.h>
@@ -67,6 +66,8 @@ char *type_kind_to_str(TypeKind kind) {
     return "cstr";
   case TYPE_STR:
     return "str";
+  case TYPE_SLICE:
+    return "[]str";
   default:
     return "?";
   }

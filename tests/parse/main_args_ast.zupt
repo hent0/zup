@@ -1,0 +1,16 @@
+--TEST--
+'main' declaring the argument list as '[]str' parses like any slice parameter (the entry-point rule is enforced later, in semantics)
+--ARGS--
+--ast
+--FILE--
+pub fn main(args: []str): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (1 members)
+  FnDecl pub 'main' -> i32
+    param args: []str
+    Return
+      Number literal 0
+--EXIT--
+0

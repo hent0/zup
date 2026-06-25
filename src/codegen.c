@@ -1227,6 +1227,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->loop_label = 0;
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
+
   bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
@@ -1284,6 +1285,85 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   return 0;
 }
 
+static int emit_entry_point(ctx_t *ctx, decl_t *decl) {
+  if (decl->fn.params_count == 0) {
+    return emit_fn(ctx, decl, decl->name);
+  }
+
+  const char *args_name = decl->fn.params->name;
+
+  fprintf(ctx->out, "declare i64 @strlen(ptr)\n");
+  fprintf(ctx->out, "define i32 @main(i32 %%argc, ptr %%argv) {\n");
+
+  fprintf(ctx->out, "entry:\n");
+  fprintf(ctx->out, "  %%%s = alloca { ptr, i64 }\n", args_name);
+  unsigned int argc = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = sext i32 %%argc to i64\n", argc);
+  unsigned int strs = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }, i64 %%%u\n", strs, argc);
+  unsigned int loop_index = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = alloca i64\n", loop_index);
+  fprintf(ctx->out, "  store i64 0, ptr %%%u\n", loop_index);
+  fprintf(ctx->out, "  br label %%args.cond\n");
+
+  fprintf(ctx->out, "args.cond:\n");
+  unsigned int idx = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", idx, loop_index);
+  unsigned int cond = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = icmp slt i64 %%%u, %%%u\n", cond, idx, argc);
+  fprintf(ctx->out, "  br i1 %%%u, label %%args.body, label %%args.done\n",
+          cond);
+
+  fprintf(ctx->out, "args.body:\n");
+  idx = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", idx, loop_index);
+  unsigned int argv_slot = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = getelementptr ptr, ptr %%argv, i64 %%%u\n",
+          argv_slot, idx);
+  unsigned int cstr = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", cstr, argv_slot);
+  unsigned int len = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = call i64 @strlen(ptr %%%u)\n", len, cstr);
+  unsigned int element = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i64 %%%u\n",
+          element, strs, idx);
+  unsigned int element_ptr = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 0\n",
+          element_ptr, element);
+  fprintf(ctx->out, "  store ptr %%%u, ptr %%%u\n", cstr, element_ptr);
+  unsigned int element_len = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 1\n",
+          element_len, element);
+  fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", len, element_len);
+  idx = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", idx, loop_index);
+  unsigned int next = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = add i64 %%%u, 1\n", next, idx);
+  fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", next, loop_index);
+  fprintf(ctx->out, "  br label %%args.cond\n");
+  fprintf(ctx->out, "args.done:\n");
+
+  unsigned int args_ptr = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %%%s, i32 0, i32 0\n",
+          args_ptr, args_name);
+  fprintf(ctx->out, "  store ptr %%%u, ptr %%%u\n", strs, args_ptr);
+  unsigned int args_len = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %%%s, i32 0, i32 1\n",
+          args_len, args_name);
+  fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", argc, args_len);
+
+  if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
+    return 1;
+  }
+
+  fprintf(ctx->out, "}\n\n");
+  return 0;
+}
+
 static int emit_decl(ctx_t *ctx, decl_t *decl) {
   if (decl == NULL) {
     return 1;
@@ -1300,8 +1380,11 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_FN: {
-    return decl->fn.is_extern ? emit_extern_fn(ctx, decl)
-                              : emit_fn(ctx, decl, decl->name);
+    if (decl->fn.is_extern) {
+      return emit_extern_fn(ctx, decl);
+    }
+    return strcmp(decl->name, "main") == 0 ? emit_entry_point(ctx, decl)
+                                           : emit_fn(ctx, decl, decl->name);
   }
   case DECL_STRUCT: {
     fprintf(ctx->out, "%%%s = type {", decl->name);

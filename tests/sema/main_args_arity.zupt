@@ -1,0 +1,10 @@
+--TEST--
+'main' accepts at most one parameter (the argument list); declaring more is a semantic error
+--FILE--
+pub fn main(args: []str, extra: []str): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'main' takes at most one parameter (the argument list as '[]str') [1:5]
+--EXIT--
+1
