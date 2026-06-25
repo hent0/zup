@@ -301,6 +301,7 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
   case STMT_FOR:
     collect_expr(ctx, stmt->for_loop.start);
     collect_expr(ctx, stmt->for_loop.end);
+    collect_expr(ctx, stmt->for_loop.iterable);
     for (stmt_t *s = stmt->for_loop.body; s != NULL; s = s->next) {
       if (collect_stmt(ctx, s) != 0) {
         return 1;
@@ -951,6 +952,7 @@ static bool block_terminates(stmt_t *body) {
 
 static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
+static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn);
 
 static const char *lvalue_root_name(const expr_t *target) {
   while (target->kind == EXPR_FIELD) {
@@ -1100,6 +1102,10 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
     return 1;
   }
 
+  if (stmt->for_loop.iterable != NULL) {
+    return emit_foreach(ctx, stmt, ret, fn);
+  }
+
   const char *type = type_kind_to_ir(stmt->for_loop.start->type.kind);
   const char *slot = arena_format(ctx->arena, "%%%s", stmt->for_loop.var);
   fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
@@ -1138,6 +1144,104 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
 
   fprintf(ctx->out, "endwhile.%d:\n", label);
+  ctx->loop_label = outer;
+  return 0;
+}
+
+static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
+  expr_t *iter = stmt->for_loop.iterable;
+  bool is_slice = iter->type.kind == TYPE_SLICE;
+
+  type_t elem = *iter->type.element;
+  const char *elem_ir = ir_type(ctx, elem);
+
+  const char *base;
+  if (is_slice) {
+    base = emit_addr(ctx, iter);
+  } else if (iter->kind == EXPR_ARRAY) {
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, iter->type));
+    base = arena_format(ctx->arena, "%%%u", slot);
+    emit_struct_into(ctx, base, iter);
+  } else {
+    base = emit_addr(ctx, iter);
+  }
+
+  const char *xslot = arena_format(ctx->arena, "%%%s", stmt->for_loop.var);
+  fprintf(ctx->out, "  %s = alloca %s\n", xslot, elem_ir);
+  add_local(ctx, stmt->for_loop.var, elem, xslot);
+
+  unsigned int index = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = alloca i64\n", index);
+  fprintf(ctx->out, "  store i64 0, ptr %%%u\n", index);
+
+  unsigned int label = ctx->label++;
+  unsigned int outer = ctx->loop_label;
+  ctx->loop_label = label;
+
+  fprintf(ctx->out, "  br label %%cond.%u\n", label);
+  fprintf(ctx->out, "cond.%u:\n", label);
+  unsigned int cur = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", cur, index);
+
+  const char *len;
+  if (is_slice) {
+    unsigned int len_ptr = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n",
+            len_ptr, base);
+    unsigned int len_val = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", len_val, len_ptr);
+    len = arena_format(ctx->arena, "%%%u", len_val);
+  } else {
+    len = arena_format(ctx->arena, "%zu", iter->type.array_length);
+  }
+
+  unsigned int cmp = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = icmp slt i64 %%%u, %s\n", cmp, cur, len);
+  fprintf(ctx->out, "  br i1 %%%u, label %%body.%u, label %%endwhile.%u\n", cmp,
+          label, label);
+
+  fprintf(ctx->out, "body.%u:\n", label);
+  unsigned int bidx = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", bidx, index);
+
+  unsigned int elem_ptr;
+  if (is_slice) {
+    unsigned int data_ptr = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n",
+            data_ptr, base);
+    unsigned int data = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", data, data_ptr);
+    elem_ptr = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i64 %%%u\n",
+            elem_ptr, elem_ir, data, bidx);
+  } else {
+    elem_ptr = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i64 %%%u\n",
+            elem_ptr, ir_type(ctx, iter->type), base, bidx);
+  }
+
+  unsigned int elem_val = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load %s, ptr %%%u\n", elem_val, elem_ir,
+          elem_ptr);
+  fprintf(ctx->out, "  store %s %%%u, ptr %s\n", elem_ir, elem_val, xslot);
+
+  if (emit_block(ctx, stmt->for_loop.body, ret, fn) != 0) {
+    return 1;
+  }
+
+  if (!block_terminates(stmt->for_loop.body)) {
+    unsigned int load = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", load, index);
+    unsigned int inc = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = add i64 %%%u, 1\n", inc, load);
+    fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", inc, index);
+    fprintf(ctx->out, "  br label %%cond.%u\n", label);
+  }
+
+  fprintf(ctx->out, "endwhile.%u:\n", label);
   ctx->loop_label = outer;
   return 0;
 }

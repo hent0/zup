@@ -491,6 +491,14 @@ stmt_t *ast_for_init(token_t token, char *var, expr_t *start, expr_t *end,
   stmt->for_loop.body = body;
   return stmt;
 }
+stmt_t *ast_foreach_init(token_t token, char *var, expr_t *iterable,
+                         stmt_t *body, arena_t *arena) {
+  stmt_t *stmt = ast_stmt_init(token, STMT_FOR, arena);
+  stmt->for_loop.var = var;
+  stmt->for_loop.iterable = iterable;
+  stmt->for_loop.body = body;
+  return stmt;
+}
 
 param_t *ast_param_init(arena_t *arena) {
   param_t *param = arena_alloc(arena, sizeof(param_t));
@@ -726,9 +734,14 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
   case STMT_FOR:
     printf("For %s\n", stmt->for_loop.var);
     print_indent(depth + 1);
-    printf("Range\n");
-    dump_expr(stmt->for_loop.start, depth + 2);
-    dump_expr(stmt->for_loop.end, depth + 2);
+    if (stmt->for_loop.iterable != NULL) {
+      printf("Iter\n");
+      dump_expr(stmt->for_loop.iterable, depth + 2);
+    } else {
+      printf("Range\n");
+      dump_expr(stmt->for_loop.start, depth + 2);
+      dump_expr(stmt->for_loop.end, depth + 2);
+    }
     print_indent(depth + 1);
     printf("Do\n");
     dump_block(stmt->for_loop.body, depth + 1);

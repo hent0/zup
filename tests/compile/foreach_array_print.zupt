@@ -1,13 +1,7 @@
+--TEST--
+for-in over an array literal binds each element in order; matches the 006_sum example's main
+--FILE--
 extern fn printf(fmt: cstr, ...);
-
-fn sum(items: []i32): i32 {
-  let sum = 0;
-  for i in 0..(items.len as i32) {
-    sum = sum + items[i];
-  }
-
-  return sum;
-}
 
 pub fn main(): i32 {
   let sum = 0;
@@ -21,3 +15,11 @@ pub fn main(): i32 {
 
   return 0;
 }
+--EXPECT--
+Sum of:
+1
+2
+3
+Equals: 6
+--EXIT--
+0

@@ -835,35 +835,51 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     break;
   }
   case STMT_FOR: {
-    exprty_t start = check_expr(sema, stmt->for_loop.start, TYPE_UNKNOWN);
-    exprty_t end = check_expr(sema, stmt->for_loop.end, TYPE_UNKNOWN);
+    type_t var_type;
+    if (stmt->for_loop.iterable != NULL) {
+      exprty_t iter = check_expr(sema, stmt->for_loop.iterable, TYPE_UNKNOWN);
+      if (iter.ok && iter.kind != TYPE_SLICE && iter.kind != TYPE_ARRAY) {
+        diag_error(sema->src, stmt->for_loop.iterable->line,
+                   stmt->for_loop.iterable->col,
+                   "for-in loop requires a slice or array, got %s",
+                   type_kind_to_str(iter.kind));
+        sema->had_error = true;
+        var_type = (type_t){.kind = TYPE_I32};
+      } else {
+        var_type = iter.element ? *iter.element : (type_t){.kind = TYPE_I32};
+      }
+    } else {
+      exprty_t start = check_expr(sema, stmt->for_loop.start, TYPE_UNKNOWN);
+      exprty_t end = check_expr(sema, stmt->for_loop.end, TYPE_UNKNOWN);
 
-    TypeKind var_type = TYPE_I32;
-    if (start.ok && !type_is_integer(start.kind)) {
-      diag_error(sema->src, stmt->for_loop.start->line,
-                 stmt->for_loop.start->col,
-                 "range bound must be an integer, got %s",
-                 type_kind_to_str(start.kind));
-      sema->had_error = true;
-    } else if (end.ok && !type_is_integer(end.kind)) {
-      diag_error(sema->src, stmt->for_loop.end->line, stmt->for_loop.end->col,
-                 "range bound must be an integer, got %s",
-                 type_kind_to_str(end.kind));
-      sema->had_error = true;
-    } else if (start.ok && end.ok && start.kind != end.kind) {
-      diag_error(sema->src, stmt->for_loop.start->line,
-                 stmt->for_loop.start->col,
-                 "range bounds must have the same type, got %s and %s",
-                 type_kind_to_str(start.kind), type_kind_to_str(end.kind));
-      sema->had_error = true;
-    } else if (start.ok) {
-      var_type = start.kind;
+      TypeKind kind = TYPE_I32;
+      if (start.ok && !type_is_integer(start.kind)) {
+        diag_error(sema->src, stmt->for_loop.start->line,
+                   stmt->for_loop.start->col,
+                   "range bound must be an integer, got %s",
+                   type_kind_to_str(start.kind));
+        sema->had_error = true;
+      } else if (end.ok && !type_is_integer(end.kind)) {
+        diag_error(sema->src, stmt->for_loop.end->line, stmt->for_loop.end->col,
+                   "range bound must be an integer, got %s",
+                   type_kind_to_str(end.kind));
+        sema->had_error = true;
+      } else if (start.ok && end.ok && start.kind != end.kind) {
+        diag_error(sema->src, stmt->for_loop.start->line,
+                   stmt->for_loop.start->col,
+                   "range bounds must have the same type, got %s and %s",
+                   type_kind_to_str(start.kind), type_kind_to_str(end.kind));
+        sema->had_error = true;
+      } else if (start.ok) {
+        kind = start.kind;
+      }
+      var_type = (type_t){.kind = kind};
     }
 
     size_t saved = sema->scope->count;
     sema->scope->items[sema->scope->count++] = (local_t){
         .name = stmt->for_loop.var,
-        .type = (type_t){.kind = var_type},
+        .type = var_type,
         .mutable = false,
         .is_loop_var = true,
     };

@@ -1,0 +1,37 @@
+--TEST--
+a for-in loop over a value (no '..' range) parses into a loop variable, an iterable, and a body
+--ARGS--
+--ast
+--FILE--
+fn sum(items: []i32): i32 {
+  let total: i32 = 0;
+  for x in items {
+    total = total + x;
+  }
+  return total;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'sum' -> i32
+    param items: []i32
+    Let total: i32
+      Number literal 0
+    For x
+      Iter
+        Id items
+      Do
+        Assign total
+          Binary +
+            Id total
+            Id x
+    Return
+      Id total
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

@@ -1,0 +1,55 @@
+--TEST--
+a for-in loop over a slice lowers to a hidden i64 index, a length-bounded condition, a per-iteration element bind, and an increment
+--ARGS--
+--ir -o -
+--FILE--
+fn sum(items: []i32): i32 {
+  let total: i32 = 0;
+  for x in items {
+    total = total + x;
+  }
+  return total;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+define internal i32 @sum(ptr byval({ ptr, i64 }) %items) {
+entry:
+  %total = alloca i32
+  store i32 0, ptr %total
+  %x = alloca i32
+  %1 = alloca i64
+  store i64 0, ptr %1
+  br label %cond.1
+cond.1:
+  %2 = load i64, ptr %1
+  %3 = getelementptr { ptr, i64 }, ptr %items, i32 0, i32 1
+  %4 = load i64, ptr %3
+  %5 = icmp slt i64 %2, %4
+  br i1 %5, label %body.1, label %endwhile.1
+body.1:
+  %6 = load i64, ptr %1
+  %7 = getelementptr { ptr, i64 }, ptr %items, i32 0, i32 0
+  %8 = load ptr, ptr %7
+  %9 = getelementptr i32, ptr %8, i64 %6
+  %10 = load i32, ptr %9
+  store i32 %10, ptr %x
+  %11 = load i32, ptr %total
+  %12 = load i32, ptr %x
+  %13 = add i32 %11, %12
+  store i32 %13, ptr %total
+  %14 = load i64, ptr %1
+  %15 = add i64 %14, 1
+  store i64 %15, ptr %1
+  br label %cond.1
+endwhile.1:
+  %16 = load i32, ptr %total
+  ret i32 %16
+}
+
+define i32 @main() {
+entry:
+  ret i32 0
+}

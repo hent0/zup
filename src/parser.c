@@ -2,7 +2,6 @@
 #include "arena.h"
 #include "ast.h"
 #include "compiler.h"
-#include "debug.h"
 #include "diag.h"
 #include "lexer.h"
 #include "token.h"
@@ -649,11 +648,17 @@ static stmt_t *parse_for(parser_t *parser) {
   bool saved = parser->no_struct_literal;
   parser->no_struct_literal = true;
   expr_t *start = parse_expr(parser);
-  expect(parser, TOKEN_DOT_DOT, "expected '..'");
-  expr_t *end = parse_expr(parser);
+
+  if (match(parser, TOKEN_DOT_DOT)) {
+    expr_t *end = parse_expr(parser);
+    parser->no_struct_literal = saved;
+    stmt_t *body = parse_block(parser);
+    return ast_for_init(token, id.value, start, end, body, parser->arena);
+  }
+
   parser->no_struct_literal = saved;
   stmt_t *body = parse_block(parser);
-  return ast_for_init(token, id.value, start, end, body, parser->arena);
+  return ast_foreach_init(token, id.value, start, body, parser->arena);
 }
 
 static stmt_t *parse_stmt(parser_t *parser) {

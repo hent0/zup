@@ -1,0 +1,49 @@
+--TEST--
+for-in over an array literal materializes the array, then iterates a hidden i64 index over its static length, binding each element
+--ARGS--
+--ir -o -
+--FILE--
+pub fn main(): i32 {
+  let total = 0;
+  for i in [1, 2, 3] {
+    total = total + i;
+  }
+  return total;
+}
+--EXPECT--
+define i32 @main() {
+entry:
+  %total = alloca i32
+  store i32 0, ptr %total
+  %1 = alloca [3 x i32]
+  %2 = getelementptr [3 x i32], ptr %1, i32 0, i32 0
+  store i32 1, ptr %2
+  %3 = getelementptr [3 x i32], ptr %1, i32 0, i32 1
+  store i32 2, ptr %3
+  %4 = getelementptr [3 x i32], ptr %1, i32 0, i32 2
+  store i32 3, ptr %4
+  %i = alloca i32
+  %5 = alloca i64
+  store i64 0, ptr %5
+  br label %cond.1
+cond.1:
+  %6 = load i64, ptr %5
+  %7 = icmp slt i64 %6, 3
+  br i1 %7, label %body.1, label %endwhile.1
+body.1:
+  %8 = load i64, ptr %5
+  %9 = getelementptr [3 x i32], ptr %1, i32 0, i64 %8
+  %10 = load i32, ptr %9
+  store i32 %10, ptr %i
+  %11 = load i32, ptr %total
+  %12 = load i32, ptr %i
+  %13 = add i32 %11, %12
+  store i32 %13, ptr %total
+  %14 = load i64, ptr %5
+  %15 = add i64 %14, 1
+  store i64 %15, ptr %5
+  br label %cond.1
+endwhile.1:
+  %16 = load i32, ptr %total
+  ret i32 %16
+}

@@ -1,0 +1,18 @@
+--TEST--
+a for-in loop over a slice visits every element in order; summing [10, 20, 30] yields 60
+--FILE--
+fn sum(items: []i32): i32 {
+  let total: i32 = 0;
+  for x in items {
+    total = total + x;
+  }
+  return total;
+}
+
+pub fn main(): i32 {
+  let xs: [3]i32 = [10, 20, 30];
+  let s: []i32 = xs;
+  return sum(s);
+}
+--EXIT--
+60

@@ -1,0 +1,12 @@
+--TEST--
+a for-in loop requires a slice or array; iterating a scalar value is a semantic error
+--FILE--
+pub fn main(): i32 {
+  for x in 5 {
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: for-in loop requires a slice or array, got i32 [2:12]
+--EXIT--
+1

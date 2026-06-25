@@ -1,0 +1,9 @@
+extern fn printf(fmt: cstr, ...);
+
+pub fn main(args: []str): i32 {
+  for arg in args {
+    printf("%s\n", arg.ptr);
+  }
+
+  return 0;
+}
