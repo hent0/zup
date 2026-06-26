@@ -1,0 +1,24 @@
+--TEST--
+omitting a defaulted argument materializes the default at the call site; the callee keeps a single normal signature
+--ARGS--
+--ir -o -
+--FILE--
+fn add(a: i32, b: i32 = 10): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return add(5);
+}
+--EXPECT--
+define internal i32 @add(i32 %a, i32 %b) {
+entry:
+  %1 = add i32 %a, %b
+  ret i32 %1
+}
+
+define i32 @main() {
+entry:
+  %1 = call i32 @add(i32 5, i32 10)
+  ret i32 %1
+}

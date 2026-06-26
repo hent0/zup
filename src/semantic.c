@@ -212,12 +212,28 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
                  call->call.arg_count);
       sema->had_error = true;
     }
-  } else if (call->call.arg_count != fn->fn.params_count) {
-    diag_error(sema->src, call->line, call->col,
-               "'%s' expects %zu argument%s but got %zu", name,
-               fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
-               call->call.arg_count);
-    sema->had_error = true;
+  } else {
+    size_t required = 0;
+    for (param_t *p = fn->fn.params; p != NULL; p = p->next) {
+      if (p->default_value == NULL) {
+        required++;
+      }
+    }
+    if (required == fn->fn.params_count) {
+      if (call->call.arg_count != fn->fn.params_count) {
+        diag_error(sema->src, call->line, call->col,
+                   "'%s' expects %zu argument%s but got %zu", name,
+                   fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
+                   call->call.arg_count);
+        sema->had_error = true;
+      }
+    } else if (call->call.arg_count < required ||
+               call->call.arg_count > fn->fn.params_count) {
+      diag_error(sema->src, call->line, call->col,
+                 "'%s' expects between %zu and %zu arguments but got %zu", name,
+                 required, fn->fn.params_count, call->call.arg_count);
+      sema->had_error = true;
+    }
   }
 
   param_t *param = fn->fn.params;
@@ -1010,8 +1026,41 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
 }
 
 static void check_fn(sema_t *sema, const decl_t *fn) {
+  bool seen_default = false;
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
     check_type(sema, param->type);
+
+    if (param->default_value != NULL) {
+      if (fn->fn.variadic) {
+        diag_error(sema->src, fn->line, fn->col,
+                   "default parameters cannot be combined with variadic '...'");
+        sema->had_error = true;
+      }
+      if (!is_const_init(param->default_value)) {
+        diag_error(sema->src, param->default_value->line,
+                   param->default_value->col,
+                   "parameter default must be a constant");
+        sema->had_error = true;
+      } else {
+        exprty_t dty =
+            check_expr(sema, param->default_value, param->type.kind);
+        if (dty.ok && !assignable(param->type, dty)) {
+          diag_error(sema->src, param->default_value->line,
+                     param->default_value->col,
+                     "cannot assign %s to parameter '%s' of type %s",
+                     type_kind_to_str(dty.kind), param->name,
+                     type_to_str(param->type));
+          sema->had_error = true;
+        }
+      }
+      seen_default = true;
+    } else if (seen_default && !param->is_self) {
+      diag_error(sema->src, fn->line, fn->col,
+                 "parameter '%s' without a default cannot follow a defaulted "
+                 "parameter",
+                 param->name);
+      sema->had_error = true;
+    }
   }
   check_type(sema, fn->fn.return_type);
 

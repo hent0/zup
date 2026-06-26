@@ -1,0 +1,17 @@
+--TEST--
+calling with the argument omitted uses the default; passing it explicitly overrides
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+fn add(a: i32, b: i32 = 10): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  printf("%d %d\n", add(5), add(5, 100));
+  return 0;
+}
+--EXPECT--
+15 105
+--EXIT--
+0

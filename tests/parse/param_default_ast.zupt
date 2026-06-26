@@ -1,0 +1,27 @@
+--TEST--
+a function parameter may carry a default value, parsed as a child expression of the param
+--ARGS--
+--ast
+--FILE--
+fn add(a: i32, b: i32 = 10): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  FnDecl priv 'add' -> i32
+    param a: i32
+    param b: i32
+      Number literal 10
+    Return
+      Binary +
+        Id a
+        Id b
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

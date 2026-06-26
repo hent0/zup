@@ -504,6 +504,7 @@ param_t *ast_param_init(arena_t *arena) {
   param_t *param = arena_alloc(arena, sizeof(param_t));
   param->name = NULL;
   param->type = (type_t){.kind = TYPE_UNKNOWN};
+  param->default_value = NULL;
   param->mutable = true;
   param->is_self = false;
   param->next = NULL;
@@ -784,6 +785,10 @@ static void dump_decl(const decl_t *decl, int depth) {
       print_indent(depth + 1);
       printf("param %s%s: %s\n", !param->mutable ? "const " : "", param->name,
              type_to_str(param->type));
+
+      if (param->default_value != NULL) {
+        dump_expr(param->default_value, depth + 2);
+      }
     }
 
     if (!decl->fn.is_extern) {

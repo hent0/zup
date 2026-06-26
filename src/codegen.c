@@ -799,11 +799,15 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
   bool ret_struct = is_aggregate(call->type.kind);
 
-  size_t n = call->call.arg_count;
-  const char **argref = arena_alloc(ctx->arena, sizeof(char *) * (n ? n : 1));
-  type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (n ? n : 1));
-  bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (n ? n : 1));
   const decl_t *fn = is_method ? NULL : find_fn(ctx, name);
+  size_t n = call->call.arg_count;
+  size_t cap = n;
+  if (fn != NULL && fn->fn.params_count > cap) {
+    cap = fn->fn.params_count;
+  }
+  const char **argref = arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
+  type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (cap ? cap : 1));
+  bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (cap ? cap : 1));
   const param_t *param = fn ? fn->fn.params : NULL;
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
@@ -844,6 +848,16 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     }
     i++;
   }
+
+  // Fill omitted trailing parameters with their declared defaults.
+  for (; param != NULL && param->default_value != NULL; param = param->next) {
+    value_t v = emit_value(ctx, param->default_value);
+    argref[i] = v.ref;
+    argtype[i] = v.type;
+    argbyval[i] = false;
+    i++;
+  }
+  n = i;
 
   const char *dest = sret_dest;
   if (ret_struct && dest == NULL) {

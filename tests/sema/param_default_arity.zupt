@@ -1,0 +1,14 @@
+--TEST--
+a defaulted parameter makes an argument optional, but the required ones must still be supplied
+--FILE--
+fn add(a: i32, b: i32 = 10): i32 {
+  return a + b;
+}
+
+pub fn main(): i32 {
+  return add();
+}
+--EXPECTERR--
+zup: error: 'add' expects between 1 and 2 arguments but got 0 [6:10]
+--EXIT--
+1

@@ -740,9 +740,15 @@ static param_t *parse_param(parser_t *parser) {
     return NULL;
   }
 
+  expr_t *default_value = NULL;
+  if (match(parser, TOKEN_EQUAL)) {
+    default_value = parse_expr(parser);
+  }
+
   param_t *param = ast_param_init(parser->arena);
   param->name = id.value;
   param->type = type;
+  param->default_value = default_value;
   param->mutable = mutable;
   return param;
 }

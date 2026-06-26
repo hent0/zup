@@ -206,6 +206,7 @@ struct param {
   type_t type;
   bool mutable;
   bool is_self;
+  expr_t *default_value;
   param_t *next;
 };
 
