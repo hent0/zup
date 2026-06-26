@@ -122,8 +122,8 @@ static type_t exprty_type(exprty_t e) {
                   .array_length = e.array_length};
 }
 
-static field_t *struct_field(const decl_t *strukt, const char *name) {
-  for (field_t *field = strukt->strct.fields; field != NULL;
+static field_t *struct_field(const decl_t *strct, const char *name) {
+  for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
     if (strcmp(field->name, name) == 0) {
       return field;
@@ -286,8 +286,8 @@ static bool number_is_float(const char *s) {
   return strpbrk(s, ".eE") != NULL;
 }
 
-static decl_t *struct_method(const decl_t *strukt, const char *name) {
-  for (decl_t *m = strukt->strct.members; m != NULL; m = m->next) {
+static decl_t *struct_method(const decl_t *strct, const char *name) {
+  for (decl_t *m = strct->strct.members; m != NULL; m = m->next) {
     if (m->kind == DECL_FN && strcmp(m->name, name) == 0) {
       return m;
     }
@@ -310,8 +310,8 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
-  decl_t *strukt = typetab_lookup(sema->types, recv.name);
-  decl_t *method = strukt ? struct_method(strukt, field->field.name) : NULL;
+  decl_t *strct = typetab_lookup(sema->types, recv.name);
+  decl_t *method = strct ? struct_method(strct, field->field.name) : NULL;
   if (method == NULL) {
     diag_error(sema->src, field->line, field->col,
                "struct '%s' has no method '%s'", recv.name, field->field.name);
@@ -493,9 +493,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_STRUCT_LITERAL: {
-    decl_t *strukt =
-        typetab_lookup(sema->types, expr->struct_literal.type_name);
-    if (strukt == NULL) {
+    decl_t *strct = typetab_lookup(sema->types, expr->struct_literal.type_name);
+    if (strct == NULL) {
       diag_error(sema->src, expr->line, expr->col, "unknown type '%s'",
                  expr->struct_literal.type_name);
       sema->had_error = true;
@@ -506,12 +505,12 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     bool ok = true;
     for (field_init_t *init = expr->struct_literal.inits; init != NULL;
          init = init->next) {
-      field_t *field = struct_field(strukt, init->name);
+      field_t *field = struct_field(strct, init->name);
       exprty_t value = check_expr(sema, init->value,
                                   field ? field->type.kind : TYPE_UNKNOWN);
       if (field == NULL) {
         diag_error(sema->src, init->line, init->col,
-                   "struct '%s' has no field '%s'", strukt->name, init->name);
+                   "struct '%s' has no field '%s'", strct->name, init->name);
         sema->had_error = true;
         ok = false;
         continue;
@@ -526,7 +525,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       }
     }
 
-    for (field_t *field = strukt->strct.fields; field != NULL;
+    for (field_t *field = strct->strct.fields; field != NULL;
          field = field->next) {
       bool found = false;
       for (field_init_t *init = expr->struct_literal.inits; init != NULL;
@@ -536,16 +535,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
           break;
         }
       }
-      if (!found) {
+      if (!found && field->default_value == NULL) {
         diag_error(sema->src, expr->line, expr->col,
                    "missing field '%s' in initializer for '%s'", field->name,
-                   strukt->name);
+                   strct->name);
         sema->had_error = true;
         ok = false;
       }
     }
 
-    result = (exprty_t){.kind = TYPE_STRUCT, .name = strukt->name, .ok = ok};
+    result = (exprty_t){.kind = TYPE_STRUCT, .name = strct->name, .ok = ok};
     break;
   }
   case EXPR_FIELD: {
@@ -599,8 +598,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    decl_t *strukt = typetab_lookup(sema->types, base.name);
-    field_t *field = strukt ? struct_field(strukt, expr->field.name) : NULL;
+    decl_t *strct = typetab_lookup(sema->types, base.name);
+    field_t *field = strct ? struct_field(strct, expr->field.name) : NULL;
     if (field == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "struct '%s' has no field '%s'", base.name, expr->field.name);
@@ -971,11 +970,12 @@ static bool check_type(sema_t *sema, type_t type) {
 
 static void check_fn(sema_t *sema, const decl_t *fn);
 
-static void check_struct(sema_t *sema, const decl_t *strukt) {
-  for (field_t *field = strukt->strct.fields; field != NULL;
+static void check_struct(sema_t *sema, const decl_t *strct) {
+  for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
     check_type(sema, field->type);
-    for (field_t *prev = strukt->strct.fields; prev != field;
+
+    for (field_t *prev = strct->strct.fields; prev != field;
          prev = prev->next) {
       if (strcmp(prev->name, field->name) == 0) {
         diag_error(sema->src, field->line, field->col, "duplicate field '%s'",
@@ -984,8 +984,26 @@ static void check_struct(sema_t *sema, const decl_t *strukt) {
         break;
       }
     }
+
+    if (field->default_value != NULL) {
+      if (!is_const_init(field->default_value)) {
+        diag_error(sema->src, field->default_value->line,
+                   field->default_value->col,
+                   "struct field default must be a constant");
+        sema->had_error = true;
+      } else {
+        exprty_t dty = check_expr(sema, field->default_value, field->type.kind);
+        if (dty.ok && !assignable(field->type, dty)) {
+          diag_error(
+              sema->src, field->default_value->line, field->default_value->col,
+              "cannot assign %s to field '%s' of type %s",
+              type_kind_to_str(dty.kind), field->name, type_to_str(field->type));
+          sema->had_error = true;
+        }
+      }
+    }
   }
-  for (decl_t *member = strukt->strct.members; member != NULL;
+  for (decl_t *member = strct->strct.members; member != NULL;
        member = member->next) {
     check_fn(sema, member);
   }

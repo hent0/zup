@@ -910,9 +910,15 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
     expect(parser, TOKEN_COLON, "expected ':' after field name");
     type_t ftype = parse_type(parser);
 
+    expr_t *default_value = NULL;
+    if (match(parser, TOKEN_EQUAL)) {
+      default_value = parse_expr(parser);
+    }
+
     field_t *field = ast_field_init(parser->arena);
     field->name = fname.value;
     field->type = ftype;
+    field->default_value = default_value;
     field->line = fname.line;
     field->col = fname.col;
 

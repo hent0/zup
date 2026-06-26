@@ -1,0 +1,25 @@
+--TEST--
+a struct field may carry a default value, parsed as a child expression of the field
+--ARGS--
+--ast
+--FILE--
+struct Config {
+  verbose: bool = false,
+  level: i32 = 1,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  Struct priv 'Config'
+    field verbose: bool
+      Boolean literal false
+    field level: i32
+      Number literal 1
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

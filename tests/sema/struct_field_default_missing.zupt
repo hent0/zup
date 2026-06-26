@@ -1,0 +1,16 @@
+--TEST--
+a defaulted field may be omitted from a literal, but a field without a default is still required
+--FILE--
+struct Config {
+  name: str,
+  level: i32 = 1,
+}
+
+pub fn main(): i32 {
+  let c: Config = Config { level: 2 };
+  return 0;
+}
+--EXPECTERR--
+zup: error: missing field 'name' in initializer for 'Config' [7:19]
+--EXIT--
+1

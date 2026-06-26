@@ -163,9 +163,9 @@ static const decl_t *find_fn(ctx_t *ctx, const char *name) {
   return NULL;
 }
 
-static int field_index(const decl_t *strukt, const char *name) {
+static int field_index(const decl_t *strct, const char *name) {
   int i = 0;
-  for (field_t *field = strukt->strct.fields; field != NULL;
+  for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next, i++) {
     if (strcmp(field->name, name) == 0) {
       return i;
@@ -174,8 +174,8 @@ static int field_index(const decl_t *strukt, const char *name) {
   return -1;
 }
 
-static field_t *find_field(const decl_t *strukt, const char *name) {
-  for (field_t *field = strukt->strct.fields; field != NULL;
+static field_t *find_field(const decl_t *strct, const char *name) {
+  for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
     if (strcmp(field->name, name) == 0) {
       return field;
@@ -421,8 +421,8 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
               reg, base, index);
       return arena_format(ctx->arena, "%%%u", reg);
     }
-    const decl_t *strukt = find_struct(ctx, base_type.name);
-    int index = field_index(strukt, expr->field.name);
+    const decl_t *strct = find_struct(ctx, base_type.name);
+    int index = field_index(strct, expr->field.name);
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
             reg, base_type.name, base, index);
@@ -953,11 +953,11 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     return;
   }
   if (expr->kind == EXPR_STRUCT_LITERAL) {
-    const decl_t *strukt = find_struct(ctx, expr->type.name);
+    const decl_t *strct = find_struct(ctx, expr->type.name);
     for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
          fi = fi->next) {
-      field_t *field = find_field(strukt, fi->name);
-      int index = field_index(strukt, fi->name);
+      field_t *field = find_field(strct, fi->name);
+      int index = field_index(strct, fi->name);
       unsigned int reg = ctx->reg++;
       fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
               reg, expr->type.name, dest, index);
@@ -966,6 +966,36 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
         emit_struct_into(ctx, slot, fi->value);
       } else {
         value_t value = emit_value(ctx, fi->value);
+        fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
+                value.ref, slot);
+      }
+    }
+
+    for (field_t *field = strct->strct.fields; field != NULL;
+         field = field->next) {
+      if (field->default_value == NULL) {
+        continue;
+      }
+      bool provided = false;
+      for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
+           fi = fi->next) {
+        if (strcmp(fi->name, field->name) == 0) {
+          provided = true;
+          break;
+        }
+      }
+      if (provided) {
+        continue;
+      }
+      int index = field_index(strct, field->name);
+      unsigned int reg = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
+              reg, expr->type.name, dest, index);
+      const char *slot = arena_format(ctx->arena, "%%%u", reg);
+      if (is_aggregate(field->type.kind)) {
+        emit_struct_into(ctx, slot, field->default_value);
+      } else {
+        value_t value = emit_value(ctx, field->default_value);
         fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
                 value.ref, slot);
       }

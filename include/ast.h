@@ -213,6 +213,7 @@ typedef struct field field_t;
 struct field {
   char *name;
   type_t type;
+  expr_t *default_value;
   unsigned int line;
   unsigned int col;
   field_t *next;

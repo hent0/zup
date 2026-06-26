@@ -1,0 +1,14 @@
+--TEST--
+a struct field's default value must match the field's declared type
+--FILE--
+struct Config {
+  level: i32 = true,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign bool to field 'level' of type i32 [2:16]
+--EXIT--
+1

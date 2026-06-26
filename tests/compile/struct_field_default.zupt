@@ -1,0 +1,19 @@
+--TEST--
+a field omitted from a struct literal takes its declared default at run time
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Config {
+  level: i32 = 7,
+  scale: i32 = 3,
+}
+
+pub fn main(): i32 {
+  let c: Config = Config { scale: 10 };
+  printf("%d %d\n", c.level, c.scale);
+  return 0;
+}
+--EXPECT--
+7 10
+--EXIT--
+0

@@ -1,0 +1,8 @@
+struct Config {
+  verbose: bool = false,
+  level: i32 = 1,
+}
+
+pub fn main(): i32 {
+  return 0;
+}

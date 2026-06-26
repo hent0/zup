@@ -514,6 +514,7 @@ field_t *ast_field_init(arena_t *arena) {
   field_t *field = arena_alloc(arena, sizeof(field_t));
   field->name = NULL;
   field->type = (type_t){.kind = TYPE_UNKNOWN};
+  field->default_value = NULL;
   field->next = NULL;
   return field;
 }
@@ -803,6 +804,10 @@ static void dump_decl(const decl_t *decl, int depth) {
          field = field->next) {
       print_indent(depth + 1);
       printf("field %s: %s\n", field->name, type_to_str(field->type));
+
+      if (field->default_value != NULL) {
+        dump_expr(field->default_value, depth + 2);
+      }
     }
     for (const decl_t *member = decl->strct.members; member != NULL;
          member = member->next) {

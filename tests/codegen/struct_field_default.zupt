@@ -1,0 +1,27 @@
+--TEST--
+omitting a defaulted field from a literal fills it with the default: provided fields store first, then omitted defaults in declaration order
+--ARGS--
+--ir -o -
+--FILE--
+struct Config {
+  verbose: bool = false,
+  level: i32 = 1,
+}
+
+pub fn main(): i32 {
+  let c: Config = Config { level: 2 };
+  return c.level;
+}
+--EXPECT--
+%Config = type { i1, i32 }
+define i32 @main() {
+entry:
+  %c = alloca %Config
+  %1 = getelementptr %Config, ptr %c, i32 0, i32 1
+  store i32 2, ptr %1
+  %2 = getelementptr %Config, ptr %c, i32 0, i32 0
+  store i1 false, ptr %2
+  %3 = getelementptr %Config, ptr %c, i32 0, i32 1
+  %4 = load i32, ptr %3
+  ret i32 %4
+}
