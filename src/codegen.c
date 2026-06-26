@@ -800,15 +800,37 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   bool ret_struct = is_aggregate(call->type.kind);
 
   const decl_t *fn = is_method ? NULL : find_fn(ctx, name);
-  size_t n = call->call.arg_count;
-  size_t cap = n;
-  if (fn != NULL && fn->fn.params_count > cap) {
-    cap = fn->fn.params_count;
+
+  const param_t *param = NULL;
+  size_t param_count = 0;
+  if (is_method) {
+    expr_t *recv = call->call.callee->field.base;
+    const decl_t *strct = find_struct(ctx, recv->type.name);
+    if (strct != NULL) {
+      for (decl_t *m = strct->strct.members; m != NULL; m = m->next) {
+        if (m->kind == DECL_FN &&
+            strcmp(m->name, call->call.callee->field.name) == 0) {
+          param = m->fn.params;
+          param_count = m->fn.params_count;
+          if (param != NULL && param->is_self) {
+            param = param->next;
+            param_count--;
+          }
+          break;
+        }
+      }
+    }
+  } else if (fn != NULL) {
+    param = fn->fn.params;
+    param_count = fn->fn.params_count;
   }
-  const char **argref = arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
+
+  size_t n = call->call.arg_count;
+  size_t cap = n > param_count ? n : param_count;
+  const char **argref =
+      arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
   type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (cap ? cap : 1));
   bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (cap ? cap : 1));
-  const param_t *param = fn ? fn->fn.params : NULL;
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
     type_t ptype = param ? param->type : (type_t){.kind = TYPE_UNKNOWN};

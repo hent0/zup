@@ -1,0 +1,22 @@
+--TEST--
+a method called with its defaulted argument omitted uses the default; passing it overrides
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+struct Counter {
+  base: i32,
+
+  fn bump(self, by: i32 = 1): i32 {
+    return self.base + by;
+  }
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter { base: 10 };
+  printf("%d %d\n", c.bump(), c.bump(5));
+  return 0;
+}
+--EXPECT--
+11 15
+--EXIT--
+0

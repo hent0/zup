@@ -341,10 +341,24 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
     param = param->next;
   }
   size_t expected = method->fn.params_count - (has_self ? 1 : 0);
-  if (call->call.arg_count != expected) {
+  size_t required = 0;
+  for (param_t *p = param; p != NULL; p = p->next) {
+    if (p->default_value == NULL) {
+      required++;
+    }
+  }
+  if (required == expected) {
+    if (call->call.arg_count != expected) {
+      diag_error(sema->src, call->line, call->col,
+                 "'%s' expects %zu argument%s but got %zu", field->field.name,
+                 expected, expected == 1 ? "" : "s", call->call.arg_count);
+      sema->had_error = true;
+    }
+  } else if (call->call.arg_count < required ||
+             call->call.arg_count > expected) {
     diag_error(sema->src, call->line, call->col,
-               "'%s' expects %zu argument%s but got %zu", field->field.name,
-               expected, expected == 1 ? "" : "s", call->call.arg_count);
+               "'%s' expects between %zu and %zu arguments but got %zu",
+               field->field.name, required, expected, call->call.arg_count);
     sema->had_error = true;
   }
 

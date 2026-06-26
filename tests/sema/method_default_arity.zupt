@@ -1,0 +1,19 @@
+--TEST--
+a method with a defaulted parameter accepts a range of argument counts; exceeding it is an error
+--FILE--
+struct Counter {
+  base: i32,
+
+  fn bump(self, by: i32 = 1): i32 {
+    return self.base + by;
+  }
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter { base: 10 };
+  return c.bump(1, 2);
+}
+--EXPECTERR--
+zup: error: 'bump' expects between 0 and 1 arguments but got 2 [11:12]
+--EXIT--
+1

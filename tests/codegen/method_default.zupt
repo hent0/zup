@@ -1,0 +1,35 @@
+--TEST--
+a method's defaulted parameter is materialized at the call site, after the self pointer
+--ARGS--
+--ir -o -
+--FILE--
+struct Counter {
+  base: i32,
+
+  fn bump(self, by: i32 = 1): i32 {
+    return self.base + by;
+  }
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter { base: 10 };
+  return c.bump();
+}
+--EXPECT--
+%Counter = type { i32 }
+define internal i32 @Counter.bump(ptr %self, i32 %by) {
+entry:
+  %1 = getelementptr %Counter, ptr %self, i32 0, i32 0
+  %2 = load i32, ptr %1
+  %3 = add i32 %2, %by
+  ret i32 %3
+}
+
+define i32 @main() {
+entry:
+  %c = alloca %Counter
+  %1 = getelementptr %Counter, ptr %c, i32 0, i32 0
+  store i32 10, ptr %1
+  %2 = call i32 @Counter.bump(ptr %c, i32 1)
+  ret i32 %2
+}
