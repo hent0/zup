@@ -11,7 +11,7 @@ struct Person {
 pub fn main(): i32 {
   let p: Person = Person { name: "Al", age: 1 };
   p.name = "Bob";
-  printf("%s\n", p.name.ptr);
+  printf("%s\n", p.name);
   return 0;
 }
 --EXPECT--

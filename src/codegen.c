@@ -719,7 +719,20 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
     type_t ptype = param ? param->type : (type_t){.kind = TYPE_UNKNOWN};
-    if (ptype.kind == TYPE_SLICE && arg->type.kind == TYPE_ARRAY) {
+    if (arg->type.kind == TYPE_STR && arg->kind != EXPR_STRING &&
+        (ptype.kind == TYPE_CSTR ||
+         (fn != NULL && fn->fn.variadic && param == NULL))) {
+      const char *addr = emit_addr(ctx, arg);
+      unsigned int field_addr = ctx->reg++;
+      fprintf(ctx->out,
+              "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n",
+              field_addr, addr);
+      unsigned int cstr = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", cstr, field_addr);
+      argref[i] = arena_format(ctx->arena, "%%%u", cstr);
+      argtype[i] = (type_t){.kind = TYPE_CSTR};
+      argbyval[i] = false;
+    } else if (ptype.kind == TYPE_SLICE && arg->type.kind == TYPE_ARRAY) {
       unsigned int slot = ctx->reg++;
       fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
       const char *tmp = arena_format(ctx->arena, "%%%u", slot);

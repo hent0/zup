@@ -1,0 +1,14 @@
+--TEST--
+a str passed to a cstr parameter reaches the callee as a usable C string (puts prints it)
+--FILE--
+extern fn puts(s: cstr): i32;
+
+pub fn main(): i32 {
+  let s: str = "hi";
+  puts(s);
+  return 0;
+}
+--EXPECT--
+hi
+--EXIT--
+0

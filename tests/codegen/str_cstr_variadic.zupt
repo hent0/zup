@@ -1,0 +1,28 @@
+--TEST--
+a str value passed in a variadic slot decays to its data pointer, so printf's %s receives a cstr
+--ARGS--
+--ir -o -
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let s: str = "hi";
+  printf("%s\n", s);
+  return 0;
+}
+--EXPECT--
+@.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
+@.str.1 = private unnamed_addr constant [4 x i8] c"%s\0A\00"
+declare i32 @printf(ptr, ...)
+define i32 @main() {
+entry:
+  %s = alloca { ptr, i64 }
+  %1 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0
+  store ptr @.str.0, ptr %1
+  %2 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1
+  store i64 2, ptr %2
+  %3 = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0
+  %4 = load ptr, ptr %3
+  %5 = call i32 @printf(ptr @.str.1, ptr %4)
+  ret i32 0
+}

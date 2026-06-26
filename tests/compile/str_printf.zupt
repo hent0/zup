@@ -1,0 +1,14 @@
+--TEST--
+a str value prints correctly through printf's %s via variadic str-to-cstr decay
+--FILE--
+extern fn printf(fmt: cstr, ...);
+
+pub fn main(): i32 {
+  let s: str = "hello";
+  printf("%s\n", s);
+  return 0;
+}
+--EXPECT--
+hello
+--EXIT--
+0
