@@ -1,0 +1,14 @@
+--TEST--
+str supports equality but not ordering; '<' on str operands is a semantic error
+--FILE--
+pub fn main(): i32 {
+  let a: str = "x";
+  let b: str = "y";
+  if a < b {
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '<' to str and str [4:6]
+--EXIT--
+1

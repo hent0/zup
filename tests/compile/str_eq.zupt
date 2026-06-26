@@ -1,0 +1,25 @@
+--TEST--
+str == compares contents: equal strings match, differing contents and differing lengths don't, != negates, and a string literal works as an operand
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn main(): i32 {
+  let a: str = "build";
+  let b: str = "build";
+  let c: str = "tests";
+  let d: str = "bui";
+
+  if a == b { printf("eq\n"); }
+  if a == c { printf("BAD-content\n"); }
+  if a == d { printf("BAD-length\n"); }
+  if a != c { printf("ne\n"); }
+  if a == "build" { printf("lit\n"); }
+
+  return 0;
+}
+--EXPECT--
+eq
+ne
+lit
+--EXIT--
+0

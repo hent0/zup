@@ -66,6 +66,7 @@ typedef struct {
   unsigned int reg;
   unsigned int label;
   unsigned int loop_label;
+  bool uses_str_eq;
 } ctx_t;
 
 static int intern_string(ctx_t *ctx, expr_t *node) {
@@ -226,6 +227,10 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
   case EXPR_CAST:
     return collect_expr(ctx, expr->cast.operand);
   case EXPR_BINARY:
+    if (expr->binary.lhs->type.kind == TYPE_STR &&
+        (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
+      ctx->uses_str_eq = true;
+    }
     if (collect_expr(ctx, expr->binary.lhs) != 0) {
       return 1;
     }
@@ -514,6 +519,85 @@ static value_t emit_cast(ctx_t *ctx, expr_t *expr) {
   return (value_t){.type = expr->cast.target, .ref = operand.ref};
 }
 
+static const char *str_len(ctx_t *ctx, expr_t *op, const char *addr) {
+  if (op->kind == EXPR_STRING) {
+    return arena_format(ctx->arena, "%zu", op->string.length);
+  }
+
+  unsigned int len = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n", len,
+          addr);
+  unsigned int value = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", value, len);
+  return arena_format(ctx->arena, "%%%u", value);
+}
+
+static const char *str_ptr(ctx_t *ctx, expr_t *op, const char *addr) {
+  if (op->kind == EXPR_STRING) {
+    return arena_format(ctx->arena, "@.str.%d", string_index(ctx, op));
+  }
+
+  unsigned int len = ctx->reg++;
+  fprintf(ctx->out,
+          "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n", len,
+          addr);
+  unsigned int value = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", value, len);
+  return arena_format(ctx->arena, "%%%u", value);
+}
+
+static value_t emit_str_equality(ctx_t *ctx, expr_t *expr) {
+  expr_t *lhs = expr->binary.lhs;
+  expr_t *rhs = expr->binary.rhs;
+
+  const char *lhs_addr = lhs->kind == EXPR_STRING ? NULL : emit_addr(ctx, lhs);
+  const char *rhs_addr = rhs->kind == EXPR_STRING ? NULL : emit_addr(ctx, rhs);
+
+  const char *lhs_len = str_len(ctx, lhs, lhs_addr);
+  const char *rhs_len = str_len(ctx, rhs, rhs_addr);
+  unsigned int equal = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = icmp eq i64 %s, %s\n", equal, lhs_len, rhs_len);
+
+  unsigned int result = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = alloca i1\n", result);
+  fprintf(ctx->out, "  store i1 %%%u, ptr %%%u\n", equal, result);
+
+  unsigned int label = ctx->label++;
+  fprintf(ctx->out,
+          "  br i1 %%%u, label %%streq.cmp.%u, label %%streq.end.%u\n", equal,
+          label, label);
+
+  fprintf(ctx->out, "streq.cmp.%u:\n", label);
+  const char *lhs_ptr = str_ptr(ctx, lhs, lhs_addr);
+  const char *rhs_ptr = str_ptr(ctx, rhs, rhs_addr);
+
+  unsigned int cmp = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = call i32 @memcmp(ptr %s, ptr %s, i64 %s)\n", cmp,
+          lhs_ptr, rhs_ptr, lhs_len);
+
+  unsigned int zero = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = icmp eq i32 %%%u, 0\n", zero, cmp);
+  fprintf(ctx->out, "  store i1 %%%u, ptr %%%u\n", zero, result);
+  fprintf(ctx->out, "  br label %%streq.end.%u\n", label);
+
+  fprintf(ctx->out, "streq.end.%u:\n", label);
+  unsigned int loaded = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", loaded, result);
+
+  const char *ref = arena_format(ctx->arena, "%%%u", loaded);
+  if (expr->binary.op == BINOP_NE) {
+    unsigned int neg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", neg, ref);
+    ref = arena_format(ctx->arena, "%%%u", neg);
+  }
+
+  return (value_t){
+      .type = (type_t){.kind = TYPE_BOOL},
+      .ref = ref,
+  };
+}
+
 static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
   case EXPR_BOOLEAN:
@@ -576,6 +660,11 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     if (binop_is_logical(expr->binary.op)) {
       return emit_logical(ctx, expr);
     }
+
+    if (expr->binary.lhs->type.kind == TYPE_STR) {
+      return emit_str_equality(ctx, expr);
+    }
+
     value_t left = emit_value(ctx, expr->binary.lhs);
     value_t right = emit_value(ctx, expr->binary.rhs);
 
@@ -1409,7 +1498,9 @@ static int emit_entry_point(ctx_t *ctx, decl_t *decl) {
 
   const char *args_name = decl->fn.params->name;
 
-  fprintf(ctx->out, "declare i64 @strlen(ptr)\n");
+  if (find_fn(ctx, "strlen") == NULL) {
+    fprintf(ctx->out, "declare i64 @strlen(ptr)\n");
+  }
   fprintf(ctx->out, "define i32 @main(i32 %%argc, ptr %%argv) {\n");
 
   fprintf(ctx->out, "entry:\n");
@@ -1554,6 +1645,10 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
   }
 
   emit_string_globals(&ctx);
+
+  if (ctx.uses_str_eq && find_fn(&ctx, "memcmp") == NULL) {
+    fprintf(ctx.out, "declare i32 @memcmp(ptr, ptr, i64)\n");
+  }
 
   for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {
     if (emit_decl(&ctx, decl) != 0) {

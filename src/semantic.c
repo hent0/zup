@@ -450,6 +450,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       } else {
         result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
       }
+    } else if (lhs.kind == TYPE_STR && rhs.kind == TYPE_STR &&
+               (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
+      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
                (type_is_float(lhs.kind) &&
                 !binop_is_arithmetic(expr->binary.op))) {
