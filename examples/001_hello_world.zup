@@ -1,8 +1,8 @@
-extern fn printf(fmt: cstr, ...);
+const std = import("std");
 
 // Single line comment
 pub fn /** Stupid comment here */ main(): i32 {
-  printf("Hello, %s!\n", "world");
+  std.println("Hello, world!");
   /**
    * Multiline comment
    */

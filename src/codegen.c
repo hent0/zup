@@ -385,6 +385,9 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     f->decl = decl;
     f->next = ctx->fns;
     ctx->fns = f;
+    for (param_t *param = decl->fn.params; param != NULL; param = param->next) {
+      collect_expr(ctx, param->default_value);
+    }
     for (stmt_t *stmt = decl->fn.body; stmt != NULL; stmt = stmt->next) {
       if (collect_stmt(ctx, stmt) != 0) {
         return 1;
@@ -400,8 +403,16 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     s->decl = decl;
     s->next = ctx->structs;
     ctx->structs = s;
+    for (field_t *field = decl->strct.fields; field != NULL;
+         field = field->next) {
+      collect_expr(ctx, field->default_value);
+    }
     for (decl_t *member = decl->strct.members; member != NULL;
          member = member->next) {
+      for (param_t *param = member->fn.params; param != NULL;
+           param = param->next) {
+        collect_expr(ctx, param->default_value);
+      }
       for (stmt_t *stmt = member->fn.body; stmt != NULL; stmt = stmt->next) {
         if (collect_stmt(ctx, stmt) != 0) {
           return 1;
@@ -938,10 +949,21 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
 
   for (; param != NULL && param->default_value != NULL; param = param->next) {
-    value_t v = emit_value(ctx, param->default_value);
-    argref[i] = v.ref;
-    argtype[i] = v.type;
-    argbyval[i] = false;
+    expr_t *def = param->default_value;
+    if (param->type.kind == TYPE_STR && def->kind == EXPR_STRING) {
+      unsigned int slot = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
+      const char *tmp = arena_format(ctx->arena, "%%%u", slot);
+      emit_struct_into(ctx, tmp, def);
+      argref[i] = tmp;
+      argtype[i] = (type_t){.kind = TYPE_STR};
+      argbyval[i] = true;
+    } else {
+      value_t v = emit_value(ctx, def);
+      argref[i] = v.ref;
+      argtype[i] = v.type;
+      argbyval[i] = false;
+    }
     i++;
   }
   n = i;

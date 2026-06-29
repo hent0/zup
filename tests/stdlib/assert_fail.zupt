@@ -1,0 +1,14 @@
+--TEST--
+std.assert(false) aborts the program before the next statement runs
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.assert(false, "assert failed");
+  std.println("unreachable");
+  return 0;
+}
+--EXPECTERR--
+assert failed
+--EXIT--
+134

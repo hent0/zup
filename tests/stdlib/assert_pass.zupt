@@ -1,0 +1,14 @@
+--TEST--
+std.assert(true) is a no-op and execution continues
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.assert(true, "unreachable");
+  std.println("ok");
+  return 0;
+}
+--EXPECT--
+ok
+--EXIT--
+0

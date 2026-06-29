@@ -1,4 +1,6 @@
 extern fn printf(fmt: cstr, ...): i32;
+extern fn dprintf(fd: i32, fmt: cstr, ...): i32;
+extern fn abort();
 
 pub fn println(s: str) {
   printf("%s\n", s);
@@ -6,4 +8,19 @@ pub fn println(s: str) {
 
 pub fn print(s: str) {
   printf("%s", s);
+}
+
+pub fn printerrln(s: str) {
+  dprintf(2, "%s\n", s);
+}
+
+pub fn printerr(s: str) {
+  dprintf(2, "%s", s);
+}
+
+pub fn assert(cond: bool, msg: str = "") {
+  if !cond {
+    printerrln(msg);
+    abort();
+  }
 }

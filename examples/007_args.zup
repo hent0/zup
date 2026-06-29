@@ -1,8 +1,8 @@
-extern fn printf(fmt: cstr, ...);
+const std = import("std");
 
 pub fn main(args: []str): i32 {
   for arg in args {
-    printf("%s\n", arg);
+    std.println(arg);
   }
 
   return 0;

@@ -200,8 +200,10 @@ while IFS= read -r test; do
     else
         # Run mode: compile to a binary and execute it.
         if "$ZUP_BIN" "$tmp_src" -o "$tmp_bin" >"$tmp_stderr" 2>&1; then
-            "$tmp_bin" >"$tmp_stdout" 2>/dev/null
-            status=$?
+            # The inner redirects capture the program's own streams; the outer
+            # 2>/dev/null drops the shell's "Aborted"/"Segmentation fault"
+            # job-control message when the program dies by a signal.
+            { "$tmp_bin" >"$tmp_stdout" 2>"$tmp_stderr"; status=$?; } 2>/dev/null
         else
             status=$?
             : > "$tmp_stdout"   # nothing ran; compile errors are in tmp_stderr

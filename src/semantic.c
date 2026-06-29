@@ -161,7 +161,8 @@ static bool is_const_init(const expr_t *expr) {
     return false;
   }
 
-  return expr->kind == EXPR_NUMBER || expr->kind == EXPR_BOOLEAN;
+  return expr->kind == EXPR_NUMBER || expr->kind == EXPR_BOOLEAN ||
+         expr->kind == EXPR_STRING;
 }
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
