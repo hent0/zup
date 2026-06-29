@@ -1,0 +1,18 @@
+--TEST--
+a relative .zup import that resolves to an existing sibling file loads without error
+--PREPARE--
+cat > "${TMPDIR:-/tmp}/zup_fix_helper.zup" <<'ZUP'
+pub fn helper(): i32 {
+  return 7;
+}
+ZUP
+--FILE--
+const h = import("zup_fix_helper.zup");
+
+pub fn main(): i32 {
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_helper.zup"
+--EXIT--
+0

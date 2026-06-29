@@ -1,0 +1,23 @@
+--TEST--
+a module-qualified call to a public function type-checks
+--ARGS--
+--ast
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.println("hi");
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  Import 'std' "std"
+  FnDecl pub 'main' -> i32
+    ExprStmt
+      MethodCall 'println' (1 args)
+        Id std
+        String literal "hi"
+    Return
+      Number literal 0
+--EXIT--
+0

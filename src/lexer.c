@@ -22,6 +22,7 @@ const keyword_t keywords[] = {
     {"continue", TOKEN_CONTINUE},
     {"in", TOKEN_IN},
     {"extern", TOKEN_EXTERN},
+    {"import", TOKEN_IMPORT},
     // Types
     {"i8", TOKEN_I8},
     {"u8", TOKEN_U8},

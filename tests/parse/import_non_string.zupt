@@ -1,0 +1,15 @@
+--TEST--
+import() requires a string-literal module path
+--FILE--
+const x = import(42);
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: expected a module path string (got TOKEN_NUMBER) [1:18]
+zup: error: expected ')' after import path (got TOKEN_NUMBER) [1:18]
+zup: error: expected ';' after binding (got TOKEN_NUMBER) [1:18]
+zup: error: expected a declaration (got TOKEN_NUMBER) [1:18]
+--EXIT--
+1

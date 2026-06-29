@@ -240,6 +240,13 @@ static expr_t *parse_primary(parser_t *parser) {
   case TOKEN_STRING:
     advance(parser);
     return ast_string_init(token, parser->arena);
+  case TOKEN_IMPORT:
+    advance(parser);
+    expect(parser, TOKEN_LPAREN, "expected '(' after 'import'");
+    token_t path =
+        expect(parser, TOKEN_STRING, "expected a module path string");
+    expect(parser, TOKEN_RPAREN, "expected ')' after import path");
+    return ast_import_init(token, path.value, parser->arena);
   case TOKEN_ID: {
     advance(parser);
     if (check(parser, TOKEN_LPAREN)) {
@@ -620,6 +627,12 @@ static binding_t parse_binding(parser_t *parser) {
 
 static decl_t *parse_global_binding(parser_t *parser, Visibility visibility) {
   binding_t binding = parse_binding(parser);
+
+  if (binding.init != NULL && binding.init->kind == EXPR_IMPORT) {
+    return ast_import_decl_init(binding.token, binding.name,
+                                binding.init->import.path, parser->arena);
+  }
+
   return ast_global_init(binding.token, visibility, binding.name, binding.type,
                          binding.mutable, binding.init, parser->arena);
 }

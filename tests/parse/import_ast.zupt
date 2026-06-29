@@ -1,0 +1,25 @@
+--TEST--
+'const NAME = import("...")' parses into import declarations
+--ARGS--
+--ast
+--PREPARE--
+printf 'pub fn a(): i32 { return 0; }\n' > "${TMPDIR:-/tmp}/zup_fix_a.zup"
+printf 'pub fn b(): i32 { return 0; }\n' > "${TMPDIR:-/tmp}/zup_fix_b.zup"
+--FILE--
+const a = import("zup_fix_a.zup");
+const b = import("zup_fix_b.zup");
+
+pub fn main(): i32 {
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_a.zup" "${TMPDIR:-/tmp}/zup_fix_b.zup"
+--EXPECT--
+Container (file) (3 members)
+  Import 'a' "zup_fix_a.zup"
+  Import 'b' "zup_fix_b.zup"
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

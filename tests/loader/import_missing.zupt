@@ -1,0 +1,12 @@
+--TEST--
+importing a relative .zup file that does not exist is a compile-time error, reported at the import
+--FILE--
+const m = import("no_such_module.zup");
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot find module 'no_such_module.zup' [1:1]
+--EXIT--
+1

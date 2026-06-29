@@ -1,0 +1,18 @@
+--TEST--
+a function in an imported module may share a name with one in the importer; both are emitted without colliding (forces symbol mangling)
+--PREPARE--
+printf 'pub fn value(): i32 {\n  return 10;\n}\n' > "${TMPDIR:-/tmp}/zup_fix_lib.zup"
+--FILE--
+const lib = import("zup_fix_lib.zup");
+
+fn value(): i32 {
+  return 1;
+}
+
+pub fn main(): i32 {
+  return value() + lib.value();
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_lib.zup"
+--EXIT--
+11

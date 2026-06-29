@@ -1,0 +1,15 @@
+--TEST--
+'import' is a keyword token, distinct from an identifier
+--ARGS--
+--tokenize
+--FILE--
+const std = import("std");
+--EXPECT--
+TOKEN_CONST [1:1]
+TOKEN_ID('std') [1:7]
+TOKEN_EQUAL [1:11]
+TOKEN_IMPORT [1:13]
+TOKEN_LPAREN [1:19]
+TOKEN_STRING('std') [1:20]
+TOKEN_RPAREN [1:25]
+TOKEN_SEMICOLON [1:26]

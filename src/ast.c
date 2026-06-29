@@ -414,6 +414,7 @@ expr_t *ast_array_init(token_t token, arena_t *arena) {
   expr->array.element_count = 0;
   return expr;
 }
+
 expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_INDEX;
@@ -423,6 +424,17 @@ expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena) {
   expr->next = NULL;
   expr->index.base = base;
   expr->index.index = index;
+  return expr;
+}
+
+expr_t *ast_import_init(token_t token, char *path, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_IMPORT;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->import.path = path;
   return expr;
 }
 
@@ -581,6 +593,20 @@ decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
   return global;
 }
 
+decl_t *ast_import_decl_init(token_t token, char *alias, char *path,
+                             arena_t *arena) {
+  decl_t *decl = arena_alloc(arena, sizeof(decl_t));
+  decl->kind = DECL_IMPORT;
+  decl->visibility = VISIBILITY_PRIVATE;
+  decl->name = alias;
+  decl->line = token.line;
+  decl->col = token.col;
+  decl->next = NULL;
+  decl->import.alias = alias;
+  decl->import.path = path;
+  return decl;
+}
+
 unit_t *ast_unit_init(source_t *src, arena_t *arena) {
   unit_t *unit = arena_alloc(arena, sizeof(unit_t));
   unit->src = src;
@@ -675,6 +701,9 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Index\n");
     dump_expr(expr->index.base, depth + 1);
     dump_expr(expr->index.index, depth + 1);
+    break;
+  case EXPR_IMPORT:
+    printf("Import \"%s\"\n", expr->import.path);
     break;
   }
 }
@@ -824,6 +853,9 @@ static void dump_decl(const decl_t *decl, int depth) {
            decl->global.mutable ? "let" : "const", decl->name,
            type_to_str(decl->global.type));
     dump_expr(decl->global.init, depth + 1);
+    break;
+  case DECL_IMPORT:
+    printf("Import '%s' \"%s\"\n", decl->import.alias, decl->import.path);
     break;
   }
 }

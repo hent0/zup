@@ -2,12 +2,27 @@
 #include "arena.h"
 #include "ast.h"
 #include "diag.h"
+#include "loader.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct {
+  decl_t **imports;
+  size_t count;
+} modtab_t;
+
+static decl_t *modtab_lookup(const modtab_t *tab, const char *alias) {
+  for (size_t i = 0; i < tab->count; i++) {
+    if (strcmp(tab->imports[i]->name, alias) == 0) {
+      return tab->imports[i];
+    }
+  }
+  return NULL;
+}
 
 typedef struct {
   decl_t **fns;
@@ -59,6 +74,7 @@ static const local_t *scope_lookup(const scope_t *scope, const char *name) {
 }
 
 typedef struct {
+  const modtab_t *modules;
   const symtab_t *tab;
   const typetab_t *types;
   const source_t *src;
@@ -192,18 +208,8 @@ static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   }
 }
 
-static exprty_t check_call(sema_t *sema, expr_t *call) {
-  expr_t *callee = call->call.callee;
-  const char *name = callee->id.name;
-
-  decl_t *fn = symtab_lookup(sema->tab, name);
-  if (fn == NULL) {
-    diag_error(sema->src, call->line, call->col,
-               "call to undefined function '%s'", name);
-    sema->had_error = true;
-    return (exprty_t){.kind = TYPE_VOID, .ok = false};
-  }
-
+static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
+                              const char *name) {
   if (fn->fn.variadic) {
     if (call->call.arg_count < fn->fn.params_count) {
       diag_error(sema->src, call->line, call->col,
@@ -257,6 +263,41 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
                     .element = fn->fn.return_type.element,
                     .array_length = fn->fn.return_type.array_length,
                     .ok = true};
+}
+
+static exprty_t check_call(sema_t *sema, expr_t *call) {
+  const char *name = call->call.callee->id.name;
+  decl_t *fn = symtab_lookup(sema->tab, name);
+  if (fn == NULL) {
+    diag_error(sema->src, call->line, call->col,
+               "call to undefined function '%s'", name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+  return check_fn_call(sema, call, fn, name);
+}
+
+static exprty_t check_module_call(sema_t *sema, expr_t *call, decl_t *import) {
+  expr_t *field = call->call.callee;
+  const char *fn_name = field->field.name;
+  module_t *mod = import->import.resolved;
+
+  decl_t *fn = NULL;
+  for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_FN && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, fn_name) == 0) {
+      fn = m;
+      break;
+    }
+  }
+  if (fn == NULL) {
+    diag_error(sema->src, field->line, field->col,
+               "module '%s' has no public function '%s'", import->import.alias,
+               fn_name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+  return check_fn_call(sema, call, fn, fn_name);
 }
 
 static unsigned long long type_int_max(TypeKind k) {
@@ -313,6 +354,14 @@ static decl_t *struct_method(const decl_t *strct, const char *name) {
 
 static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   expr_t *field = call->call.callee;
+
+  if (field->field.base->kind == EXPR_ID && sema->modules != NULL) {
+    decl_t *import = modtab_lookup(sema->modules, field->field.base->id.name);
+    if (import != NULL) {
+      return check_module_call(sema, call, import);
+    }
+  }
+
   exprty_t recv = check_expr(sema, field->field.base, TYPE_UNKNOWN);
   if (!recv.ok) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
@@ -433,8 +482,14 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     }
 
     if (local == NULL) {
-      diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
-                 expr->id.name);
+      if (sema->modules != NULL &&
+          modtab_lookup(sema->modules, expr->id.name) != NULL) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "'%s' is a module, not a value", expr->id.name);
+      } else {
+        diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
+                   expr->id.name);
+      }
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
@@ -1024,10 +1079,11 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
       } else {
         exprty_t dty = check_expr(sema, field->default_value, field->type.kind);
         if (dty.ok && !assignable(field->type, dty)) {
-          diag_error(
-              sema->src, field->default_value->line, field->default_value->col,
-              "cannot assign %s to field '%s' of type %s",
-              type_kind_to_str(dty.kind), field->name, type_to_str(field->type));
+          diag_error(sema->src, field->default_value->line,
+                     field->default_value->col,
+                     "cannot assign %s to field '%s' of type %s",
+                     type_kind_to_str(dty.kind), field->name,
+                     type_to_str(field->type));
           sema->had_error = true;
         }
       }
@@ -1056,8 +1112,7 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
                    "parameter default must be a constant");
         sema->had_error = true;
       } else {
-        exprty_t dty =
-            check_expr(sema, param->default_value, param->type.kind);
+        exprty_t dty = check_expr(sema, param->default_value, param->type.kind);
         if (dty.ok && !assignable(param->type, dty)) {
           diag_error(sema->src, param->default_value->line,
                      param->default_value->col,
@@ -1156,7 +1211,7 @@ static bool check_entry_point(const symtab_t *tab, const source_t *src) {
   return ok;
 }
 
-int semantic_check(unit_t *unit, arena_t *arena) {
+int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   if (unit == NULL) {
     return false;
   }
@@ -1165,6 +1220,11 @@ int semantic_check(unit_t *unit, arena_t *arena) {
   bool had_error = false;
 
   size_t capacity = root->container.member_count;
+  modtab_t modules = {
+      .imports =
+          arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
+      .count = 0,
+  };
   symtab_t tab = {
       .fns = arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
       .count = 0,
@@ -1197,13 +1257,16 @@ int semantic_check(unit_t *unit, arena_t *arena) {
       types.structs[types.count++] = member;
       break;
     }
+    case DECL_IMPORT:
+      modules.imports[modules.count++] = member;
+      break;
     case DECL_CONTAINER:
     case DECL_GLOBAL:
       break;
     }
   }
 
-  if (!check_entry_point(&tab, unit->src)) {
+  if (require_main && !check_entry_point(&tab, unit->src)) {
     had_error = true;
   }
 
@@ -1213,6 +1276,7 @@ int semantic_check(unit_t *unit, arena_t *arena) {
   };
 
   sema_t sema = {
+      .modules = &modules,
       .tab = &tab,
       .types = &types,
       .src = unit->src,

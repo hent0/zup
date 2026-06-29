@@ -2,6 +2,7 @@
 #define CODEGEN_H
 #include "arena.h"
 #include "ast.h"
+#include "loader.h"
 #include <stdio.h>
-int codegen_emit(FILE *out, unit_t *unit, arena_t *arena);
+int codegen_emit(FILE *out, compilation_t *compilation, arena_t *arena);
 #endif

@@ -1,0 +1,17 @@
+--TEST--
+a string literal passed to a str parameter is built into a fat pointer and reaches the callee intact
+--FILE--
+extern fn printf(fmt: cstr, ...): i32;
+
+fn greet(s: str) {
+  printf("%s\n", s);
+}
+
+pub fn main(): i32 {
+  greet("hi");
+  return 0;
+}
+--EXPECT--
+hi
+--EXIT--
+0

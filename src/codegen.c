@@ -67,6 +67,9 @@ typedef struct {
   unsigned int label;
   unsigned int loop_label;
   bool uses_str_eq;
+
+  const char *prefix;
+  module_t *module;
 } ctx_t;
 
 static int intern_string(ctx_t *ctx, expr_t *node) {
@@ -158,6 +161,47 @@ static const decl_t *find_fn(ctx_t *ctx, const char *name) {
   for (ctx_fn_t *f = ctx->fns; f != NULL; f = f->next) {
     if (strcmp(f->decl->name, name) == 0) {
       return f->decl;
+    }
+  }
+  return NULL;
+}
+
+static const char *module_stem(const char *path, arena_t *arena) {
+  const char *slash = strrchr(path, '/');
+  const char *base = slash ? slash + 1 : path;
+  const char *dot = strrchr(base, '.');
+  size_t len = dot ? (size_t)(dot - base) : strlen(base);
+  char *out = arena_alloc(arena, len + 1);
+  memcpy(out, base, len);
+  out[len] = '\0';
+  return out;
+}
+
+static const char *mangle(ctx_t *ctx, const char *name) {
+  if (ctx->prefix == NULL || ctx->prefix[0] == '\0') {
+    return name;
+  }
+  return arena_format(ctx->arena, "%s.%s", ctx->prefix, name);
+}
+
+static decl_t *find_import(ctx_t *ctx, const char *alias) {
+  if (ctx->module == NULL) {
+    return NULL;
+  }
+  for (decl_t *decl = ctx->module->unit->root->container.members; decl != NULL;
+       decl = decl->next) {
+    if (decl->kind == DECL_IMPORT && strcmp(decl->import.alias, alias) == 0) {
+      return decl;
+    }
+  }
+  return NULL;
+}
+
+static const decl_t *module_fn(module_t *mod, const char *name) {
+  for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_FN && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, name) == 0) {
+      return m;
     }
   }
   return NULL;
@@ -260,6 +304,9 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       return 1;
     }
     return collect_expr(ctx, expr->index.index);
+  case EXPR_IMPORT:
+    NOT_IMPLEMENTED;
+    return 1;
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -363,11 +410,14 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     }
     return 0;
   }
+  case DECL_IMPORT:
+    return 0;
   }
   return 0;
 }
 
 static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest);
+static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr);
 static void emit_slice_from_array(ctx_t *ctx, const char *dest, expr_t *arr);
 
 static unsigned type_bits(TypeKind kind) {
@@ -395,8 +445,6 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr);
 static const char *ir_type(ctx_t *ctx, type_t type);
 static value_t emit_value(ctx_t *ctx, expr_t *expr);
 
-// Address of an lvalue: a local's stack slot, a global, or a field within an
-// aggregate (via getelementptr). Used by field reads and struct construction.
 static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
   case EXPR_ID: {
@@ -685,7 +733,6 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     value_t operand = emit_value(ctx, expr->unary.operand);
     unsigned int reg = ctx->reg++;
     if (expr->unary.op == UNOP_NOT) {
-      // !x  ->  xor i1 x, true
       fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", reg, operand.ref);
       return (value_t){
           .type = (type_t){.kind = TYPE_BOOL},
@@ -693,7 +740,6 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
       };
     }
     if (type_is_float(operand.type.kind)) {
-      // -x  ->  fneg <ty> x
       fprintf(ctx->out, "  %%%u = fneg %s %s\n", reg,
               type_kind_to_ir(operand.type.kind), operand.ref);
       return (value_t){
@@ -701,7 +747,6 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
           .ref = arena_format(ctx->arena, "%%%u", reg),
       };
     }
-    // -x  ->  sub <ty> 0, x
     fprintf(ctx->out, "  %%%u = sub %s 0, %s\n", reg,
             type_kind_to_ir(operand.type.kind), operand.ref);
     return (value_t){
@@ -789,17 +834,30 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   bool is_method = call->call.callee->kind == EXPR_FIELD;
   const char *name;
   const char *self = NULL;
+  const decl_t *fn = NULL;
   if (is_method) {
     expr_t *recv = call->call.callee->field.base;
-    name = arena_format(ctx->arena, "%s.%s", recv->type.name,
-                        call->call.callee->field.name);
-    self = emit_addr(ctx, recv);
+    const char *member = call->call.callee->field.name;
+    decl_t *import =
+        recv->kind == EXPR_ID ? find_import(ctx, recv->id.name) : NULL;
+    if (import != NULL) {
+      const char *prefix = import->import.resolved->prefix;
+      name = (prefix && prefix[0])
+                 ? arena_format(ctx->arena, "%s.%s", prefix, member)
+                 : member;
+      fn = module_fn(import->import.resolved, member);
+      is_method = false;
+    } else {
+      name = mangle(ctx,
+                    arena_format(ctx->arena, "%s.%s", recv->type.name, member));
+      self = emit_addr(ctx, recv);
+    }
   } else {
-    name = call->call.callee->id.name;
+    const char *callee = call->call.callee->id.name;
+    fn = find_fn(ctx, callee);
+    name = (fn != NULL && fn->fn.is_extern) ? callee : mangle(ctx, callee);
   }
   bool ret_struct = is_aggregate(call->type.kind);
-
-  const decl_t *fn = is_method ? NULL : find_fn(ctx, name);
 
   const param_t *param = NULL;
   size_t param_count = 0;
@@ -834,9 +892,17 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
     type_t ptype = param ? param->type : (type_t){.kind = TYPE_UNKNOWN};
-    if (arg->type.kind == TYPE_STR && arg->kind != EXPR_STRING &&
-        (ptype.kind == TYPE_CSTR ||
-         (fn != NULL && fn->fn.variadic && param == NULL))) {
+    if (ptype.kind == TYPE_STR && arg->kind == EXPR_STRING) {
+      unsigned int slot = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
+      const char *tmp = arena_format(ctx->arena, "%%%u", slot);
+      emit_struct_into(ctx, tmp, arg);
+      argref[i] = tmp;
+      argtype[i] = (type_t){.kind = TYPE_STR};
+      argbyval[i] = true;
+    } else if (arg->type.kind == TYPE_STR && arg->kind != EXPR_STRING &&
+               (ptype.kind == TYPE_CSTR ||
+                (fn != NULL && fn->fn.variadic && param == NULL))) {
       const char *addr = emit_addr(ctx, arg);
       unsigned int field_addr = ctx->reg++;
       fprintf(ctx->out,
@@ -871,7 +937,6 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     i++;
   }
 
-  // Fill omitted trailing parameters with their declared defaults.
   for (; param != NULL && param->default_value != NULL; param = param->next) {
     value_t v = emit_value(ctx, param->default_value);
     argref[i] = v.ref;
@@ -1503,7 +1568,8 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
-          sret ? "void" : ir_type(ctx, decl->fn.return_type), name);
+          sret ? "void" : ir_type(ctx, decl->fn.return_type),
+          mangle(ctx, name));
 
   const char *sep = "";
   if (sret) {
@@ -1687,12 +1753,14 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
             type_kind_to_ir(decl->global.type.kind), value.ref);
     return 0;
   }
+  case DECL_IMPORT:
+    return 0;
   }
   return 0;
 }
 
-int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
-  if (unit == NULL) {
+int codegen_emit(FILE *out, compilation_t *compilation, arena_t *arena) {
+  if (compilation == NULL) {
     return 1;
   }
 
@@ -1704,8 +1772,15 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
       .loop_label = 0,
   };
 
-  for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {
-    if (collect_decl(&ctx, decl) != 0) {
+  for (module_t *module = compilation->modules; module != NULL;
+       module = module->next) {
+    module->prefix =
+        (module == compilation->entry) ? "" : module_stem(module->path, arena);
+  }
+
+  for (module_t *module = compilation->modules; module != NULL;
+       module = module->next) {
+    if (collect_decl(&ctx, module->unit->root) != 0) {
       return 1;
     }
   }
@@ -1716,8 +1791,11 @@ int codegen_emit(FILE *out, unit_t *unit, arena_t *arena) {
     fprintf(ctx.out, "declare i32 @memcmp(ptr, ptr, i64)\n");
   }
 
-  for (decl_t *decl = unit->root; decl != NULL; decl = decl->next) {
-    if (emit_decl(&ctx, decl) != 0) {
+  for (module_t *module = compilation->modules; module != NULL;
+       module = module->next) {
+    ctx.prefix = module->prefix;
+    ctx.module = module;
+    if (emit_decl(&ctx, module->unit->root) != 0) {
       return 1;
     }
   }

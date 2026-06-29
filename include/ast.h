@@ -6,6 +6,8 @@
 #include "token.h"
 #include <stddef.h>
 
+typedef struct module module_t; // defined in loader.h
+
 typedef enum {
   TYPE_UNKNOWN,
   TYPE_VOID,
@@ -76,6 +78,7 @@ typedef enum {
   EXPR_FIELD,
   EXPR_ARRAY,
   EXPR_INDEX,
+  EXPR_IMPORT,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -143,6 +146,9 @@ struct expr {
       expr_t *base;
       expr_t *index;
     } index;
+    struct {
+      char *path;
+    } import;
   };
 };
 
@@ -230,6 +236,7 @@ typedef enum {
   DECL_CONTAINER,
   DECL_GLOBAL,
   DECL_STRUCT,
+  DECL_IMPORT,
 } DeclKind;
 
 typedef struct decl decl_t;
@@ -265,6 +272,11 @@ struct decl {
       decl_t *members;
       size_t member_count;
     } strct;
+    struct {
+      char *alias;
+      char *path;
+      module_t *resolved;
+    } import;
   };
 };
 
@@ -303,6 +315,7 @@ expr_t *ast_struct_literal_init(token_t token, arena_t *arena);
 expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
 expr_t *ast_array_init(token_t token, arena_t *arena);
 expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena);
+expr_t *ast_import_init(token_t token, char *path, arena_t *arena);
 
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);
 stmt_t *ast_expr_stmt_init(token_t token, expr_t *value, arena_t *arena);
@@ -330,6 +343,8 @@ decl_t *ast_struct_init(char *name, arena_t *arena);
 decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
                         type_t type, bool mutable, expr_t *init,
                         arena_t *arena);
+decl_t *ast_import_decl_init(token_t token, char *alias, char *path,
+                             arena_t *arena);
 
 unit_t *ast_unit_init(source_t *src, arena_t *arena);
 

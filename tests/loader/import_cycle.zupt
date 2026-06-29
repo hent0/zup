@@ -1,0 +1,23 @@
+--TEST--
+mutually-importing modules are a circular-import error, detected when an in-progress module is re-entered
+--PREPARE--
+cat > "${TMPDIR:-/tmp}/zup_fix_cyc_a.zup" <<'ZUP'
+const b = import("zup_fix_cyc_b.zup");
+pub fn a(): i32 { return 1; }
+ZUP
+cat > "${TMPDIR:-/tmp}/zup_fix_cyc_b.zup" <<'ZUP'
+const a = import("zup_fix_cyc_a.zup");
+pub fn b(): i32 { return 2; }
+ZUP
+--FILE--
+const a = import("zup_fix_cyc_a.zup");
+
+pub fn main(): i32 {
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_cyc_a.zup" "${TMPDIR:-/tmp}/zup_fix_cyc_b.zup"
+--EXPECTERR--
+zup: error: circular import 'zup_fix_cyc_a.zup' [1:1]
+--EXIT--
+1

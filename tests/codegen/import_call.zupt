@@ -1,0 +1,28 @@
+--TEST--
+a cross-module call lowers to a call of the imported module's prefixed function; the imported function is emitted into the same module (prefix = module file stem; the entry module stays unmangled)
+--ARGS--
+--ir -o -
+--PREPARE--
+printf 'pub fn add(a: i32, b: i32): i32 {\n  return a + b;\n}\n' > "${TMPDIR:-/tmp}/math.zup"
+--FILE--
+const math = import("math.zup");
+
+pub fn main(): i32 {
+  return math.add(2, 3);
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/math.zup"
+--EXPECT--
+define i32 @main() {
+entry:
+  %1 = call i32 @math.add(i32 2, i32 3)
+  ret i32 %1
+}
+
+define i32 @math.add(i32 %a, i32 %b) {
+entry:
+  %1 = add i32 %a, %b
+  ret i32 %1
+}
+--EXIT--
+0

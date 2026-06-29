@@ -1,0 +1,13 @@
+--TEST--
+calling a function the module does not publicly expose is a semantic error
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.nope("x");
+  return 0;
+}
+--EXPECTERR--
+zup: error: module 'std' has no public function 'nope' [4:7]
+--EXIT--
+1

@@ -1,0 +1,12 @@
+--TEST--
+a bare name with no matching std module is a compile-time error
+--FILE--
+const x = import("no_such_std_module");
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot find module 'no_such_std_module' [1:1]
+--EXIT--
+1

@@ -1,0 +1,13 @@
+--TEST--
+the end-to-end milestone: importing std and calling std.println prints through the imported function
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.println("hi");
+  return 0;
+}
+--EXPECT--
+hi
+--EXIT--
+0

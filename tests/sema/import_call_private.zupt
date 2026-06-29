@@ -1,0 +1,17 @@
+--TEST--
+a non-public function in an imported module is not callable across the module boundary
+--PREPARE--
+printf 'fn secret() {\n}\n\npub fn ok() {\n}\n' > "${TMPDIR:-/tmp}/zup_fix_priv.zup"
+--FILE--
+const m = import("zup_fix_priv.zup");
+
+pub fn main(): i32 {
+  m.secret();
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_priv.zup"
+--EXPECTERR--
+zup: error: module 'm' has no public function 'secret' [4:5]
+--EXIT--
+1

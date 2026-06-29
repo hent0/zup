@@ -54,6 +54,7 @@ typedef enum {
   TOKEN_PIPE_PIPE,
   TOKEN_CARET,
   TOKEN_EXTERN,
+  TOKEN_IMPORT,
   // Types
   TOKEN_VOID,
   TOKEN_I8,

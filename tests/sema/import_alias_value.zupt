@@ -1,0 +1,13 @@
+--TEST--
+a module alias is not a value; using it outside a qualified call is an error
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let x: i32 = std;
+  return 0;
+}
+--EXPECTERR--
+zup: error: 'std' is a module, not a value [4:16]
+--EXIT--
+1

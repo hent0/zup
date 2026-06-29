@@ -1,0 +1,9 @@
+extern fn printf(fmt: cstr, ...): i32;
+
+pub fn println(s: str) {
+  printf("%s\n", s);
+}
+
+pub fn print(s: str) {
+  printf("%s", s);
+}

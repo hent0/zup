@@ -1,0 +1,10 @@
+--TEST--
+a bare-name import (no .zup suffix) resolves to the bundled std library
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXIT--
+0

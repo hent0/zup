@@ -1,0 +1,14 @@
+--TEST--
+a public function from an imported user module is called across the boundary and its result flows back
+--PREPARE--
+printf 'pub fn add(a: i32, b: i32): i32 {\n  return a + b;\n}\n' > "${TMPDIR:-/tmp}/zup_fix_math.zup"
+--FILE--
+const math = import("zup_fix_math.zup");
+
+pub fn main(): i32 {
+  return math.add(2, 3);
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_fix_math.zup"
+--EXIT--
+5

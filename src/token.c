@@ -116,6 +116,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_CARET";
   case TOKEN_EXTERN:
     return "TOKEN_EXTERN";
+  case TOKEN_IMPORT:
+    return "TOKEN_IMPORT";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
