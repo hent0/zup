@@ -859,11 +859,15 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     decl_t *import =
         recv->kind == EXPR_ID ? find_import(ctx, recv->id.name) : NULL;
     if (import != NULL) {
-      const char *prefix = import->import.resolved->prefix;
-      name = (prefix && prefix[0])
-                 ? arena_format(ctx->arena, "%s.%s", prefix, member)
-                 : member;
       fn = module_fn(import->import.resolved, member);
+      const char *prefix = import->import.resolved->prefix;
+      if (fn != NULL && fn->fn.is_extern) {
+        name = member;
+      } else {
+        name = (prefix && prefix[0])
+                   ? arena_format(ctx->arena, "%s.%s", prefix, member)
+                   : member;
+      }
       is_method = false;
     } else {
       name = mangle(ctx,

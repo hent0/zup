@@ -840,13 +840,13 @@ static decl_t *parse_fn(parser_t *parser, Visibility visibility) {
   return fn;
 }
 
-static decl_t *parse_extern(parser_t *parser) {
+static decl_t *parse_extern(parser_t *parser, Visibility visibility) {
   token_t kw = expect(parser, TOKEN_EXTERN, "expected 'extern'");
   expect(parser, TOKEN_FN, "expected 'fn' after 'extern'");
   token_t name = expect(parser, TOKEN_ID, "expected function name");
 
   decl_t *fn = ast_fn_init(parser->arena);
-  fn->visibility = VISIBILITY_PRIVATE;
+  fn->visibility = visibility;
   fn->name = name.value;
   fn->line = kw.line;
   fn->col = kw.col;
@@ -980,11 +980,11 @@ static Visibility parse_visibility(parser_t *parser) {
 }
 
 static decl_t *parse_decl(parser_t *parser) {
-  if (check(parser, TOKEN_EXTERN)) {
-    return parse_extern(parser);
-  }
-
   Visibility visibility = parse_visibility(parser);
+
+  if (check(parser, TOKEN_EXTERN)) {
+    return parse_extern(parser, visibility);
+  }
 
   switch (parser->current.kind) {
   case TOKEN_FN:
