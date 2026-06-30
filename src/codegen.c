@@ -40,6 +40,7 @@ struct ctx_local {
 
 typedef struct ctx_struct ctx_struct_t;
 struct ctx_struct {
+  const char *name;
   const decl_t *decl;
   ctx_struct_t *next;
 };
@@ -150,7 +151,7 @@ static bool is_aggregate(TypeKind kind) {
 
 static const decl_t *find_struct(ctx_t *ctx, const char *name) {
   for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
-    if (strcmp(s->decl->name, name) == 0) {
+    if (strcmp(s->name, name) == 0) {
       return s->decl;
     }
   }
@@ -182,6 +183,10 @@ static const char *mangle(ctx_t *ctx, const char *name) {
     return name;
   }
   return arena_format(ctx->arena, "%s.%s", ctx->prefix, name);
+}
+
+static const char *struct_ref(ctx_t *ctx, const char *name) {
+  return strchr(name, '.') != NULL ? name : mangle(ctx, name);
 }
 
 static decl_t *find_import(ctx_t *ctx, const char *alias) {
@@ -400,6 +405,7 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   case DECL_STRUCT: {
     ctx_struct_t *s = arena_alloc(ctx->arena, sizeof(ctx_struct_t));
+    s->name = mangle(ctx, decl->name);
     s->decl = decl;
     s->next = ctx->structs;
     ctx->structs = s;
@@ -480,11 +486,12 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
               reg, base, index);
       return arena_format(ctx->arena, "%%%u", reg);
     }
-    const decl_t *strct = find_struct(ctx, base_type.name);
+    const char *sname = struct_ref(ctx, base_type.name);
+    const decl_t *strct = find_struct(ctx, sname);
     int index = field_index(strct, expr->field.name);
     unsigned int reg = ctx->reg++;
     fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
-            reg, base_type.name, base, index);
+            reg, sname, base, index);
     return arena_format(ctx->arena, "%%%u", reg);
   }
   case EXPR_INDEX: {
@@ -874,7 +881,7 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   size_t param_count = 0;
   if (is_method) {
     expr_t *recv = call->call.callee->field.base;
-    const decl_t *strct = find_struct(ctx, recv->type.name);
+    const decl_t *strct = find_struct(ctx, struct_ref(ctx, recv->type.name));
     if (strct != NULL) {
       for (decl_t *m = strct->strct.members; m != NULL; m = m->next) {
         if (m->kind == DECL_FN &&
@@ -1076,14 +1083,15 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     return;
   }
   if (expr->kind == EXPR_STRUCT_LITERAL) {
-    const decl_t *strct = find_struct(ctx, expr->type.name);
+    const char *sname = struct_ref(ctx, expr->type.name);
+    const decl_t *strct = find_struct(ctx, sname);
     for (field_init_t *fi = expr->struct_literal.inits; fi != NULL;
          fi = fi->next) {
       field_t *field = find_field(strct, fi->name);
       int index = field_index(strct, fi->name);
       unsigned int reg = ctx->reg++;
       fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
-              reg, expr->type.name, dest, index);
+              reg, sname, dest, index);
       const char *slot = arena_format(ctx->arena, "%%%u", reg);
       if (is_aggregate(field->type.kind)) {
         emit_struct_into(ctx, slot, fi->value);
@@ -1113,7 +1121,7 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
       int index = field_index(strct, field->name);
       unsigned int reg = ctx->reg++;
       fprintf(ctx->out, "  %%%u = getelementptr %%%s, ptr %s, i32 0, i32 %d\n",
-              reg, expr->type.name, dest, index);
+              reg, sname, dest, index);
       const char *slot = arena_format(ctx->arena, "%%%u", reg);
       if (is_aggregate(field->type.kind)) {
         emit_struct_into(ctx, slot, field->default_value);
@@ -1544,7 +1552,7 @@ static int emit_condition(ctx_t *ctx, stmt_t *stmt, type_t ret,
 
 static const char *ir_type(ctx_t *ctx, type_t type) {
   if (type.kind == TYPE_STRUCT) {
-    return arena_format(ctx->arena, "%%%s", type.name);
+    return arena_format(ctx->arena, "%%%s", struct_ref(ctx, type.name));
   }
   if (type.kind == TYPE_ARRAY) {
     return arena_format(ctx->arena, "[%zu x %s]", type.array_length,
@@ -1749,14 +1757,6 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
                                            : emit_fn(ctx, decl, decl->name);
   }
   case DECL_STRUCT: {
-    fprintf(ctx->out, "%%%s = type {", decl->name);
-    bool first = true;
-    for (field_t *field = decl->strct.fields; field != NULL;
-         field = field->next) {
-      fprintf(ctx->out, "%s%s", first ? " " : ", ", ir_type(ctx, field->type));
-      first = false;
-    }
-    fprintf(ctx->out, first ? "}\n" : " }\n");
     for (decl_t *member = decl->strct.members; member != NULL;
          member = member->next) {
       if (emit_fn(ctx, member,
@@ -1781,6 +1781,26 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
   return 0;
 }
 
+static void emit_struct_types(ctx_t *ctx, decl_t *decl) {
+  if (decl->kind == DECL_CONTAINER) {
+    for (decl_t *m = decl->container.members; m != NULL; m = m->next) {
+      emit_struct_types(ctx, m);
+    }
+    return;
+  }
+  if (decl->kind != DECL_STRUCT) {
+    return;
+  }
+  fprintf(ctx->out, "%%%s = type {", mangle(ctx, decl->name));
+  bool first = true;
+  for (field_t *field = decl->strct.fields; field != NULL;
+       field = field->next) {
+    fprintf(ctx->out, "%s%s", first ? " " : ", ", ir_type(ctx, field->type));
+    first = false;
+  }
+  fprintf(ctx->out, first ? "}\n" : " }\n");
+}
+
 int codegen_emit(FILE *out, compilation_t *compilation, arena_t *arena) {
   if (compilation == NULL) {
     return 1;
@@ -1802,15 +1822,23 @@ int codegen_emit(FILE *out, compilation_t *compilation, arena_t *arena) {
 
   for (module_t *module = compilation->modules; module != NULL;
        module = module->next) {
+    ctx.prefix = module->prefix;
     if (collect_decl(&ctx, module->unit->root) != 0) {
       return 1;
     }
   }
+  ctx.prefix = NULL;
 
   emit_string_globals(&ctx);
 
   if (ctx.uses_str_eq && find_fn(&ctx, "memcmp") == NULL) {
     fprintf(ctx.out, "declare i32 @memcmp(ptr, ptr, i64)\n");
+  }
+
+  for (module_t *module = compilation->modules; module != NULL;
+       module = module->next) {
+    ctx.prefix = module->prefix;
+    emit_struct_types(&ctx, module->unit->root);
   }
 
   for (module_t *module = compilation->modules; module != NULL;

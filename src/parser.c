@@ -145,6 +145,12 @@ static type_t parse_type(parser_t *parser) {
     advance(parser);
     type.kind = TYPE_STRUCT;
     type.name = token.value;
+    if (match(parser, TOKEN_DOT)) {
+      token_t member =
+          expect(parser, TOKEN_ID, "expected struct name after '.'");
+      type.module = token.value;
+      type.name = member.value;
+    }
     break;
   default:
     parse_error(parser, "expected a type");
@@ -187,8 +193,7 @@ static expr_t *parse_call_args(parser_t *parser, expr_t *callee) {
   return call;
 }
 
-static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
-  expr_t *lit = ast_struct_literal_init(type_name, parser->arena);
+static expr_t *parse_struct_body(parser_t *parser, expr_t *lit) {
   expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
 
   field_init_t *tail = NULL;
@@ -223,6 +228,11 @@ static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
 
   expect(parser, TOKEN_RBRACE, "expected '}' after struct fields");
   return lit;
+}
+
+static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
+  return parse_struct_body(parser,
+                           ast_struct_literal_init(type_name, parser->arena));
 }
 
 static expr_t *parse_primary(parser_t *parser) {
@@ -302,6 +312,13 @@ static expr_t *parse_postfix(parser_t *parser) {
       expr = ast_field_access_init(expr, name, parser->arena);
     } else if (check(parser, TOKEN_LPAREN) && expr->kind == EXPR_FIELD) {
       expr = parse_call_args(parser, expr);
+    } else if (check(parser, TOKEN_LBRACE) && !parser->no_struct_literal &&
+               expr->kind == EXPR_FIELD && expr->field.base->kind == EXPR_ID) {
+      token_t name = {
+          .value = expr->field.name, .line = expr->line, .col = expr->col};
+      expr_t *lit = ast_struct_literal_init(name, parser->arena);
+      lit->struct_literal.module = expr->field.base->id.name;
+      expr = parse_struct_body(parser, lit);
     } else if (check(parser, TOKEN_LBRACKET)) {
       advance(parser);
       expr_t *index = parse_expr(parser);

@@ -1,0 +1,20 @@
+--TEST--
+a non-public struct in an imported module is not usable across the module boundary
+--PREPARE--
+printf 'struct Rect {\n  w: i32,\n  h: i32,\n}\n' > "${TMPDIR:-/tmp}/zup_priv_shapes.zup"
+--FILE--
+const m = import("zup_priv_shapes.zup");
+
+fn area(r: m.Rect): i32 {
+  return 0;
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_priv_shapes.zup"
+--EXPECTERR--
+zup: error: module 'm' has no public struct 'Rect' [3:12]
+--EXIT--
+1

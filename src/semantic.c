@@ -24,6 +24,27 @@ static decl_t *modtab_lookup(const modtab_t *tab, const char *alias) {
   return NULL;
 }
 
+static const char *module_stem(const char *path, arena_t *arena) {
+  const char *slash = strrchr(path, '/');
+  const char *base = slash ? slash + 1 : path;
+  const char *dot = strrchr(base, '.');
+  size_t len = dot ? (size_t)(dot - base) : strlen(base);
+  char *out = arena_alloc(arena, len + 1);
+  memcpy(out, base, len);
+  out[len] = '\0';
+  return out;
+}
+
+static decl_t *module_pub_struct(module_t *mod, const char *name) {
+  for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_STRUCT && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, name) == 0) {
+      return m;
+    }
+  }
+  return NULL;
+}
+
 typedef struct {
   decl_t **fns;
   size_t count;
@@ -39,14 +60,19 @@ static decl_t *symtab_lookup(const symtab_t *tab, const char *name) {
 }
 
 typedef struct {
-  decl_t **structs;
+  const char *name;
+  decl_t *decl;
+} typeent_t;
+
+typedef struct {
+  typeent_t *structs;
   size_t count;
 } typetab_t;
 
 static decl_t *typetab_lookup(const typetab_t *tab, const char *name) {
   for (size_t i = 0; i < tab->count; i++) {
-    if (strcmp(tab->structs[i]->name, name) == 0) {
-      return tab->structs[i];
+    if (strcmp(tab->structs[i].name, name) == 0) {
+      return tab->structs[i].decl;
     }
   }
   return NULL;
@@ -166,6 +192,7 @@ static bool is_const_init(const expr_t *expr) {
 }
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
+static void resolve_qualified_type(sema_t *sema, type_t *t);
 
 static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   for (decl_t *member = root->container.members; member != NULL;
@@ -556,8 +583,6 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_UNARY: {
-    // !  : operand must be bool, result bool
-    // -  : operand must be an integer, result the same integer type
     bool is_not = expr->unary.op == UNOP_NOT;
     TypeKind operand_expected = is_not ? TYPE_BOOL : expected;
     exprty_t operand = check_expr(sema, expr->unary.operand, operand_expected);
@@ -579,6 +604,31 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_STRUCT_LITERAL: {
+    if (expr->struct_literal.module != NULL) {
+      decl_t *import =
+          modtab_lookup(sema->modules, expr->struct_literal.module);
+      if (import == NULL || import->import.resolved == NULL) {
+        diag_error(sema->src, expr->line, expr->col, "'%s' is not a module",
+                   expr->struct_literal.module);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+      if (module_pub_struct(import->import.resolved,
+                            expr->struct_literal.type_name) == NULL) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "module '%s' has no public struct '%s'",
+                   expr->struct_literal.module, expr->struct_literal.type_name);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+      expr->struct_literal.type_name =
+          arena_format(sema->arena, "%s.%s",
+                       module_stem(import->import.resolved->path, sema->arena),
+                       expr->struct_literal.type_name);
+      expr->struct_literal.module = NULL;
+    }
     decl_t *strct = typetab_lookup(sema->types, expr->struct_literal.type_name);
     if (strct == NULL) {
       diag_error(sema->src, expr->line, expr->col, "unknown type '%s'",
@@ -630,7 +680,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       }
     }
 
-    result = (exprty_t){.kind = TYPE_STRUCT, .name = strct->name, .ok = ok};
+    result = (exprty_t){
+        .kind = TYPE_STRUCT, .name = expr->struct_literal.type_name, .ok = ok};
     break;
   }
   case EXPR_FIELD: {
@@ -826,6 +877,7 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     break;
   }
   case STMT_BINDING: {
+    resolve_qualified_type(sema, &stmt->binding.type);
     if (stmt->binding.init != NULL) {
       exprty_t init =
           check_expr(sema, stmt->binding.init, stmt->binding.type.kind);
@@ -869,7 +921,6 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     expr_t *target = stmt->assign.target;
     exprty_t lhs = check_expr(sema, target, TYPE_UNKNOWN);
 
-    // Mutability is a property of the binding the lvalue is rooted at.
     const char *root = lvalue_root(target);
     const local_t *local =
         (root && sema->scope) ? scope_lookup(sema->scope, root) : NULL;
@@ -1041,6 +1092,32 @@ static size_t count_bindings(stmt_t *body) {
   return n;
 }
 
+static void resolve_qualified_type(sema_t *sema, type_t *t) {
+  if (t->kind != TYPE_STRUCT || t->module == NULL) {
+    return;
+  }
+  decl_t *import = modtab_lookup(sema->modules, t->module);
+  if (import == NULL || import->import.resolved == NULL) {
+    diag_error(sema->src, t->line, t->col, "'%s' is not a module", t->module);
+    sema->had_error = true;
+    t->kind = TYPE_UNKNOWN;
+    t->module = NULL;
+    return;
+  }
+  if (module_pub_struct(import->import.resolved, t->name) == NULL) {
+    diag_error(sema->src, t->line, t->col,
+               "module '%s' has no public struct '%s'", t->module, t->name);
+    sema->had_error = true;
+    t->kind = TYPE_UNKNOWN;
+    t->module = NULL;
+    return;
+  }
+  t->name = arena_format(
+      sema->arena, "%s.%s",
+      module_stem(import->import.resolved->path, sema->arena), t->name);
+  t->module = NULL;
+}
+
 static bool check_type(sema_t *sema, type_t type) {
   if (type.kind == TYPE_ARRAY || type.kind == TYPE_SLICE) {
     return check_type(sema, *type.element);
@@ -1099,6 +1176,7 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
 static void check_fn(sema_t *sema, const decl_t *fn) {
   bool seen_default = false;
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
+    resolve_qualified_type(sema, &param->type);
     check_type(sema, param->type);
 
     if (param->default_value != NULL) {
@@ -1221,6 +1299,13 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   bool had_error = false;
 
   size_t capacity = root->container.member_count;
+  size_t type_capacity = capacity;
+  for (decl_t *m = root->container.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_IMPORT && m->import.resolved != NULL) {
+      type_capacity += m->import.resolved->unit->root->container.member_count;
+    }
+  }
+
   modtab_t modules = {
       .imports =
           arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
@@ -1231,8 +1316,8 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       .count = 0,
   };
   typetab_t types = {
-      .structs =
-          arena_alloc(arena, sizeof(decl_t *) * (capacity ? capacity : 1)),
+      .structs = arena_alloc(arena, sizeof(typeent_t) *
+                                        (type_capacity ? type_capacity : 1)),
       .count = 0,
   };
   for (decl_t *member = root->container.members; member != NULL;
@@ -1255,7 +1340,8 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
         had_error = true;
         break;
       }
-      types.structs[types.count++] = member;
+      types.structs[types.count++] =
+          (typeent_t){.name = member->name, .decl = member};
       break;
     }
     case DECL_IMPORT:
@@ -1288,7 +1374,22 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   };
 
   for (size_t i = 0; i < types.count; i++) {
-    check_struct(&sema, types.structs[i]);
+    check_struct(&sema, types.structs[i].decl);
+  }
+
+  for (size_t i = 0; i < modules.count; i++) {
+    decl_t *imp = modules.imports[i];
+    if (imp->import.resolved == NULL) {
+      continue;
+    }
+    const char *stem = module_stem(imp->import.resolved->path, arena);
+    for (decl_t *m = imp->import.resolved->unit->root->container.members;
+         m != NULL; m = m->next) {
+      if (m->kind == DECL_STRUCT && m->visibility == VISIBILITY_PUBLIC) {
+        types.structs[types.count++] = (typeent_t){
+            .name = arena_format(arena, "%s.%s", stem, m->name), .decl = m};
+      }
+    }
   }
 
   check_globals(&sema, root, &globals);

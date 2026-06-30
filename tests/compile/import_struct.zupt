@@ -1,0 +1,15 @@
+--TEST--
+a public struct from an imported module can be named, constructed, and have its fields read across the boundary
+--PREPARE--
+printf 'pub struct Rect {\n  w: i32,\n  h: i32,\n}\n' > "${TMPDIR:-/tmp}/zup_shapes.zup"
+--FILE--
+const m = import("zup_shapes.zup");
+
+pub fn main(): i32 {
+  let r: m.Rect = m.Rect { w: 4, h: 5 };
+  return r.w + r.h;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_shapes.zup"
+--EXIT--
+9

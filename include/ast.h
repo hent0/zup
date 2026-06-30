@@ -33,6 +33,7 @@ typedef struct type type_t;
 struct type {
   TypeKind kind;
   char *name;
+  char *module;
   type_t *element;
   size_t array_length;
   unsigned int line;
@@ -131,6 +132,7 @@ struct expr {
     } unary;
     struct {
       char *type_name;
+      char *module; // import alias for m.Person { ... }; else NULL
       field_init_t *inits;
       size_t init_count;
     } struct_literal;

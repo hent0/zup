@@ -386,6 +386,7 @@ expr_t *ast_struct_literal_init(token_t token, arena_t *arena) {
   expr->type = (type_t){.kind = TYPE_UNKNOWN};
   expr->next = NULL;
   expr->struct_literal.type_name = token.value;
+  expr->struct_literal.module = NULL;
   expr->struct_literal.inits = NULL;
   expr->struct_literal.init_count = 0;
   return expr;
