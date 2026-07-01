@@ -1,7 +1,7 @@
 --TEST--
 a method on an imported struct is callable across the module boundary, mangled to the struct's owning module
 --PREPARE--
-printf 'pub struct Rect {\n  w: i32,\n  h: i32,\n\n  fn area(self): i32 {\n    return self.w * self.h;\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_shapes.zup"
+printf 'pub struct Rect {\n  pub w: i32,\n  pub h: i32,\n\n  pub fn area(self): i32 {\n    return self.w * self.h;\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_shapes.zup"
 --FILE--
 const m = import("zup_shapes.zup");
 

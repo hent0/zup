@@ -1,0 +1,15 @@
+--TEST--
+a public function returning a struct from its own module yields that struct across the boundary; the inferred binding type resolves to the mangled definition
+--PREPARE--
+printf 'pub struct Rect {\n  pub w: i32,\n  pub h: i32,\n}\n\npub fn make(w: i32, h: i32): Rect {\n  return Rect { w: w, h: h };\n}\n' > "${TMPDIR:-/tmp}/zup_shapes.zup"
+--FILE--
+const m = import("zup_shapes.zup");
+
+pub fn main(): i32 {
+  const r = m.make(4, 5);
+  return r.w + r.h;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_shapes.zup"
+--EXIT--
+9

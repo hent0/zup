@@ -529,6 +529,7 @@ field_t *ast_field_init(arena_t *arena) {
   field->name = NULL;
   field->type = (type_t){.kind = TYPE_UNKNOWN};
   field->default_value = NULL;
+  field->visibility = VISIBILITY_PRIVATE;
   field->next = NULL;
   return field;
 }

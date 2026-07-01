@@ -208,6 +208,11 @@ struct stmt {
   };
 };
 
+typedef enum {
+  VISIBILITY_PRIVATE,
+  VISIBILITY_PUBLIC,
+} Visibility;
+
 typedef struct param param_t;
 struct param {
   char *name;
@@ -223,15 +228,11 @@ struct field {
   char *name;
   type_t type;
   expr_t *default_value;
+  Visibility visibility;
   unsigned int line;
   unsigned int col;
   field_t *next;
 };
-
-typedef enum {
-  VISIBILITY_PRIVATE,
-  VISIBILITY_PUBLIC,
-} Visibility;
 
 typedef enum {
   DECL_FN,

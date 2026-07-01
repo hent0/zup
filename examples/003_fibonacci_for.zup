@@ -1,4 +1,4 @@
-extern fn printf(fmt: cstr, ...);
+const std = import("std");
 
 fn fib(n: i32) {
   if n <= 0 {
@@ -8,21 +8,21 @@ fn fib(n: i32) {
   let a: i32 = 0;
   let b: i32 = 1;
 
-  printf("%d ", a);
+  std.printf("%d ", a);
 
   if n > 1 {
-    printf("%d ", b);
+    std.printf("%d ", b);
   }
 
   for i in 3..n + 1 {
     let current: i32 = a + b;
-    printf("%d ", current);
+    std.printf("%d ", current);
 
     a = b;
     b = current;
   }
 
-  printf("\n");
+  std.printf("\n");
 }
 
 pub fn main(): i32 {

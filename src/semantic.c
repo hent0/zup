@@ -174,6 +174,15 @@ static field_t *struct_field(const decl_t *strct, const char *name) {
   return NULL;
 }
 
+static bool is_imported_type(const char *name) {
+  return name != NULL && strchr(name, '.') != NULL;
+}
+
+static const char *bare_type_name(const char *name) {
+  const char *dot = name != NULL ? strrchr(name, '.') : NULL;
+  return dot != NULL ? dot + 1 : name;
+}
+
 static const char *lvalue_root(const expr_t *target) {
   while (target->kind == EXPR_FIELD || target->kind == EXPR_INDEX) {
     target =
@@ -325,7 +334,14 @@ static exprty_t check_module_call(sema_t *sema, expr_t *call, decl_t *import) {
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
-  return check_fn_call(sema, call, fn, fn_name);
+
+  exprty_t result = check_fn_call(sema, call, fn, fn_name);
+  if (result.kind == TYPE_STRUCT && result.name != NULL &&
+      strchr(result.name, '.') == NULL) {
+    result.name = arena_format(
+        sema->arena, "%s.%s", module_stem(mod->path, sema->arena), result.name);
+  }
+  return result;
 }
 
 static unsigned long long type_int_max(TypeKind k) {
@@ -408,6 +424,13 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   if (method == NULL) {
     diag_error(sema->src, field->line, field->col,
                "struct '%s' has no method '%s'", recv.name, field->field.name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
+  if (is_imported_type(recv.name) && method->visibility != VISIBILITY_PUBLIC) {
+    diag_error(sema->src, field->line, field->col,
+               "method '%s' of struct '%s' is not public", field->field.name,
+               bare_type_name(recv.name));
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
@@ -651,6 +674,15 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
         ok = false;
         continue;
       }
+      if (is_imported_type(expr->struct_literal.type_name) &&
+          field->visibility != VISIBILITY_PUBLIC) {
+        diag_error(sema->src, init->line, init->col,
+                   "field '%s' of struct '%s' is not public", init->name,
+                   bare_type_name(expr->struct_literal.type_name));
+        sema->had_error = true;
+        ok = false;
+        continue;
+      }
       if (value.ok && !assignable(field->type, value)) {
         diag_error(sema->src, init->value->line, init->value->col,
                    "cannot assign %s to field '%s' of type %s",
@@ -740,6 +772,14 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     if (field == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "struct '%s' has no field '%s'", base.name, expr->field.name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (is_imported_type(base.name) && field->visibility != VISIBILITY_PUBLIC) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "field '%s' of struct '%s' is not public", expr->field.name,
+                 bare_type_name(base.name));
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;

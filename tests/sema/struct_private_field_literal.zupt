@@ -1,0 +1,17 @@
+--TEST--
+a private field of an imported struct cannot be set in a struct literal across the module boundary
+--PREPARE--
+printf 'pub struct Point {\n  pub x: i32,\n  pub y: i32,\n  secret: i32 = 0,\n\n  pub fn sum(self): i32 {\n    return self.x + self.y;\n  }\n\n  fn hidden(self): i32 {\n    return self.secret;\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_point.zup"
+--FILE--
+const m = import("zup_point.zup");
+
+pub fn main(): i32 {
+  let p: m.Point = m.Point { x: 1, y: 2, secret: 9 };
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_point.zup"
+--EXPECTERR--
+zup: error: field 'secret' of struct 'Point' is not public [4:42]
+--EXIT--
+1

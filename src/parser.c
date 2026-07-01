@@ -862,12 +862,13 @@ static decl_t *parse_extern(parser_t *parser, Visibility visibility) {
   return fn;
 }
 
-static decl_t *parse_method(parser_t *parser, char *struct_name) {
+static decl_t *parse_method(parser_t *parser, char *struct_name,
+                            Visibility visibility) {
   token_t kw = expect(parser, TOKEN_FN, "expected 'fn'");
   token_t name = expect(parser, TOKEN_ID, "expected method name");
 
   decl_t *fn = ast_fn_init(parser->arena);
-  fn->visibility = VISIBILITY_PRIVATE;
+  fn->visibility = visibility;
   fn->name = name.value;
   fn->line = kw.line;
   fn->col = kw.col;
@@ -927,8 +928,11 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
   field_t *f_tail = NULL;
   decl_t *m_tail = NULL;
   while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    Visibility member_vis =
+        match(parser, TOKEN_PUB) ? VISIBILITY_PUBLIC : VISIBILITY_PRIVATE;
+
     if (check(parser, TOKEN_FN)) {
-      decl_t *method = parse_method(parser, decl->name);
+      decl_t *method = parse_method(parser, decl->name, member_vis);
       if (method == NULL) {
         break;
       }
@@ -955,6 +959,7 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
     field->name = fname.value;
     field->type = ftype;
     field->default_value = default_value;
+    field->visibility = member_vis;
     field->line = fname.line;
     field->col = fname.col;
 

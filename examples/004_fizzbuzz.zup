@@ -1,7 +1,5 @@
 const std = import("std");
 
-extern printf(fmt: cstr, ...);
-
 pub fn main(): i32 {
   let i: i32 = 1;
 
@@ -13,7 +11,7 @@ pub fn main(): i32 {
     } else if i % 5 == 0 {
         std.println("Buzz");
     } else {
-        printf("%d\n", i);
+        std.printf("%d\n", i);
     }
 
     i = i + 1;
