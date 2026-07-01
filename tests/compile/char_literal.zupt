@@ -1,0 +1,8 @@
+--TEST--
+a char literal is the byte value of its character
+--FILE--
+pub fn main(): i32 {
+  return 'A' as i32;
+}
+--EXIT--
+65

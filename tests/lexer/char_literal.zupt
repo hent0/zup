@@ -1,0 +1,12 @@
+--TEST--
+char literals lex to integer tokens carrying the byte value, including escapes
+--ARGS--
+--tokenize
+--FILE--
+'A' '0' '\n' '\'' '\\'
+--EXPECT--
+TOKEN_NUMBER(65) [1:1]
+TOKEN_NUMBER(48) [1:5]
+TOKEN_NUMBER(10) [1:9]
+TOKEN_NUMBER(39) [1:14]
+TOKEN_NUMBER(92) [1:19]

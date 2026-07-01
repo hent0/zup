@@ -207,6 +207,68 @@ static token_t string_literal(lexer_t *lexer) {
                     .value = id, .length = out);
 }
 
+static token_t char_literal(lexer_t *lexer) {
+  unsigned int start_line = lexer->line;
+  unsigned int start_col = lexer->col;
+  advance(lexer); // opening '
+
+  int byte = 0;
+  if (at_eof(lexer) || *lexer->current == '\'' || *lexer->current == '\n') {
+    diag_error(NULL, start_line, start_col, "empty char literal");
+  } else if (*lexer->current == '\\') {
+    advance(lexer);
+    switch (*lexer->current) {
+    case 'n':
+      byte = '\n';
+      break;
+    case 't':
+      byte = '\t';
+      break;
+    case 'r':
+      byte = '\r';
+      break;
+    case '0':
+      byte = '\0';
+      break;
+    case '\\':
+      byte = '\\';
+      break;
+    case '\'':
+      byte = '\'';
+      break;
+    case '"':
+      byte = '"';
+      break;
+    default:
+      diag_error(NULL, start_line, start_col, "unknown escape '\\%c'",
+                 *lexer->current);
+      byte = (unsigned char)*lexer->current;
+      break;
+    }
+    advance(lexer);
+  } else {
+    byte = (unsigned char)*lexer->current;
+    advance(lexer);
+  }
+
+  if (*lexer->current == '\'') {
+    advance(lexer); // closing '
+  } else {
+    diag_error(NULL, start_line, start_col,
+               "char literal must contain a single byte");
+    while (!at_eof(lexer) && *lexer->current != '\'' &&
+           *lexer->current != '\n') {
+      advance(lexer);
+    }
+    if (*lexer->current == '\'') {
+      advance(lexer);
+    }
+  }
+
+  return token_init(TOKEN_NUMBER, .line = start_line, .col = start_col,
+                    .value = arena_format(lexer->arena, "%d", byte & 0xFF));
+}
+
 static token_t number_literal(lexer_t *lexer) {
   const char *start = lexer->current;
   unsigned int start_line = lexer->line;
@@ -309,6 +371,8 @@ token_t lexer_next_token(lexer_t *lexer) {
         lexer, token_init(TOKEN_COMMA, .line = lexer->line, .col = lexer->col));
   case '"':
     return string_literal(lexer);
+  case '\'':
+    return char_literal(lexer);
   case '+':
     return advance_with(
         lexer, token_init(TOKEN_PLUS, .line = lexer->line, .col = lexer->col));

@@ -1,0 +1,12 @@
+--TEST--
+a byte read from a string compares equal to a char literal (the lexer's core operation)
+--FILE--
+pub fn main(): i32 {
+  let s: str = "AB";
+  if s[0] == 'A' {
+    return 7;
+  }
+  return 0;
+}
+--EXIT--
+7

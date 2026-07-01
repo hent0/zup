@@ -1,0 +1,8 @@
+--TEST--
+an escaped char literal yields the escape's byte value
+--FILE--
+pub fn main(): i32 {
+  return '\n' as i32;
+}
+--EXIT--
+10

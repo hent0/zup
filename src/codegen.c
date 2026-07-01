@@ -497,8 +497,6 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   case EXPR_INDEX: {
     const char *base = emit_addr(ctx, expr->index.base);
     value_t idx = emit_value(ctx, expr->index.index);
-    // str shares the { ptr, i64 } layout of a slice; index its byte the same
-    // way, loading through the data pointer at field 0.
     if (expr->index.base->type.kind == TYPE_SLICE ||
         expr->index.base->type.kind == TYPE_STR) {
       unsigned int g = ctx->reg++;
