@@ -1,0 +1,9 @@
+--TEST--
+indexing a string yields the byte at that position as a u8
+--FILE--
+pub fn main(): i32 {
+  let s: str = "ABC";
+  return s[1] as i32;
+}
+--EXIT--
+66

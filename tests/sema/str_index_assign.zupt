@@ -1,0 +1,12 @@
+--TEST--
+writing through a string index is rejected: strings are an immutable view of bytes
+--FILE--
+pub fn main(): i32 {
+  let s: str = "AB";
+  s[0] = 67;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign through index into str (strings are immutable) [3:3]
+--EXIT--
+1

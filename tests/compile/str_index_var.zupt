@@ -1,0 +1,10 @@
+--TEST--
+a string can be indexed by a runtime integer variable (cursor-style access)
+--FILE--
+pub fn main(): i32 {
+  let s: str = "ABC";
+  let i: i32 = 2;
+  return s[i] as i32;
+}
+--EXIT--
+67

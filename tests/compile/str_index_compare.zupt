@@ -1,0 +1,12 @@
+--TEST--
+a byte read from a string compares against an integer literal (the lexer's core operation)
+--FILE--
+pub fn main(): i32 {
+  let s: str = "AB";
+  if s[0] == 65 {
+    return 9;
+  }
+  return 0;
+}
+--EXIT--
+9

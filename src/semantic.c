@@ -830,7 +830,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    if (base.kind != TYPE_ARRAY && base.kind != TYPE_SLICE) {
+    if (base.kind != TYPE_ARRAY && base.kind != TYPE_SLICE &&
+        base.kind != TYPE_STR) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot index non-array type %s", type_kind_to_str(base.kind));
       sema->had_error = true;
@@ -842,6 +843,10 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
                  "array index must be an integer, got %s",
                  type_kind_to_str(idx.kind));
       sema->had_error = true;
+    }
+    if (base.kind == TYPE_STR) {
+      result = (exprty_t){.kind = TYPE_U8, .ok = true};
+      break;
     }
     result = (exprty_t){.kind = base.element->kind,
                         .name = base.element->name,
@@ -960,6 +965,16 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_ASSIGN: {
     expr_t *target = stmt->assign.target;
     exprty_t lhs = check_expr(sema, target, TYPE_UNKNOWN);
+
+    if (target->kind == EXPR_INDEX &&
+        target->index.base->type.kind == TYPE_STR) {
+      diag_error(
+          sema->src, stmt->line, stmt->col,
+          "cannot assign through index into str (strings are immutable)");
+      sema->had_error = true;
+      check_expr(sema, stmt->assign.value, TYPE_UNKNOWN);
+      break;
+    }
 
     const char *root = lvalue_root(target);
     const local_t *local =
