@@ -1,0 +1,30 @@
+--TEST--
+nested type paths resolve through pub imports: annotations, literals, struct fields, and enum casts
+--PREPARE--
+printf 'pub enum Mode {\n  Read,\n  Write,\n}\n\npub struct File {\n  pub fd: i32,\n\n  pub fn desc(self): i32 {\n    return self.fd;\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_tio.zup"
+printf 'pub const io = import("zup_tio.zup");\n' > "${TMPDIR:-/tmp}/zup_tstd.zup"
+--FILE--
+const stdx = import("zup_tstd.zup");
+
+fn describe(f: stdx.io.File): i32 {
+  return f.fd;
+}
+
+fn make(): stdx.io.File {
+  return stdx.io.File{fd: 7};
+}
+
+struct Wrapper {
+  inner: stdx.io.File,
+}
+
+pub fn main(): i32 {
+  let f: stdx.io.File = make();
+  let m: stdx.io.Mode = .Write;
+  let w: Wrapper = Wrapper{inner: stdx.io.File{fd: 30}};
+  return describe(f) + (m as i32) + w.inner.desc() + (2 as stdx.io.Mode) as i32;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_tio.zup" "${TMPDIR:-/tmp}/zup_tstd.zup"
+--EXIT--
+40

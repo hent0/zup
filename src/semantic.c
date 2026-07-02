@@ -45,6 +45,16 @@ static decl_t *module_pub_struct(module_t *mod, const char *name) {
   return NULL;
 }
 
+static decl_t *module_pub_enum(module_t *mod, const char *name) {
+  for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
+    if (m->kind == DECL_ENUM && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, name) == 0) {
+      return m;
+    }
+  }
+  return NULL;
+}
+
 typedef struct {
   decl_t **fns;
   size_t count;
@@ -232,6 +242,39 @@ static decl_t *imports_pub_enum(const sema_t *sema, const char *name) {
     }
   }
   return NULL;
+}
+
+static module_t *resolve_module_alias_path(const sema_t *sema,
+                                           const char *path) {
+  if (sema->modules == NULL) {
+    return NULL;
+  }
+  module_t *mod = NULL;
+  const char *seg = path;
+  for (;;) {
+    const char *dot = strchr(seg, '.');
+    size_t len = dot != NULL ? (size_t)(dot - seg) : strlen(seg);
+    char *name = arena_format(sema->arena, "%.*s", (int)len, seg);
+    if (mod == NULL) {
+      decl_t *imp = modtab_lookup(sema->modules, name);
+      mod = imp != NULL ? imp->import.resolved : NULL;
+    } else {
+      module_t *next = NULL;
+      for (decl_t *m = mod->unit->root->container.members; m != NULL;
+           m = m->next) {
+        if (m->kind == DECL_IMPORT && m->visibility == VISIBILITY_PUBLIC &&
+            strcmp(m->name, name) == 0) {
+          next = m->import.resolved;
+          break;
+        }
+      }
+      mod = next;
+    }
+    if (mod == NULL || dot == NULL) {
+      return mod;
+    }
+    seg = dot + 1;
+  }
 }
 
 static module_t *resolve_module_path(const sema_t *sema, const expr_t *expr) {
@@ -615,6 +658,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
   case EXPR_CAST: {
     exprty_t operand =
         check_expr(sema, expr->cast.operand, type_from_kind(TYPE_UNKNOWN));
+    resolve_qualified_type(sema, &expr->cast.target);
     resolve_enum_type(sema, &expr->cast.target);
     TypeKind target = expr->cast.target.kind;
     bool valid = (type_is_numeric(operand.kind) && type_is_numeric(target)) ||
@@ -762,17 +806,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       }
     }
     if (expr->struct_literal.module != NULL) {
-      decl_t *import =
-          modtab_lookup(sema->modules, expr->struct_literal.module);
-      if (import == NULL || import->import.resolved == NULL) {
+      module_t *mod =
+          resolve_module_alias_path(sema, expr->struct_literal.module);
+      if (mod == NULL) {
         diag_error(sema->src, expr->line, expr->col, "'%s' is not a module",
                    expr->struct_literal.module);
         sema->had_error = true;
         result = (exprty_t){.kind = TYPE_VOID, .ok = false};
         break;
       }
-      if (module_pub_struct(import->import.resolved,
-                            expr->struct_literal.type_name) == NULL) {
+      if (module_pub_struct(mod, expr->struct_literal.type_name) == NULL) {
         diag_error(sema->src, expr->line, expr->col,
                    "module '%s' has no public struct '%s'",
                    expr->struct_literal.module, expr->struct_literal.type_name);
@@ -782,7 +825,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       }
       expr->struct_literal.type_name =
           arena_format(sema->arena, "%s.%s",
-                       module_stem(import->import.resolved->path, sema->arena),
+                       module_stem(mod->path, sema->arena),
                        expr->struct_literal.type_name);
       expr->struct_literal.module = NULL;
     }
@@ -1537,25 +1580,29 @@ static void resolve_qualified_type(sema_t *sema, type_t *t) {
   if (t->kind != TYPE_STRUCT || t->module == NULL) {
     return;
   }
-  decl_t *import = modtab_lookup(sema->modules, t->module);
-  if (import == NULL || import->import.resolved == NULL) {
+  module_t *mod = resolve_module_alias_path(sema, t->module);
+  if (mod == NULL) {
     diag_error(sema->src, t->line, t->col, "'%s' is not a module", t->module);
     sema->had_error = true;
     t->kind = TYPE_UNKNOWN;
     t->module = NULL;
     return;
   }
-  if (module_pub_struct(import->import.resolved, t->name) == NULL) {
-    diag_error(sema->src, t->line, t->col,
-               "module '%s' has no public struct '%s'", t->module, t->name);
-    sema->had_error = true;
-    t->kind = TYPE_UNKNOWN;
+  if (module_pub_struct(mod, t->name) != NULL) {
+    t->name = arena_format(sema->arena, "%s.%s",
+                           module_stem(mod->path, sema->arena), t->name);
     t->module = NULL;
     return;
   }
-  t->name = arena_format(
-      sema->arena, "%s.%s",
-      module_stem(import->import.resolved->path, sema->arena), t->name);
+  if (module_pub_enum(mod, t->name) != NULL) {
+    t->kind = TYPE_ENUM;
+    t->module = NULL;
+    return;
+  }
+  diag_error(sema->src, t->line, t->col,
+             "module '%s' has no public struct '%s'", t->module, t->name);
+  sema->had_error = true;
+  t->kind = TYPE_UNKNOWN;
   t->module = NULL;
 }
 
@@ -1606,6 +1653,7 @@ static void check_fn(sema_t *sema, decl_t *fn);
 static void check_struct(sema_t *sema, const decl_t *strct) {
   for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
+    resolve_qualified_type(sema, &field->type);
     check_type(sema, &field->type);
 
     for (field_t *prev = strct->strct.fields; prev != field;

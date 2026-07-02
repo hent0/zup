@@ -145,10 +145,13 @@ static type_t parse_type(parser_t *parser) {
     advance(parser);
     type.kind = TYPE_STRUCT;
     type.name = token.value;
-    if (match(parser, TOKEN_DOT)) {
+    while (match(parser, TOKEN_DOT)) {
       token_t member =
           expect(parser, TOKEN_ID, "expected struct name after '.'");
-      type.module = token.value;
+      type.module = type.module == NULL
+                        ? type.name
+                        : arena_format(parser->arena, "%s.%s", type.module,
+                                       type.name);
       type.name = member.value;
     }
     break;
@@ -364,6 +367,20 @@ static expr_t *parse_primary(parser_t *parser) {
   }
 }
 
+static char *field_chain_path(expr_t *expr, arena_t *arena) {
+  if (expr->kind == EXPR_ID) {
+    return expr->id.name;
+  }
+  if (expr->kind != EXPR_FIELD) {
+    return NULL;
+  }
+  char *base = field_chain_path(expr->field.base, arena);
+  if (base == NULL) {
+    return NULL;
+  }
+  return arena_format(arena, "%s.%s", base, expr->field.name);
+}
+
 static expr_t *parse_postfix(parser_t *parser) {
   expr_t *expr = parse_primary(parser);
   if (expr == NULL) {
@@ -377,11 +394,13 @@ static expr_t *parse_postfix(parser_t *parser) {
     } else if (check(parser, TOKEN_LPAREN) && expr->kind == EXPR_FIELD) {
       expr = parse_call_args(parser, expr);
     } else if (check(parser, TOKEN_LBRACE) && !parser->no_struct_literal &&
-               expr->kind == EXPR_FIELD && expr->field.base->kind == EXPR_ID) {
+               expr->kind == EXPR_FIELD &&
+               field_chain_path(expr->field.base, parser->arena) != NULL) {
       token_t name = {
           .value = expr->field.name, .line = expr->line, .col = expr->col};
       expr_t *lit = ast_struct_literal_init(name, parser->arena);
-      lit->struct_literal.module = expr->field.base->id.name;
+      lit->struct_literal.module =
+          field_chain_path(expr->field.base, parser->arena);
       expr = parse_struct_body(parser, lit);
     } else if (check(parser, TOKEN_LBRACKET)) {
       advance(parser);
