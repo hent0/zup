@@ -1,5 +1,5 @@
 --TEST--
-match requires an enum scrutinee
+match requires an enum or bool scrutinee
 --FILE--
 pub fn main(): i32 {
   return match 3 {
@@ -7,6 +7,6 @@ pub fn main(): i32 {
   };
 }
 --EXPECTERR--
-zup: error: match requires an enum value, got i32 [2:16]
+zup: error: match requires an enum or bool value, got i32 [2:16]
 --EXIT--
 1

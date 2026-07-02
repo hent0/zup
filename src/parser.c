@@ -163,7 +163,8 @@ static type_t parse_type(parser_t *parser) {
 static expr_t *parse_expr(parser_t *parser);
 
 static bool starts_expr(TokenKind kind) {
-  return kind == TOKEN_NUMBER || kind == TOKEN_STRING || kind == TOKEN_ID;
+  return kind == TOKEN_NUMBER || kind == TOKEN_STRING || kind == TOKEN_ID ||
+         kind == TOKEN_MATCH;
 }
 
 static expr_t *parse_call_args(parser_t *parser, expr_t *callee) {

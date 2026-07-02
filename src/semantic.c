@@ -930,23 +930,25 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    if (scrut.kind != TYPE_ENUM || scrut.name == NULL) {
+    decl_t *enm = NULL;
+    if (scrut.kind == TYPE_ENUM && scrut.name != NULL) {
+      enm = typetab_lookup(sema->types, scrut.name);
+      if (enm == NULL) {
+        enm = imports_pub_enum(sema, scrut.name);
+      }
+      if (enm == NULL || enm->kind != DECL_ENUM) {
+        diag_error(sema->src, expr->match_expr.scrutinee->line,
+                   expr->match_expr.scrutinee->col, "unknown enum '%s'",
+                   scrut.name);
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+    } else if (scrut.kind != TYPE_BOOL) {
       diag_error(sema->src, expr->match_expr.scrutinee->line,
                  expr->match_expr.scrutinee->col,
-                 "match requires an enum value, got %s",
+                 "match requires an enum or bool value, got %s",
                  type_to_str(exprty_type(scrut)));
-      sema->had_error = true;
-      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
-      break;
-    }
-    decl_t *enm = typetab_lookup(sema->types, scrut.name);
-    if (enm == NULL) {
-      enm = imports_pub_enum(sema, scrut.name);
-    }
-    if (enm == NULL || enm->kind != DECL_ENUM) {
-      diag_error(sema->src, expr->match_expr.scrutinee->line,
-                 expr->match_expr.scrutinee->col, "unknown enum '%s'",
-                 scrut.name);
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
@@ -959,7 +961,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       break;
     }
 
-    size_t member_count = enm->enm.member_count;
+    size_t member_count = enm != NULL ? enm->enm.member_count : 2;
     bool *covered = arena_alloc(
         sema->arena, sizeof(bool) * (member_count ? member_count : 1));
     bool has_wildcard = false;
@@ -981,6 +983,23 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         exprty_t pat = check_expr(sema, arm->pattern, exprty_type(scrut));
         if (!pat.ok) {
           ok = false;
+        } else if (enm == NULL) {
+          if (arm->pattern->kind != EXPR_BOOLEAN) {
+            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                       "match pattern must be a bool literal");
+            sema->had_error = true;
+            ok = false;
+          } else {
+            size_t index = arm->pattern->boolean.value ? 1 : 0;
+            if (covered[index]) {
+              diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                         "duplicate match arm for '%s'",
+                         arm->pattern->boolean.value ? "true" : "false");
+              sema->had_error = true;
+              ok = false;
+            }
+            covered[index] = true;
+          }
         } else if (pat.kind != TYPE_ENUM || pat.name == NULL ||
                    strcmp(pat.name, scrut.name) != 0 ||
                    arm->pattern->kind != EXPR_NUMBER) {
@@ -1026,14 +1045,29 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     }
 
     if (!has_wildcard) {
-      size_t index = 0;
-      for (enum_member_t *m = enm->enm.members; m != NULL;
-           m = m->next, index++) {
-        if (!covered[index]) {
+      if (enm == NULL) {
+        if (!covered[1]) {
           diag_error(sema->src, expr->line, expr->col,
-                     "match does not cover enum member '%s'", m->name);
+                     "match does not cover 'true'");
           sema->had_error = true;
           ok = false;
+        }
+        if (!covered[0]) {
+          diag_error(sema->src, expr->line, expr->col,
+                     "match does not cover 'false'");
+          sema->had_error = true;
+          ok = false;
+        }
+      } else {
+        size_t index = 0;
+        for (enum_member_t *m = enm->enm.members; m != NULL;
+             m = m->next, index++) {
+          if (!covered[index]) {
+            diag_error(sema->src, expr->line, expr->col,
+                       "match does not cover enum member '%s'", m->name);
+            sema->had_error = true;
+            ok = false;
+          }
         }
       }
     }

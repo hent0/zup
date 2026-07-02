@@ -1,0 +1,20 @@
+--TEST--
+match works over bool, as a void statement and as a value
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  const b = true;
+  match b {
+    true => std.printf("ok\n"),
+    false => std.printf("no\n"),
+  };
+  return match b {
+    true => 5,
+    false => 0,
+  };
+}
+--EXPECT--
+ok
+--EXIT--
+5

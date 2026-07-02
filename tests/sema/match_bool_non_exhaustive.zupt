@@ -1,0 +1,16 @@
+--TEST--
+a bool match without '_' must cover both true and false
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  const b = true;
+  match b {
+    true => std.printf("ok\n"),
+  };
+  return 0;
+}
+--EXPECTERR--
+zup: error: match does not cover 'false' [5:3]
+--EXIT--
+1

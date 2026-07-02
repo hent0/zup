@@ -1,0 +1,14 @@
+--TEST--
+two arms naming the same bool literal are a duplicate-arm error
+--FILE--
+pub fn main(): i32 {
+  return match true {
+    true => 1,
+    true => 2,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: duplicate match arm for 'true' [4:5]
+--EXIT--
+1

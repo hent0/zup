@@ -1188,9 +1188,10 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
 
 static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   unsigned int id = ctx->label++;
+  bool is_void = expr->type.kind == TYPE_VOID;
   value_t scrut = emit_value(ctx, expr->match_expr.scrutinee);
 
-  if (dest == NULL) {
+  if (!is_void && dest == NULL) {
     unsigned int slot = ctx->reg++;
     fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, expr->type));
     dest = arena_format(ctx->arena, "%%%u", slot);
@@ -1213,7 +1214,9 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
               cmp, id, i, id, i + 1);
       fprintf(ctx->out, "match.body.%u.%zu:\n", id, i);
     }
-    if (is_aggregate(expr->type.kind)) {
+    if (is_void) {
+      emit_value(ctx, arm->value);
+    } else if (is_aggregate(expr->type.kind)) {
       emit_aggregate_into(ctx, dest, expr->type, arm->value);
     } else {
       value_t value = emit_value(ctx, arm->value);
@@ -1224,6 +1227,9 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   }
 
   fprintf(ctx->out, "match.end.%u:\n", id);
+  if (is_void) {
+    return (value_t){.type = expr->type, .ref = NULL};
+  }
   if (is_aggregate(expr->type.kind)) {
     return (value_t){.type = expr->type, .ref = dest};
   }
@@ -1267,6 +1273,9 @@ static int emit_expr(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
   case EXPR_CALL:
     emit_call(ctx, expr, NULL);
+    return 0;
+  case EXPR_MATCH:
+    emit_match(ctx, expr, NULL);
     return 0;
   default:
     NOT_IMPLEMENTED;
