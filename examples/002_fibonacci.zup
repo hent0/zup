@@ -5,12 +5,12 @@ fn fib(n: i32, a: i32, b: i32): i32 {
     return 0;
   }
 
-  std.printf("%d ", a);
+  std.io.printf("%d ", a);
   return fib(n - 1, b, a + b);
 }
 
 pub fn main(): i32 {
   fib(10, 0, 1);
-  std.printf("\n");
+  std.io.printf("\n");
   return 0;
 }

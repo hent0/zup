@@ -5,13 +5,13 @@ pub fn main(): i32 {
 
   while i <= 100 {
     if i % 3 == 0 && i % 5 == 0 {
-        std.println("FizzBuzz");
+        std.io.println("FizzBuzz");
     } else if i % 3 == 0 {
-        std.println("Fizz");
+        std.io.println("Fizz");
     } else if i % 5 == 0 {
-        std.println("Buzz");
+        std.io.println("Buzz");
     } else {
-        std.printf("%d\n", i);
+        std.io.printf("%d\n", i);
     }
 
     i = i + 1;

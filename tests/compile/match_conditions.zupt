@@ -13,12 +13,12 @@ fn grade(n: i32): str {
 
 pub fn main(): i32 {
   match true {
-    1 == 1 => std.println("ok"),
-    _ => std.println("no"),
+    1 == 1 => std.io.println("ok"),
+    _ => std.io.println("no"),
   };
-  std.println(grade(5));
-  std.println(grade(42));
-  std.println(grade(1000));
+  std.io.println(grade(5));
+  std.io.println(grade(42));
+  std.io.println(grade(1000));
   return 0;
 }
 --EXPECT--

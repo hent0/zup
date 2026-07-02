@@ -5,7 +5,7 @@ const std = import("std");
 
 pub fn main(): i32 {
   std.assert(false, "assert failed");
-  std.println("unreachable");
+  std.io.println("unreachable");
   return 0;
 }
 --EXPECTERR--

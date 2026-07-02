@@ -64,6 +64,7 @@ static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
       break;
     case OPTION_STATIC:
       opts->compile_static = true;
+      break;
     case OPTION_KEEP_IR:
       opts->keep_ir = true;
       break;

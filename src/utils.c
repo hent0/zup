@@ -34,13 +34,9 @@ int read_entire_file(const char *path, arena_t *arena, source_t *out) {
   fseek(fd, 0, SEEK_END);
   size_t len = (size_t)ftell(fd);
   fseek(fd, 0, SEEK_SET);
-  if (len == 0) {
-    fclose(fd);
-    return -1;
-  }
 
   char *buffer = arena_alloc(arena, len + 1);
-  if (fread(buffer, 1, len, fd) != len) {
+  if (len > 0 && fread(buffer, 1, len, fd) != len) {
     fclose(fd);
     return -1;
   }

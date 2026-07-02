@@ -6,7 +6,7 @@ const std = import("std");
 pub fn main(): i32 {
   const b = true;
   match b {
-    true => std.printf("ok\n"),
+    true => std.io.printf("ok\n"),
   };
   return 0;
 }

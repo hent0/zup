@@ -1,0 +1,16 @@
+--TEST--
+a pub import re-exports a module: nested calls, transitive struct methods, and transitive enum inference all resolve
+--PREPARE--
+printf 'pub enum Mode {\n  Read,\n  Write,\n}\n\npub struct File {\n  pub fd: i32,\n\n  pub fn desc(self): i32 {\n    return self.fd;\n  }\n}\n\npub fn open(fd: i32): File {\n  return File{fd: fd};\n}\n\npub fn answer(): i32 {\n  return 40;\n}\n\npub fn set(m: Mode): i32 {\n  return m as i32;\n}\n' > "${TMPDIR:-/tmp}/zup_rio.zup"
+printf 'pub const io = import("zup_rio.zup");\n' > "${TMPDIR:-/tmp}/zup_rstd.zup"
+--FILE--
+const stdx = import("zup_rstd.zup");
+
+pub fn main(): i32 {
+  let f = stdx.io.open(2);
+  return stdx.io.answer() + f.fd + f.desc() + stdx.io.set(.Write);
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_rio.zup" "${TMPDIR:-/tmp}/zup_rstd.zup"
+--EXIT--
+45

@@ -11,7 +11,7 @@ struct Greeter {
 
 pub fn main(): i32 {
   let g: Greeter = Greeter {};
-  std.printf("%s\n", g.greet());
+  std.io.printf("%s\n", g.greet());
   return 0;
 }
 --EXPECT--

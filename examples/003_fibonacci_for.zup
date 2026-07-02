@@ -8,21 +8,21 @@ fn fib(n: i32) {
   let a: i32 = 0;
   let b: i32 = 1;
 
-  std.printf("%d ", a);
+  std.io.printf("%d ", a);
 
   if n > 1 {
-    std.printf("%d ", b);
+    std.io.printf("%d ", b);
   }
 
   for i in 3..n + 1 {
     let current: i32 = a + b;
-    std.printf("%d ", current);
+    std.io.printf("%d ", current);
 
     a = b;
     b = current;
   }
 
-  std.printf("\n");
+  std.io.printf("\n");
 }
 
 pub fn main(): i32 {

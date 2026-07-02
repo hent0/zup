@@ -2,7 +2,7 @@ const std = import("std");
 
 pub fn main(args: []str): i32 {
   for arg in args {
-    std.println(arg);
+    std.io.println(arg);
   }
 
   return 0;

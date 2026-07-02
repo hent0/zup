@@ -1,12 +1,12 @@
 --TEST--
-a module-qualified call to a public function type-checks
+a nested module-qualified call to a public function type-checks
 --ARGS--
 --ast
 --FILE--
 const std = import("std");
 
 pub fn main(): i32 {
-  std.println("hi");
+  std.io.println("hi");
   return 0;
 }
 --EXPECT--
@@ -15,7 +15,8 @@ Container (file) (2 members)
   FnDecl pub 'main' -> i32
     ExprStmt
       MethodCall 'println' (1 args)
-        Id std
+        Field io
+          Id std
         String literal "hi"
     Return
       Number literal 0

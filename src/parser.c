@@ -710,8 +710,11 @@ static decl_t *parse_global_binding(parser_t *parser, Visibility visibility) {
   binding_t binding = parse_binding(parser);
 
   if (binding.init != NULL && binding.init->kind == EXPR_IMPORT) {
-    return ast_import_decl_init(binding.token, binding.name,
-                                binding.init->import.path, parser->arena);
+    decl_t *decl = ast_import_decl_init(binding.token, binding.name,
+                                        binding.init->import.path,
+                                        parser->arena);
+    decl->visibility = visibility;
+    return decl;
   }
 
   return ast_global_init(binding.token, visibility, binding.name, binding.type,

@@ -1,0 +1,18 @@
+pub extern fn printf(fmt: cstr, ...): i32;
+extern fn dprintf(fd: i32, fmt: cstr, ...): i32;
+
+pub fn println(fmt: str) {
+  printf("%s\n", fmt);
+}
+
+pub fn print(fmt: str) {
+  printf("%s", fmt);
+}
+
+pub fn printerrln(fmt: str) {
+  dprintf(2, "%s\n", fmt);
+}
+
+pub fn printerr(fmt: str) {
+  dprintf(2, "%s", fmt);
+}

@@ -99,8 +99,42 @@ static const local_t *scope_lookup(const scope_t *scope, const char *name) {
   return NULL;
 }
 
+typedef struct modnode modnode_t;
+struct modnode {
+  module_t *mod;
+  modnode_t *next;
+};
+
+static bool modnode_contains(const modnode_t *head, const module_t *mod) {
+  for (; head != NULL; head = head->next) {
+    if (head->mod == mod) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static modnode_t *collect_pub_modules(modnode_t *head, module_t *mod,
+                                      arena_t *arena) {
+  if (mod == NULL || modnode_contains(head, mod)) {
+    return head;
+  }
+  modnode_t *node = arena_alloc(arena, sizeof(modnode_t));
+  node->mod = mod;
+  node->next = head;
+  head = node;
+  for (decl_t *m = mod->unit->root->container.members; m != NULL;
+       m = m->next) {
+    if (m->kind == DECL_IMPORT && m->visibility == VISIBILITY_PUBLIC) {
+      head = collect_pub_modules(head, m->import.resolved, arena);
+    }
+  }
+  return head;
+}
+
 typedef struct {
   const modtab_t *modules;
+  const modnode_t *reachable;
   const symtab_t *tab;
   const typetab_t *types;
   const source_t *src;
@@ -188,20 +222,38 @@ static enum_member_t *enum_member(const decl_t *enm, const char *name) {
 }
 
 static decl_t *imports_pub_enum(const sema_t *sema, const char *name) {
-  if (sema->modules == NULL) {
-    return NULL;
-  }
-  for (size_t i = 0; i < sema->modules->count; i++) {
-    decl_t *imp = sema->modules->imports[i];
-    if (imp->import.resolved == NULL) {
-      continue;
-    }
-    for (decl_t *m = imp->import.resolved->unit->root->container.members;
-         m != NULL; m = m->next) {
+  for (const modnode_t *n = sema->reachable; n != NULL; n = n->next) {
+    for (decl_t *m = n->mod->unit->root->container.members; m != NULL;
+         m = m->next) {
       if (m->kind == DECL_ENUM && m->visibility == VISIBILITY_PUBLIC &&
           strcmp(m->name, name) == 0) {
         return m;
       }
+    }
+  }
+  return NULL;
+}
+
+static module_t *resolve_module_path(const sema_t *sema, const expr_t *expr) {
+  if (expr->kind == EXPR_ID) {
+    if (sema->modules == NULL) {
+      return NULL;
+    }
+    decl_t *imp = modtab_lookup(sema->modules, expr->id.name);
+    return imp != NULL ? imp->import.resolved : NULL;
+  }
+  if (expr->kind != EXPR_FIELD) {
+    return NULL;
+  }
+  module_t *base = resolve_module_path(sema, expr->field.base);
+  if (base == NULL) {
+    return NULL;
+  }
+  for (decl_t *m = base->unit->root->container.members; m != NULL;
+       m = m->next) {
+    if (m->kind == DECL_IMPORT && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, expr->field.name) == 0) {
+      return m->import.resolved;
     }
   }
   return NULL;
@@ -348,10 +400,10 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
   return check_fn_call(sema, call, fn, name);
 }
 
-static exprty_t check_module_call(sema_t *sema, expr_t *call, decl_t *import) {
+static exprty_t check_module_call(sema_t *sema, expr_t *call, module_t *mod,
+                                  const char *display) {
   expr_t *field = call->call.callee;
   const char *fn_name = field->field.name;
-  module_t *mod = import->import.resolved;
 
   decl_t *fn = NULL;
   for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
@@ -363,8 +415,7 @@ static exprty_t check_module_call(sema_t *sema, expr_t *call, decl_t *import) {
   }
   if (fn == NULL) {
     diag_error(sema->src, field->line, field->col,
-               "module '%s' has no public function '%s'", import->import.alias,
-               fn_name);
+               "module '%s' has no public function '%s'", display, fn_name);
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
@@ -433,11 +484,24 @@ static decl_t *struct_method(const decl_t *strct, const char *name) {
 static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   expr_t *field = call->call.callee;
 
-  if (field->field.base->kind == EXPR_ID && sema->modules != NULL) {
-    decl_t *import = modtab_lookup(sema->modules, field->field.base->id.name);
-    if (import != NULL) {
-      return check_module_call(sema, call, import);
-    }
+  module_t *mod = resolve_module_path(sema, field->field.base);
+  if (mod != NULL) {
+    const char *display = field->field.base->kind == EXPR_ID
+                              ? field->field.base->id.name
+                              : field->field.base->field.name;
+    return check_module_call(sema, call, mod, display);
+  }
+  if (field->field.base->kind == EXPR_FIELD &&
+      resolve_module_path(sema, field->field.base->field.base) != NULL) {
+    expr_t *base = field->field.base;
+    const char *display = base->field.base->kind == EXPR_ID
+                              ? base->field.base->id.name
+                              : base->field.base->field.name;
+    diag_error(sema->src, base->line, base->col,
+               "module '%s' has no public module '%s'", display,
+               base->field.name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
   exprty_t recv =
@@ -1720,11 +1784,15 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   bool had_error = false;
 
   size_t capacity = root->container.member_count;
-  size_t type_capacity = capacity;
+  modnode_t *reachable = NULL;
   for (decl_t *m = root->container.members; m != NULL; m = m->next) {
     if (m->kind == DECL_IMPORT && m->import.resolved != NULL) {
-      type_capacity += m->import.resolved->unit->root->container.member_count;
+      reachable = collect_pub_modules(reachable, m->import.resolved, arena);
     }
+  }
+  size_t type_capacity = capacity;
+  for (modnode_t *n = reachable; n != NULL; n = n->next) {
+    type_capacity += n->mod->unit->root->container.member_count;
   }
 
   modtab_t modules = {
@@ -1795,6 +1863,7 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
 
   sema_t sema = {
       .modules = &modules,
+      .reachable = reachable,
       .tab = &tab,
       .types = &types,
       .src = unit->src,
@@ -1805,14 +1874,10 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   };
 
   size_t local_type_count = types.count;
-  for (size_t i = 0; i < modules.count; i++) {
-    decl_t *imp = modules.imports[i];
-    if (imp->import.resolved == NULL) {
-      continue;
-    }
-    const char *stem = module_stem(imp->import.resolved->path, arena);
-    for (decl_t *m = imp->import.resolved->unit->root->container.members;
-         m != NULL; m = m->next) {
+  for (modnode_t *n = reachable; n != NULL; n = n->next) {
+    const char *stem = module_stem(n->mod->path, arena);
+    for (decl_t *m = n->mod->unit->root->container.members; m != NULL;
+         m = m->next) {
       if (m->kind == DECL_STRUCT && m->visibility == VISIBILITY_PUBLIC) {
         types.structs[types.count++] = (typeent_t){
             .name = arena_format(arena, "%s.%s", stem, m->name), .decl = m};

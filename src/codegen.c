@@ -51,6 +51,12 @@ struct ctx_fn {
   ctx_fn_t *next;
 };
 
+typedef struct ctx_extern ctx_extern_t;
+struct ctx_extern {
+  const char *name;
+  ctx_extern_t *next;
+};
+
 typedef struct {
   FILE *out;
   arena_t *arena;
@@ -63,6 +69,7 @@ typedef struct {
   ctx_local_t *locals_tail;
   ctx_struct_t *structs;
   ctx_fn_t *fns;
+  ctx_extern_t *externs;
 
   unsigned int reg;
   unsigned int label;
@@ -207,6 +214,28 @@ static const decl_t *module_fn(module_t *mod, const char *name) {
     if (m->kind == DECL_FN && m->visibility == VISIBILITY_PUBLIC &&
         strcmp(m->name, name) == 0) {
       return m;
+    }
+  }
+  return NULL;
+}
+
+static module_t *module_path(ctx_t *ctx, expr_t *expr) {
+  if (expr->kind == EXPR_ID) {
+    decl_t *import = find_import(ctx, expr->id.name);
+    return import != NULL ? import->import.resolved : NULL;
+  }
+  if (expr->kind != EXPR_FIELD) {
+    return NULL;
+  }
+  module_t *base = module_path(ctx, expr->field.base);
+  if (base == NULL) {
+    return NULL;
+  }
+  for (decl_t *m = base->unit->root->container.members; m != NULL;
+       m = m->next) {
+    if (m->kind == DECL_IMPORT && m->visibility == VISIBILITY_PUBLIC &&
+        strcmp(m->name, expr->field.name) == 0) {
+      return m->import.resolved;
     }
   }
   return NULL;
@@ -882,11 +911,10 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   if (is_method) {
     expr_t *recv = call->call.callee->field.base;
     const char *member = call->call.callee->field.name;
-    decl_t *import =
-        recv->kind == EXPR_ID ? find_import(ctx, recv->id.name) : NULL;
-    if (import != NULL) {
-      fn = module_fn(import->import.resolved, member);
-      const char *prefix = import->import.resolved->prefix;
+    module_t *mod = module_path(ctx, recv);
+    if (mod != NULL) {
+      fn = module_fn(mod, member);
+      const char *prefix = mod->prefix;
       if (fn != NULL && fn->fn.is_extern) {
         name = member;
       } else {
@@ -1660,6 +1688,16 @@ static const char *ir_type(ctx_t *ctx, type_t type) {
 }
 
 static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
+  for (ctx_extern_t *e = ctx->externs; e != NULL; e = e->next) {
+    if (strcmp(e->name, decl->name) == 0) {
+      return 0;
+    }
+  }
+  ctx_extern_t *node = arena_alloc(ctx->arena, sizeof(ctx_extern_t));
+  node->name = decl->name;
+  node->next = ctx->externs;
+  ctx->externs = node;
+
   bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "declare %s @%s(",
           sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);

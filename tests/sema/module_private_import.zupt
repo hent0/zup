@@ -1,0 +1,17 @@
+--TEST--
+a private import is not re-exported: it cannot be reached through the importing module
+--PREPARE--
+printf 'pub fn answer(): i32 {\n  return 40;\n}\n' > "${TMPDIR:-/tmp}/zup_pio.zup"
+printf 'const io = import("zup_pio.zup");\n\npub fn version(): i32 {\n  return 1;\n}\n' > "${TMPDIR:-/tmp}/zup_pstd.zup"
+--FILE--
+const stdx = import("zup_pstd.zup");
+
+pub fn main(): i32 {
+  return stdx.io.answer();
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_pio.zup" "${TMPDIR:-/tmp}/zup_pstd.zup"
+--EXPECTERR--
+zup: error: module 'stdx' has no public module 'io' [4:15]
+--EXIT--
+1

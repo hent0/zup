@@ -5,7 +5,7 @@ const std = import("std");
 
 pub fn main(): i32 {
   std.exit(3);
-  std.printf("unreachable\n");
+  std.io.printf("unreachable\n");
   return 0;
 }
 --EXIT--

@@ -4,10 +4,10 @@ arguments to a module-qualified call are type-checked against the imported funct
 const std = import("std");
 
 pub fn main(): i32 {
-  std.println(5);
+  std.io.println(5);
   return 0;
 }
 --EXPECTERR--
-zup: error: cannot pass i32 as argument 's' of 'println' (expected str) [4:7]
+zup: error: cannot pass i32 as argument 'fmt' of 'println' (expected str) [4:10]
 --EXIT--
 1

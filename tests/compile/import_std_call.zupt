@@ -1,10 +1,10 @@
 --TEST--
-the end-to-end milestone: importing std and calling std.println prints through the imported function
+the end-to-end milestone: importing std and calling std.io.println prints through the re-exported io module
 --FILE--
 const std = import("std");
 
 pub fn main(): i32 {
-  std.println("hi");
+  std.io.println("hi");
   return 0;
 }
 --EXPECT--

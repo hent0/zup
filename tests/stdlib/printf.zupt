@@ -1,10 +1,10 @@
 --TEST--
-std.printf re-exports libc printf: formatted, variadic printing across the module boundary
+std.io.printf re-exports libc printf: formatted, variadic printing across the module boundary
 --FILE--
 const std = import("std");
 
 pub fn main(): i32 {
-  std.printf("%d %s\n", 7, "hi");
+  std.io.printf("%d %s\n", 7, "hi");
   return 0;
 }
 --EXPECT--
