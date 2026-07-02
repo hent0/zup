@@ -1,0 +1,19 @@
+--TEST--
+a dot enum literal infers its enum from the struct field type in a literal
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+struct Pixel {
+  c: Color,
+}
+
+pub fn main(): i32 {
+  let p: Pixel = Pixel { c: .Green };
+  return p.c as i32;
+}
+--EXIT--
+1

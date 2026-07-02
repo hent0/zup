@@ -1,0 +1,11 @@
+--TEST--
+a dot enum literal without an enum-typed context cannot infer its type
+--FILE--
+pub fn main(): i32 {
+  let x = .Green;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot infer enum type for '.Green' [2:12]
+--EXIT--
+1

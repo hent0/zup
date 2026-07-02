@@ -267,6 +267,12 @@ static expr_t *parse_primary(parser_t *parser) {
     }
     return ast_id_init(token, parser->arena);
   }
+  case TOKEN_DOT: {
+    advance(parser);
+    token_t name =
+        expect(parser, TOKEN_ID, "expected enum member name after '.'");
+    return ast_enum_literal_init(name, parser->arena);
+  }
   case TOKEN_LPAREN:
     advance(parser);
     expr_t *inner = parse_expr(parser);

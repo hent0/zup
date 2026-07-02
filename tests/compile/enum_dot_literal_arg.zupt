@@ -1,0 +1,18 @@
+--TEST--
+a dot enum literal infers its enum from the parameter type, even when the callee is declared after the caller
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  return pick(.Green);
+}
+
+fn pick(c: Color): i32 {
+  return c as i32;
+}
+--EXIT--
+1

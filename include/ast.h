@@ -78,6 +78,7 @@ typedef enum {
   EXPR_UNARY,
   EXPR_STRUCT_LITERAL,
   EXPR_FIELD,
+  EXPR_ENUM_LITERAL,
   EXPR_ARRAY,
   EXPR_INDEX,
   EXPR_IMPORT,
@@ -141,6 +142,9 @@ struct expr {
       expr_t *base;
       char *name;
     } field;
+    struct {
+      char *name;
+    } enum_literal;
     struct {
       expr_t *elements;
       size_t element_count;
@@ -331,6 +335,7 @@ expr_t *ast_call_init(expr_t *callee, arena_t *arena);
 expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena);
 expr_t *ast_struct_literal_init(token_t token, arena_t *arena);
 expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
+expr_t *ast_enum_literal_init(token_t name, arena_t *arena);
 expr_t *ast_array_init(token_t token, arena_t *arena);
 expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);

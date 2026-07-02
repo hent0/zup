@@ -1,0 +1,18 @@
+--TEST--
+a dot enum literal infers its enum from the function return type
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  return pick() as i32;
+}
+
+fn pick(): Color {
+  return .Blue;
+}
+--EXIT--
+2

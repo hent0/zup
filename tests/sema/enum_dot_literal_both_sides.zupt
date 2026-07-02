@@ -1,0 +1,19 @@
+--TEST--
+comparing two dot enum literals has no side to infer the enum from and is an error
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  if .Red == .Green {
+    return 1;
+  }
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot infer enum type for '.Red' [7:7]
+zup: error: cannot infer enum type for '.Green' [7:15]
+--EXIT--
+1

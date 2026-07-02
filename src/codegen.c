@@ -315,6 +315,7 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
+  case EXPR_ENUM_LITERAL:
     return 0;
   }
   return 0;

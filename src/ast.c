@@ -409,6 +409,17 @@ expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_enum_literal_init(token_t name, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_ENUM_LITERAL;
+  expr->line = name.line;
+  expr->col = name.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->enum_literal.name = name.value;
+  return expr;
+}
+
 expr_t *ast_array_init(token_t token, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_ARRAY;
@@ -719,6 +730,9 @@ static void dump_expr(const expr_t *expr, int depth) {
   case EXPR_FIELD:
     printf("Field %s\n", expr->field.name);
     dump_expr(expr->field.base, depth + 1);
+    break;
+  case EXPR_ENUM_LITERAL:
+    printf("EnumLiteral .%s\n", expr->enum_literal.name);
     break;
   case EXPR_ARRAY:
     printf("Array (%zu elements)\n", expr->array.element_count);

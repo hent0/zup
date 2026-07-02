@@ -1,0 +1,26 @@
+--TEST--
+a leading-dot literal resolves against the annotated type and folds to the member's value in the checked AST
+--ARGS--
+--ast
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Green;
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  Enum priv 'Color'
+    member Red = 0
+    member Green = 1
+  FnDecl pub 'main' -> i32
+    Let c: Color
+      Number literal 1
+    Return
+      Number literal 0
+--EXIT--
+0

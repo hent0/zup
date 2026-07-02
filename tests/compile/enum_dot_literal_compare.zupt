@@ -1,0 +1,21 @@
+--TEST--
+a dot enum literal in a comparison infers its enum from the other operand, on either side
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Green;
+  if .Green == c {
+    c = .Blue;
+  }
+  if c == .Blue {
+    return 5;
+  }
+  return 0;
+}
+--EXIT--
+5

@@ -1,0 +1,16 @@
+--TEST--
+a dot enum literal naming a member the enum does not declare is a compile error
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Purple;
+  return 0;
+}
+--EXPECTERR--
+zup: error: enum 'Color' has no member 'Purple' [7:19]
+--EXIT--
+1
