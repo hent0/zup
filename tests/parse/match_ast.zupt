@@ -1,0 +1,41 @@
+--TEST--
+match parses as an expression with pattern arms and a trailing '_' arm
+--ARGS--
+--ast
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+fn name(c: Color): i32 {
+  return match c {
+    .Red => 1,
+    _ => 0,
+  };
+}
+
+pub fn main(): i32 {
+  return name(Color.Green);
+}
+--EXPECT--
+Container (file) (3 members)
+  Enum priv 'Color'
+    member Red = 0
+    member Green = 1
+  FnDecl priv 'name' -> i32
+    param c: Color
+    Return
+      Match
+        Id c
+        Arm
+          Number literal 0
+          Number literal 1
+        Arm _
+          Number literal 0
+  FnDecl pub 'main' -> i32
+    Return
+      Call 'name' (1 args)
+        Number literal 1
+--EXIT--
+0

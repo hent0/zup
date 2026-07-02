@@ -81,10 +81,19 @@ typedef enum {
   EXPR_ENUM_LITERAL,
   EXPR_ARRAY,
   EXPR_INDEX,
+  EXPR_MATCH,
   EXPR_IMPORT,
 } ExprKind;
 
 typedef struct expr expr_t;
+typedef struct match_arm match_arm_t;
+struct match_arm {
+  expr_t *pattern; // NULL for the '_' arm
+  expr_t *value;
+  unsigned int line;
+  unsigned int col;
+  match_arm_t *next;
+};
 typedef struct field_init field_init_t;
 struct field_init {
   char *name;
@@ -153,6 +162,11 @@ struct expr {
       expr_t *base;
       expr_t *index;
     } index;
+    struct {
+      expr_t *scrutinee;
+      match_arm_t *arms;
+      size_t arm_count;
+    } match_expr;
     struct {
       char *path;
     } import;
@@ -338,6 +352,8 @@ expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
 expr_t *ast_enum_literal_init(token_t name, arena_t *arena);
 expr_t *ast_array_init(token_t token, arena_t *arena);
 expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena);
+expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena);
+match_arm_t *ast_match_arm_init(arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);
 
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);

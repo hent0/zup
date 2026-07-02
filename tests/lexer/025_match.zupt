@@ -1,0 +1,21 @@
+--TEST--
+'match' is a keyword and '=>' tokenizes as a fat arrow
+--ARGS--
+--tokenize
+--FILE--
+match c { .Red => 1, _ => 2 }
+--EXPECT--
+TOKEN_MATCH [1:1]
+TOKEN_ID('c') [1:7]
+TOKEN_LBRACE [1:9]
+TOKEN_DOT [1:11]
+TOKEN_ID('Red') [1:12]
+TOKEN_FAT_ARROW [1:16]
+TOKEN_NUMBER(1) [1:19]
+TOKEN_COMMA [1:20]
+TOKEN_UNDERSCORE [1:22]
+TOKEN_FAT_ARROW [1:24]
+TOKEN_NUMBER(2) [1:27]
+TOKEN_RBRACE [1:29]
+--EXIT--
+0

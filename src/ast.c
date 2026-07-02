@@ -444,6 +444,29 @@ expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_MATCH;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->match_expr.scrutinee = scrutinee;
+  expr->match_expr.arms = NULL;
+  expr->match_expr.arm_count = 0;
+  return expr;
+}
+
+match_arm_t *ast_match_arm_init(arena_t *arena) {
+  match_arm_t *arm = arena_alloc(arena, sizeof(match_arm_t));
+  arm->pattern = NULL;
+  arm->value = NULL;
+  arm->line = 0;
+  arm->col = 0;
+  arm->next = NULL;
+  return arm;
+}
+
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_IMPORT;
@@ -745,6 +768,19 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Index\n");
     dump_expr(expr->index.base, depth + 1);
     dump_expr(expr->index.index, depth + 1);
+    break;
+  case EXPR_MATCH:
+    printf("Match\n");
+    dump_expr(expr->match_expr.scrutinee, depth + 1);
+    for (const match_arm_t *arm = expr->match_expr.arms; arm != NULL;
+         arm = arm->next) {
+      print_indent(depth + 1);
+      printf("Arm%s\n", arm->pattern == NULL ? " _" : "");
+      if (arm->pattern != NULL) {
+        dump_expr(arm->pattern, depth + 2);
+      }
+      dump_expr(arm->value, depth + 2);
+    }
     break;
   case EXPR_IMPORT:
     printf("Import \"%s\"\n", expr->import.path);

@@ -187,6 +187,26 @@ static enum_member_t *enum_member(const decl_t *enm, const char *name) {
   return NULL;
 }
 
+static decl_t *imports_pub_enum(const sema_t *sema, const char *name) {
+  if (sema->modules == NULL) {
+    return NULL;
+  }
+  for (size_t i = 0; i < sema->modules->count; i++) {
+    decl_t *imp = sema->modules->imports[i];
+    if (imp->import.resolved == NULL) {
+      continue;
+    }
+    for (decl_t *m = imp->import.resolved->unit->root->container.members;
+         m != NULL; m = m->next) {
+      if (m->kind == DECL_ENUM && m->visibility == VISIBILITY_PUBLIC &&
+          strcmp(m->name, name) == 0) {
+        return m;
+      }
+    }
+  }
+  return NULL;
+}
+
 static bool is_imported_type(const char *name) {
   return name != NULL && strchr(name, '.') != NULL;
 }
@@ -868,6 +888,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     resolve_enum_type(sema, &want);
     decl_t *enm =
         want.name != NULL ? typetab_lookup(sema->types, want.name) : NULL;
+    if (enm == NULL && want.kind == TYPE_ENUM && want.name != NULL) {
+      enm = imports_pub_enum(sema, want.name);
+    }
     if (want.kind != TYPE_ENUM || enm == NULL || enm->kind != DECL_ENUM) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot infer enum type for '.%s'", expr->enum_literal.name);
@@ -887,6 +910,132 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     expr->kind = EXPR_NUMBER;
     expr->number.value = arena_format(sema->arena, "%lld", member->value);
     result = (exprty_t){.kind = TYPE_ENUM, .name = enm->name, .ok = true};
+    break;
+  }
+  case EXPR_MATCH: {
+    exprty_t scrut = check_expr(sema, expr->match_expr.scrutinee,
+                                type_from_kind(TYPE_UNKNOWN));
+    if (!scrut.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (scrut.kind != TYPE_ENUM || scrut.name == NULL) {
+      diag_error(sema->src, expr->match_expr.scrutinee->line,
+                 expr->match_expr.scrutinee->col,
+                 "match requires an enum value, got %s",
+                 type_to_str(exprty_type(scrut)));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    decl_t *enm = typetab_lookup(sema->types, scrut.name);
+    if (enm == NULL) {
+      enm = imports_pub_enum(sema, scrut.name);
+    }
+    if (enm == NULL || enm->kind != DECL_ENUM) {
+      diag_error(sema->src, expr->match_expr.scrutinee->line,
+                 expr->match_expr.scrutinee->col, "unknown enum '%s'",
+                 scrut.name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (expr->match_expr.arms == NULL) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "match must have at least one arm");
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+
+    size_t member_count = enm->enm.member_count;
+    bool *covered = arena_alloc(
+        sema->arena, sizeof(bool) * (member_count ? member_count : 1));
+    bool has_wildcard = false;
+    bool have_rtype = false;
+    bool ok = true;
+    exprty_t rtype = {.kind = TYPE_UNKNOWN};
+
+    for (match_arm_t *arm = expr->match_expr.arms; arm != NULL;
+         arm = arm->next) {
+      if (arm->pattern == NULL) {
+        has_wildcard = true;
+        if (arm->next != NULL) {
+          diag_error(sema->src, arm->line, arm->col,
+                     "'_' must be the last match arm");
+          sema->had_error = true;
+          ok = false;
+        }
+      } else {
+        exprty_t pat = check_expr(sema, arm->pattern, exprty_type(scrut));
+        if (!pat.ok) {
+          ok = false;
+        } else if (pat.kind != TYPE_ENUM || pat.name == NULL ||
+                   strcmp(pat.name, scrut.name) != 0 ||
+                   arm->pattern->kind != EXPR_NUMBER) {
+          diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                     "match pattern must be a member of enum '%s'",
+                     bare_type_name(scrut.name));
+          sema->had_error = true;
+          ok = false;
+        } else {
+          long long value = strtoll(arm->pattern->number.value, NULL, 10);
+          size_t index = 0;
+          for (enum_member_t *m = enm->enm.members; m != NULL;
+               m = m->next, index++) {
+            if (m->value == value) {
+              if (covered[index]) {
+                diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                           "duplicate match arm for '%s'", m->name);
+                sema->had_error = true;
+                ok = false;
+              }
+              covered[index] = true;
+              break;
+            }
+          }
+        }
+      }
+
+      type_t hint = have_rtype ? exprty_type(rtype) : expected;
+      exprty_t value = check_expr(sema, arm->value, hint);
+      if (!value.ok) {
+        ok = false;
+      } else if (!have_rtype) {
+        rtype = value;
+        have_rtype = true;
+      } else if (!assignable(exprty_type(rtype), value)) {
+        diag_error(sema->src, arm->value->line, arm->value->col,
+                   "match arm has type %s, expected %s",
+                   type_to_str(exprty_type(value)),
+                   type_to_str(exprty_type(rtype)));
+        sema->had_error = true;
+        ok = false;
+      }
+    }
+
+    if (!has_wildcard) {
+      size_t index = 0;
+      for (enum_member_t *m = enm->enm.members; m != NULL;
+           m = m->next, index++) {
+        if (!covered[index]) {
+          diag_error(sema->src, expr->line, expr->col,
+                     "match does not cover enum member '%s'", m->name);
+          sema->had_error = true;
+          ok = false;
+        }
+      }
+    }
+
+    if (!have_rtype) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = rtype.kind,
+                          .name = rtype.name,
+                          .element = rtype.element,
+                          .array_length = rtype.array_length,
+                          .ok = ok};
+    }
     break;
   }
   case EXPR_ARRAY: {
@@ -1317,6 +1466,7 @@ static void resolve_fn_signature(sema_t *sema, decl_t *fn) {
     resolve_qualified_type(sema, &param->type);
     resolve_enum_type(sema, &param->type);
   }
+  resolve_qualified_type(sema, &fn->fn.return_type);
   resolve_enum_type(sema, &fn->fn.return_type);
 }
 
@@ -1587,27 +1737,7 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       .had_error = false,
   };
 
-  for (size_t i = 0; i < tab.count; i++) {
-    resolve_fn_signature(&sema, tab.fns[i]);
-  }
-  for (size_t i = 0; i < types.count; i++) {
-    if (types.structs[i].decl->kind != DECL_STRUCT) {
-      continue;
-    }
-    for (decl_t *m = types.structs[i].decl->strct.members; m != NULL;
-         m = m->next) {
-      resolve_fn_signature(&sema, m);
-    }
-  }
-
-  for (size_t i = 0; i < types.count; i++) {
-    if (types.structs[i].decl->kind == DECL_ENUM) {
-      check_enum(&sema, types.structs[i].decl);
-    } else {
-      check_struct(&sema, types.structs[i].decl);
-    }
-  }
-
+  size_t local_type_count = types.count;
   for (size_t i = 0; i < modules.count; i++) {
     decl_t *imp = modules.imports[i];
     if (imp->import.resolved == NULL) {
@@ -1620,6 +1750,27 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
         types.structs[types.count++] = (typeent_t){
             .name = arena_format(arena, "%s.%s", stem, m->name), .decl = m};
       }
+    }
+  }
+
+  for (size_t i = 0; i < tab.count; i++) {
+    resolve_fn_signature(&sema, tab.fns[i]);
+  }
+  for (size_t i = 0; i < local_type_count; i++) {
+    if (types.structs[i].decl->kind != DECL_STRUCT) {
+      continue;
+    }
+    for (decl_t *m = types.structs[i].decl->strct.members; m != NULL;
+         m = m->next) {
+      resolve_fn_signature(&sema, m);
+    }
+  }
+
+  for (size_t i = 0; i < local_type_count; i++) {
+    if (types.structs[i].decl->kind == DECL_ENUM) {
+      check_enum(&sema, types.structs[i].decl);
+    } else {
+      check_struct(&sema, types.structs[i].decl);
     }
   }
 

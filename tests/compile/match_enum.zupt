@@ -1,0 +1,29 @@
+--TEST--
+match selects the arm whose enum member equals the scrutinee, with '_' as the default
+--FILE--
+const std = import("std");
+
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+fn name(c: Color): str {
+  return match c {
+    .Red => "red",
+    .Green => "green",
+    _ => "other",
+  };
+}
+
+pub fn main(): i32 {
+  std.printf("%s\n", name(Color.Green));
+  std.printf("%s\n", name(Color.Blue));
+  return 0;
+}
+--EXPECT--
+green
+other
+--EXIT--
+0

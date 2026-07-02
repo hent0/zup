@@ -1,0 +1,19 @@
+--TEST--
+a match without '_' must cover every member of the enum
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  return match Color.Red {
+    .Red => 1,
+    .Green => 2,
+  };
+}
+--EXPECTERR--
+zup: error: match does not cover enum member 'Blue' [8:10]
+--EXIT--
+1

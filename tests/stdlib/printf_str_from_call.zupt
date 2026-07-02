@@ -1,0 +1,20 @@
+--TEST--
+a str returned by a method call can be passed to a variadic %s without a named binding
+--FILE--
+const std = import("std");
+
+struct Greeter {
+  fn greet(self): str {
+    return "hello";
+  }
+}
+
+pub fn main(): i32 {
+  let g: Greeter = Greeter {};
+  std.printf("%s\n", g.greet());
+  return 0;
+}
+--EXPECT--
+hello
+--EXIT--
+0

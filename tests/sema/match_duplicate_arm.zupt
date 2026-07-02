@@ -1,0 +1,19 @@
+--TEST--
+two arms naming the same enum member are a duplicate-arm error
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  return match Color.Red {
+    .Red => 1,
+    .Red => 2,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: duplicate match arm for 'Red' [9:6]
+--EXIT--
+1

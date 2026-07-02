@@ -235,6 +235,49 @@ static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
                            ast_struct_literal_init(type_name, parser->arena));
 }
 
+static expr_t *parse_match(parser_t *parser) {
+  token_t kw = parser->current;
+  advance(parser);
+
+  bool saved = parser->no_struct_literal;
+  parser->no_struct_literal = true;
+  expr_t *scrutinee = parse_expr(parser);
+  parser->no_struct_literal = saved;
+
+  expr_t *expr = ast_match_init(kw, scrutinee, parser->arena);
+  expect(parser, TOKEN_LBRACE, "expected '{' after match value");
+
+  match_arm_t *tail = NULL;
+  while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    match_arm_t *arm = ast_match_arm_init(parser->arena);
+    arm->line = parser->current.line;
+    arm->col = parser->current.col;
+
+    if (check(parser, TOKEN_UNDERSCORE)) {
+      advance(parser);
+    } else {
+      arm->pattern = parse_expr(parser);
+    }
+    expect(parser, TOKEN_FAT_ARROW, "expected '=>' after match pattern");
+    arm->value = parse_expr(parser);
+
+    if (tail == NULL) {
+      expr->match_expr.arms = arm;
+    } else {
+      tail->next = arm;
+    }
+    tail = arm;
+    expr->match_expr.arm_count++;
+
+    if (!match(parser, TOKEN_COMMA)) {
+      break;
+    }
+  }
+
+  expect(parser, TOKEN_RBRACE, "expected '}' after match arms");
+  return expr;
+}
+
 static expr_t *parse_primary(parser_t *parser) {
   token_t token = parser->current;
   switch (parser->current.kind) {
@@ -273,6 +316,8 @@ static expr_t *parse_primary(parser_t *parser) {
         expect(parser, TOKEN_ID, "expected enum member name after '.'");
     return ast_enum_literal_init(name, parser->arena);
   }
+  case TOKEN_MATCH:
+    return parse_match(parser);
   case TOKEN_LPAREN:
     advance(parser);
     expr_t *inner = parse_expr(parser);

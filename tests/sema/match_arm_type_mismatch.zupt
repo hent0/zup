@@ -1,0 +1,19 @@
+--TEST--
+every match arm must yield the same type as the first arm
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  let x = match Color.Red {
+    .Red => 1,
+    _ => "nope",
+  };
+  return 0;
+}
+--EXPECTERR--
+zup: error: match arm has type str, expected i32 [9:10]
+--EXIT--
+1

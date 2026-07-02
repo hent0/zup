@@ -312,6 +312,20 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
   case EXPR_IMPORT:
     NOT_IMPLEMENTED;
     return 1;
+  case EXPR_MATCH:
+    if (collect_expr(ctx, expr->match_expr.scrutinee) != 0) {
+      return 1;
+    }
+    for (match_arm_t *arm = expr->match_expr.arms; arm != NULL;
+         arm = arm->next) {
+      if (arm->pattern != NULL && collect_expr(ctx, arm->pattern) != 0) {
+        return 1;
+      }
+      if (collect_expr(ctx, arm->value) != 0) {
+        return 1;
+      }
+    }
+    return 0;
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -463,6 +477,7 @@ static unsigned type_bits(TypeKind kind) {
 static value_t emit_logical(ctx_t *ctx, expr_t *expr);
 static const char *ir_type(ctx_t *ctx, type_t type);
 static value_t emit_value(ctx_t *ctx, expr_t *expr);
+static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest);
 
 static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
@@ -815,6 +830,8 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }
+  case EXPR_MATCH:
+    return emit_match(ctx, expr, NULL);
   default:
     return (value_t){
         .type = (type_t){.kind = TYPE_UNKNOWN},
@@ -935,6 +952,9 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
                (ptype.kind == TYPE_CSTR ||
                 (fn != NULL && fn->fn.variadic && param == NULL))) {
       const char *addr = emit_addr(ctx, arg);
+      if (addr == NULL) {
+        addr = emit_value(ctx, arg).ref;
+      }
       unsigned int field_addr = ctx->reg++;
       fprintf(ctx->out,
               "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n",
@@ -953,7 +973,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       argtype[i] = ptype;
       argbyval[i] = true;
     } else if (is_aggregate(arg->type.kind) && arg->kind != EXPR_STRING) {
-      argref[i] = emit_addr(ctx, arg);
+      const char *addr = emit_addr(ctx, arg);
+      if (addr == NULL) {
+        addr = emit_value(ctx, arg).ref;
+      }
+      argref[i] = addr;
       argtype[i] = arg->type;
       argbyval[i] = true;
     } else {
@@ -1150,12 +1174,64 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     emit_call(ctx, expr, dest);
     return;
   }
+  if (expr->kind == EXPR_MATCH) {
+    emit_match(ctx, expr, dest);
+    return;
+  }
   const char *src = emit_addr(ctx, expr);
   unsigned int reg = ctx->reg++;
   fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg, ir_type(ctx, expr->type),
           src);
   fprintf(ctx->out, "  store %s %%%u, ptr %s\n", ir_type(ctx, expr->type), reg,
           dest);
+}
+
+static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
+  unsigned int id = ctx->label++;
+  value_t scrut = emit_value(ctx, expr->match_expr.scrutinee);
+
+  if (dest == NULL) {
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, expr->type));
+    dest = arena_format(ctx->arena, "%%%u", slot);
+  }
+
+  fprintf(ctx->out, "  br label %%match.arm.%u.0\n", id);
+
+  size_t i = 0;
+  for (match_arm_t *arm = expr->match_expr.arms; arm != NULL;
+       arm = arm->next, i++) {
+    fprintf(ctx->out, "match.arm.%u.%zu:\n", id, i);
+    if (arm->pattern != NULL && arm->next != NULL) {
+      value_t pat = emit_value(ctx, arm->pattern);
+      unsigned int cmp = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = icmp eq %s %s, %s\n", cmp,
+              ir_type(ctx, scrut.type), scrut.ref, pat.ref);
+      fprintf(ctx->out,
+              "  br i1 %%%u, label %%match.body.%u.%zu, label "
+              "%%match.arm.%u.%zu\n",
+              cmp, id, i, id, i + 1);
+      fprintf(ctx->out, "match.body.%u.%zu:\n", id, i);
+    }
+    if (is_aggregate(expr->type.kind)) {
+      emit_aggregate_into(ctx, dest, expr->type, arm->value);
+    } else {
+      value_t value = emit_value(ctx, arm->value);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, expr->type),
+              value.ref, dest);
+    }
+    fprintf(ctx->out, "  br label %%match.end.%u\n", id);
+  }
+
+  fprintf(ctx->out, "match.end.%u:\n", id);
+  if (is_aggregate(expr->type.kind)) {
+    return (value_t){.type = expr->type, .ref = dest};
+  }
+  unsigned int reg = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+          ir_type(ctx, expr->type), dest);
+  return (value_t){.type = expr->type,
+                   .ref = arena_format(ctx->arena, "%%%u", reg)};
 }
 
 static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,

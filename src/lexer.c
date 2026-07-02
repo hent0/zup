@@ -24,6 +24,7 @@ const keyword_t keywords[] = {
     {"extern", TOKEN_EXTERN},
     {"import", TOKEN_IMPORT},
     {"enum", TOKEN_ENUM},
+    {"match", TOKEN_MATCH},
     // Types
     {"i8", TOKEN_I8},
     {"u8", TOKEN_U8},
@@ -403,6 +404,12 @@ token_t lexer_next_token(lexer_t *lexer) {
       return advance_with(
           lexer,
           advance_with(lexer, token_init(TOKEN_EQUAL_EQUAL, .line = lexer->line,
+                                         lexer->col)));
+    }
+    if (peek(lexer) == '>') {
+      return advance_with(
+          lexer,
+          advance_with(lexer, token_init(TOKEN_FAT_ARROW, .line = lexer->line,
                                          lexer->col)));
     }
     return advance_with(

@@ -1,0 +1,20 @@
+--TEST--
+a match covering every enum member needs no '_' arm and can initialize a binding
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Blue;
+  let n: i32 = match c {
+    .Red => 10,
+    .Green => 20,
+    .Blue => 30,
+  };
+  return n;
+}
+--EXIT--
+30

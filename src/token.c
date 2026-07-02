@@ -62,6 +62,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_EQUAL";
   case TOKEN_EQUAL_EQUAL:
     return "TOKEN_EQUAL_EQUAL";
+  case TOKEN_FAT_ARROW:
+    return "TOKEN_FAT_ARROW";
   case TOKEN_BANG:
     return "TOKEN_BANG";
   case TOKEN_BANG_EQUAL:
@@ -120,6 +122,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_IMPORT";
   case TOKEN_ENUM:
     return "TOKEN_ENUM";
+  case TOKEN_MATCH:
+    return "TOKEN_MATCH";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";

@@ -1,0 +1,29 @@
+--TEST--
+a method can return an imported struct built from a literal whose enum field infers across the module boundary
+--PREPARE--
+printf 'pub enum Kind {\n  Section,\n  Eof,\n}\n\npub struct Token {\n  pub kind: Kind,\n}\n' > "${TMPDIR:-/tmp}/zup_tok.zup"
+--FILE--
+const token = import("zup_tok.zup");
+
+pub struct Scanner {
+  cursor: i32 = 0,
+
+  pub fn next(self): token.Token {
+    return token.Token {
+      kind: .Eof,
+    };
+  }
+}
+
+pub fn main(): i32 {
+  let s: Scanner = Scanner {};
+  let t = s.next();
+  if t.kind == .Eof {
+    return 5;
+  }
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_tok.zup"
+--EXIT--
+5

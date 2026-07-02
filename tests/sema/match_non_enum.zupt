@@ -1,0 +1,12 @@
+--TEST--
+match requires an enum scrutinee
+--FILE--
+pub fn main(): i32 {
+  return match 3 {
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: match requires an enum value, got i32 [2:16]
+--EXIT--
+1
