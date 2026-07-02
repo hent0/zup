@@ -965,6 +965,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     bool *covered = arena_alloc(
         sema->arena, sizeof(bool) * (member_count ? member_count : 1));
     bool has_wildcard = false;
+    bool has_condition = false;
     bool have_rtype = false;
     bool ok = true;
     exprty_t rtype = {.kind = TYPE_UNKNOWN};
@@ -984,12 +985,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         if (!pat.ok) {
           ok = false;
         } else if (enm == NULL) {
-          if (arm->pattern->kind != EXPR_BOOLEAN) {
-            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
-                       "match pattern must be a bool literal");
-            sema->had_error = true;
-            ok = false;
-          } else {
+          if (arm->pattern->kind == EXPR_BOOLEAN) {
             size_t index = arm->pattern->boolean.value ? 1 : 0;
             if (covered[index]) {
               diag_error(sema->src, arm->pattern->line, arm->pattern->col,
@@ -999,6 +995,14 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
               ok = false;
             }
             covered[index] = true;
+          } else if (pat.kind != TYPE_BOOL) {
+            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                       "match pattern must be a bool expression, got %s",
+                       type_to_str(exprty_type(pat)));
+            sema->had_error = true;
+            ok = false;
+          } else {
+            has_condition = true;
           }
         } else if (pat.kind != TYPE_ENUM || pat.name == NULL ||
                    strcmp(pat.name, scrut.name) != 0 ||
@@ -1046,17 +1050,26 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
 
     if (!has_wildcard) {
       if (enm == NULL) {
-        if (!covered[1]) {
-          diag_error(sema->src, expr->line, expr->col,
-                     "match does not cover 'true'");
-          sema->had_error = true;
-          ok = false;
-        }
-        if (!covered[0]) {
-          diag_error(sema->src, expr->line, expr->col,
-                     "match does not cover 'false'");
-          sema->had_error = true;
-          ok = false;
+        if (has_condition) {
+          if (!(covered[0] && covered[1])) {
+            diag_error(sema->src, expr->line, expr->col,
+                       "match with condition arms must end with a '_' arm");
+            sema->had_error = true;
+            ok = false;
+          }
+        } else {
+          if (!covered[1]) {
+            diag_error(sema->src, expr->line, expr->col,
+                       "match does not cover 'true'");
+            sema->had_error = true;
+            ok = false;
+          }
+          if (!covered[0]) {
+            diag_error(sema->src, expr->line, expr->col,
+                       "match does not cover 'false'");
+            sema->had_error = true;
+            ok = false;
+          }
         }
       } else {
         size_t index = 0;

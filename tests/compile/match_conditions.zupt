@@ -1,0 +1,30 @@
+--TEST--
+match over a bool takes arbitrary condition arms, evaluated in order with the first true one winning
+--FILE--
+const std = import("std");
+
+fn grade(n: i32): str {
+  return match true {
+    n < 10 => "low",
+    n < 100 => "mid",
+    _ => "high",
+  };
+}
+
+pub fn main(): i32 {
+  match true {
+    1 == 1 => std.println("ok"),
+    _ => std.println("no"),
+  };
+  std.println(grade(5));
+  std.println(grade(42));
+  std.println(grade(1000));
+  return 0;
+}
+--EXPECT--
+ok
+low
+mid
+high
+--EXIT--
+0

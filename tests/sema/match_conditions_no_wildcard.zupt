@@ -1,0 +1,12 @@
+--TEST--
+condition arms cannot be proven exhaustive, so a match using them must end with '_'
+--FILE--
+pub fn main(): i32 {
+  return match true {
+    1 == 1 => 1,
+  };
+}
+--EXPECTERR--
+zup: error: match with condition arms must end with a '_' arm [2:10]
+--EXIT--
+1

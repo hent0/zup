@@ -1,0 +1,13 @@
+--TEST--
+a condition arm of a bool match must itself be a bool expression
+--FILE--
+pub fn main(): i32 {
+  return match true {
+    3 => 1,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: match pattern must be a bool expression, got i32 [3:5]
+--EXIT--
+1
