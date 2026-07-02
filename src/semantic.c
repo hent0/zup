@@ -123,7 +123,7 @@ static bool types_equal(type_t a, type_t b) {
   if (a.kind != b.kind) {
     return false;
   }
-  if (a.kind == TYPE_STRUCT) {
+  if (a.kind == TYPE_STRUCT || a.kind == TYPE_ENUM) {
     return a.name != NULL && b.name != NULL && strcmp(a.name, b.name) == 0;
   }
   if (a.kind == TYPE_ARRAY) {
@@ -147,8 +147,9 @@ static bool assignable(type_t to, exprty_t from) {
   if (to.kind != from.kind) {
     return false;
   }
-  if (to.kind == TYPE_STRUCT) {
-    return from.name != NULL && strcmp(to.name, from.name) == 0;
+  if (to.kind == TYPE_STRUCT || to.kind == TYPE_ENUM) {
+    return from.name != NULL && to.name != NULL &&
+           strcmp(to.name, from.name) == 0;
   }
   if (to.kind == TYPE_ARRAY) {
     return from.element != NULL && to.array_length == from.array_length &&
@@ -169,6 +170,16 @@ static field_t *struct_field(const decl_t *strct, const char *name) {
        field = field->next) {
     if (strcmp(field->name, name) == 0) {
       return field;
+    }
+  }
+  return NULL;
+}
+
+static enum_member_t *enum_member(const decl_t *enm, const char *name) {
+  for (enum_member_t *member = enm->enm.members; member != NULL;
+       member = member->next) {
+    if (strcmp(member->name, name) == 0) {
+      return member;
     }
   }
   return NULL;
@@ -202,6 +213,7 @@ static bool is_const_init(const expr_t *expr) {
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected);
 static void resolve_qualified_type(sema_t *sema, type_t *t);
+static void resolve_enum_type(sema_t *sema, type_t *t);
 
 static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   for (decl_t *member = root->container.members; member != NULL;
@@ -420,7 +432,9 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   }
 
   decl_t *strct = typetab_lookup(sema->types, recv.name);
-  decl_t *method = strct ? struct_method(strct, field->field.name) : NULL;
+  decl_t *method = strct != NULL && strct->kind == DECL_STRUCT
+                       ? struct_method(strct, field->field.name)
+                       : NULL;
   if (method == NULL) {
     diag_error(sema->src, field->line, field->col,
                "struct '%s' has no method '%s'", recv.name, field->field.name);
@@ -512,15 +526,20 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   case EXPR_CAST: {
     exprty_t operand = check_expr(sema, expr->cast.operand, TYPE_UNKNOWN);
+    resolve_enum_type(sema, &expr->cast.target);
     TypeKind target = expr->cast.target.kind;
-    if (operand.ok &&
-        (!type_is_numeric(operand.kind) || !type_is_numeric(target))) {
+    bool valid = (type_is_numeric(operand.kind) && type_is_numeric(target)) ||
+                 (operand.kind == TYPE_ENUM && type_is_integer(target)) ||
+                 (type_is_integer(operand.kind) && target == TYPE_ENUM);
+    if (operand.ok && !valid) {
       diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
-                 type_kind_to_str(operand.kind), type_kind_to_str(target));
+                 type_to_str(exprty_type(operand)),
+                 type_to_str(expr->cast.target));
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){.kind = target, .ok = operand.ok};
+      result = (exprty_t){
+          .kind = target, .name = expr->cast.target.name, .ok = operand.ok};
     }
     break;
   }
@@ -537,6 +556,10 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
           modtab_lookup(sema->modules, expr->id.name) != NULL) {
         diag_error(sema->src, expr->line, expr->col,
                    "'%s' is a module, not a value", expr->id.name);
+      } else if (sema->types != NULL &&
+                 typetab_lookup(sema->types, expr->id.name) != NULL) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "'%s' is a type, not a value", expr->id.name);
       } else {
         diag_error(sema->src, expr->line, expr->col, "undefined name '%s'",
                    expr->id.name);
@@ -587,6 +610,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
         result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
       }
     } else if (lhs.kind == TYPE_STR && rhs.kind == TYPE_STR &&
+               (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
+      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+    } else if (lhs.kind == TYPE_ENUM && rhs.kind == TYPE_ENUM &&
+               lhs.name != NULL && rhs.name != NULL &&
+               strcmp(lhs.name, rhs.name) == 0 &&
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
@@ -660,6 +688,13 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
+    if (strct->kind != DECL_STRUCT) {
+      diag_error(sema->src, expr->line, expr->col, "'%s' is not a struct",
+                 expr->struct_literal.type_name);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
 
     bool ok = true;
     for (field_init_t *init = expr->struct_literal.inits; init != NULL;
@@ -717,6 +752,29 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
     break;
   }
   case EXPR_FIELD: {
+    if (expr->field.base->kind == EXPR_ID &&
+        (sema->scope == NULL ||
+         scope_lookup(sema->scope, expr->field.base->id.name) == NULL) &&
+        (sema->globals == NULL ||
+         scope_lookup(sema->globals, expr->field.base->id.name) == NULL)) {
+      decl_t *enm = typetab_lookup(sema->types, expr->field.base->id.name);
+      if (enm != NULL && enm->kind == DECL_ENUM) {
+        enum_member_t *member = enum_member(enm, expr->field.name);
+        if (member == NULL) {
+          diag_error(sema->src, expr->line, expr->col,
+                     "enum '%s' has no member '%s'", enm->name,
+                     expr->field.name);
+          sema->had_error = true;
+          result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+          break;
+        }
+        expr->kind = EXPR_NUMBER;
+        expr->number.value =
+            arena_format(sema->arena, "%lld", member->value);
+        result = (exprty_t){.kind = TYPE_ENUM, .name = enm->name, .ok = true};
+        break;
+      }
+    }
     exprty_t base = check_expr(sema, expr->field.base, TYPE_UNKNOWN);
     if (!base.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
@@ -768,7 +826,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, TypeKind expected) {
       break;
     }
     decl_t *strct = typetab_lookup(sema->types, base.name);
-    field_t *field = strct ? struct_field(strct, expr->field.name) : NULL;
+    field_t *field = strct != NULL && strct->kind == DECL_STRUCT
+                         ? struct_field(strct, expr->field.name)
+                         : NULL;
     if (field == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "struct '%s' has no field '%s'", base.name, expr->field.name);
@@ -923,6 +983,7 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   }
   case STMT_BINDING: {
     resolve_qualified_type(sema, &stmt->binding.type);
+    resolve_enum_type(sema, &stmt->binding.type);
     if (stmt->binding.init != NULL) {
       exprty_t init =
           check_expr(sema, stmt->binding.init, stmt->binding.type.kind);
@@ -1173,25 +1234,41 @@ static void resolve_qualified_type(sema_t *sema, type_t *t) {
   t->module = NULL;
 }
 
-static bool check_type(sema_t *sema, type_t type) {
-  if (type.kind == TYPE_ARRAY || type.kind == TYPE_SLICE) {
-    return check_type(sema, *type.element);
+static void resolve_enum_type(sema_t *sema, type_t *t) {
+  if (t->kind != TYPE_STRUCT || t->module != NULL) {
+    return;
   }
-  if (type.kind == TYPE_STRUCT &&
-      typetab_lookup(sema->types, type.name) == NULL) {
-    diag_error(sema->src, type.line, type.col, "unknown type '%s'", type.name);
-    sema->had_error = true;
-    return false;
+  decl_t *decl = typetab_lookup(sema->types, t->name);
+  if (decl != NULL && decl->kind == DECL_ENUM) {
+    t->kind = TYPE_ENUM;
+  }
+}
+
+static bool check_type(sema_t *sema, type_t *type) {
+  if (type->kind == TYPE_ARRAY || type->kind == TYPE_SLICE) {
+    return check_type(sema, type->element);
+  }
+  if (type->kind == TYPE_STRUCT) {
+    decl_t *decl = typetab_lookup(sema->types, type->name);
+    if (decl == NULL) {
+      diag_error(sema->src, type->line, type->col, "unknown type '%s'",
+                 type->name);
+      sema->had_error = true;
+      return false;
+    }
+    if (decl->kind == DECL_ENUM) {
+      type->kind = TYPE_ENUM;
+    }
   }
   return true;
 }
 
-static void check_fn(sema_t *sema, const decl_t *fn);
+static void check_fn(sema_t *sema, decl_t *fn);
 
 static void check_struct(sema_t *sema, const decl_t *strct) {
   for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
-    check_type(sema, field->type);
+    check_type(sema, &field->type);
 
     for (field_t *prev = strct->strct.fields; prev != field;
          prev = prev->next) {
@@ -1228,11 +1305,26 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
   }
 }
 
-static void check_fn(sema_t *sema, const decl_t *fn) {
+static void check_enum(sema_t *sema, const decl_t *enm) {
+  for (enum_member_t *member = enm->enm.members; member != NULL;
+       member = member->next) {
+    for (enum_member_t *prev = enm->enm.members; prev != member;
+         prev = prev->next) {
+      if (strcmp(prev->name, member->name) == 0) {
+        diag_error(sema->src, member->line, member->col,
+                   "duplicate enum member '%s'", member->name);
+        sema->had_error = true;
+        break;
+      }
+    }
+  }
+}
+
+static void check_fn(sema_t *sema, decl_t *fn) {
   bool seen_default = false;
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
     resolve_qualified_type(sema, &param->type);
-    check_type(sema, param->type);
+    check_type(sema, &param->type);
 
     if (param->default_value != NULL) {
       if (fn->fn.variadic) {
@@ -1265,7 +1357,7 @@ static void check_fn(sema_t *sema, const decl_t *fn) {
       sema->had_error = true;
     }
   }
-  check_type(sema, fn->fn.return_type);
+  check_type(sema, &fn->fn.return_type);
 
   if (fn->fn.is_extern) {
     return;
@@ -1399,6 +1491,16 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
           (typeent_t){.name = member->name, .decl = member};
       break;
     }
+    case DECL_ENUM:
+      if (typetab_lookup(&types, member->name)) {
+        diag_error(unit->src, member->line, member->col,
+                   "redefinition of type '%s'", member->name);
+        had_error = true;
+        break;
+      }
+      types.structs[types.count++] =
+          (typeent_t){.name = member->name, .decl = member};
+      break;
     case DECL_IMPORT:
       modules.imports[modules.count++] = member;
       break;
@@ -1429,7 +1531,11 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
   };
 
   for (size_t i = 0; i < types.count; i++) {
-    check_struct(&sema, types.structs[i].decl);
+    if (types.structs[i].decl->kind == DECL_ENUM) {
+      check_enum(&sema, types.structs[i].decl);
+    } else {
+      check_struct(&sema, types.structs[i].decl);
+    }
   }
 
   for (size_t i = 0; i < modules.count; i++) {

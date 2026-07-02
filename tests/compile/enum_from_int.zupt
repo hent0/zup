@@ -1,0 +1,15 @@
+--TEST--
+an integer casts to an enum (unchecked) and back to its backing type
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  let c: Color = 2 as Color;
+  return c as i32;
+}
+--EXIT--
+2

@@ -16,7 +16,8 @@ vim.api.nvim_create_autocmd("FileType", {
     end
 
     -- Keywords
-    vim.fn.matchadd("Keyword", [[\v<(pub|fn|return|as|if|else|const|let|while|for|break|continue|in|extern|struct)>]])
+    vim.fn.matchadd("Keyword",
+      [[\v<(pub|fn|return|as|if|else|const|let|while|for|break|continue|in|extern|struct|enum)>]])
     -- Types
     vim.fn.matchadd("Type", [[\v<(i8|u8|i16|u16|i32|u32|i64|u64|f32|f64|void|bool|cstr|str|string)>]])
     -- Slice/array type prefixes: []T and [N]T (highlight the brackets when before a type)

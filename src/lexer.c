@@ -23,6 +23,7 @@ const keyword_t keywords[] = {
     {"in", TOKEN_IN},
     {"extern", TOKEN_EXTERN},
     {"import", TOKEN_IMPORT},
+    {"enum", TOKEN_ENUM},
     // Types
     {"i8", TOKEN_I8},
     {"u8", TOKEN_U8},

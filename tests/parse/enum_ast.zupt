@@ -1,0 +1,25 @@
+--TEST--
+an enum declares named members that receive sequential integer values from zero
+--ARGS--
+--ast
+--FILE--
+enum TokenKind {
+  Ident,
+  Number,
+  Plus,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  Enum priv 'TokenKind'
+    member Ident = 0
+    member Number = 1
+    member Plus = 2
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

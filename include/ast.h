@@ -27,6 +27,7 @@ typedef enum {
   TYPE_STRUCT,
   TYPE_ARRAY,
   TYPE_SLICE,
+  TYPE_ENUM,
 } TypeKind;
 
 typedef struct type type_t;
@@ -234,12 +235,22 @@ struct field {
   field_t *next;
 };
 
+typedef struct enum_member enum_member_t;
+struct enum_member {
+  char *name;
+  long long value;
+  unsigned int line;
+  unsigned int col;
+  enum_member_t *next;
+};
+
 typedef enum {
   DECL_FN,
   DECL_CONTAINER,
   DECL_GLOBAL,
   DECL_STRUCT,
   DECL_IMPORT,
+  DECL_ENUM,
 } DeclKind;
 
 typedef struct decl decl_t;
@@ -280,6 +291,10 @@ struct decl {
       char *path;
       module_t *resolved;
     } import;
+    struct {
+      enum_member_t *members;
+      size_t member_count;
+    } enm;
   };
 };
 
@@ -343,6 +358,7 @@ field_t *ast_field_init(arena_t *arena);
 decl_t *ast_fn_init(arena_t *arena);
 decl_t *ast_container_init(char *name, arena_t *arena);
 decl_t *ast_struct_init(char *name, arena_t *arena);
+decl_t *ast_enum_init(char *name, arena_t *arena);
 decl_t *ast_global_init(token_t token, Visibility visibility, char *name,
                         type_t type, bool mutable, expr_t *init,
                         arena_t *arena);
@@ -350,6 +366,8 @@ decl_t *ast_import_decl_init(token_t token, char *alias, char *path,
                              arena_t *arena);
 
 unit_t *ast_unit_init(source_t *src, arena_t *arena);
+
+enum_member_t *ast_enum_member_init(arena_t *arena);
 
 int ast_dump(unit_t *unit);
 

@@ -427,6 +427,7 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     }
     return 0;
   }
+  case DECL_ENUM:
   case DECL_IMPORT:
     return 0;
   }
@@ -529,6 +530,12 @@ static value_t emit_cast(ctx_t *ctx, expr_t *expr) {
   value_t operand = emit_value(ctx, expr->cast.operand);
   TypeKind from = operand.type.kind;
   TypeKind to = expr->cast.target.kind;
+  if (from == TYPE_ENUM) {
+    from = TYPE_I32;
+  }
+  if (to == TYPE_ENUM) {
+    to = TYPE_I32;
+  }
   int from_bits = type_bits(from);
   int to_bits = type_bits(to);
 
@@ -1781,6 +1788,7 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_IMPORT:
+  case DECL_ENUM:
     return 0;
   }
   return 0;

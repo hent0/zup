@@ -1,0 +1,15 @@
+--TEST--
+accessing a member the enum does not declare is a compile error
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  return Color.Purple as i32;
+}
+--EXPECTERR--
+zup: error: enum 'Color' has no member 'Purple' [7:16]
+--EXIT--
+1

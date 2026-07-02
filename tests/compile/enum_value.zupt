@@ -1,0 +1,14 @@
+--TEST--
+an enum member is an integer constant reachable by dotted access and castable to its backing type
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  return Color.Blue as i32;
+}
+--EXIT--
+2

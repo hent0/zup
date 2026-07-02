@@ -31,6 +31,8 @@ char *type_kind_to_ir(TypeKind kind) {
   case TYPE_STR:
   case TYPE_SLICE:
     return "{ ptr, i64 }";
+  case TYPE_ENUM:
+    return "i32";
   default:
     return "?";
   }
@@ -68,6 +70,8 @@ char *type_kind_to_str(TypeKind kind) {
     return "str";
   case TYPE_SLICE:
     return "[]str";
+  case TYPE_ENUM:
+    return "enum";
   default:
     return "?";
   }
@@ -76,6 +80,7 @@ char *type_kind_to_str(TypeKind kind) {
 char *type_to_str(type_t type) {
   switch (type.kind) {
   case TYPE_STRUCT:
+  case TYPE_ENUM:
     return type.name;
   case TYPE_ARRAY:
   case TYPE_SLICE: {
@@ -534,6 +539,16 @@ field_t *ast_field_init(arena_t *arena) {
   return field;
 }
 
+enum_member_t *ast_enum_member_init(arena_t *arena) {
+  enum_member_t *member = arena_alloc(arena, sizeof(enum_member_t));
+  member->name = NULL;
+  member->line = 0;
+  member->col = 0;
+  member->value = 0;
+  member->next = NULL;
+  return member;
+}
+
 decl_t *ast_fn_init(arena_t *arena) {
   decl_t *fn = arena_alloc(arena, sizeof(decl_t));
   fn->kind = DECL_FN;
@@ -576,6 +591,19 @@ decl_t *ast_struct_init(char *name, arena_t *arena) {
   decl->strct.field_count = 0;
   decl->strct.members = NULL;
   decl->strct.member_count = 0;
+  return decl;
+}
+
+decl_t *ast_enum_init(char *name, arena_t *arena) {
+  decl_t *decl = arena_alloc(arena, sizeof(decl_t));
+  decl->kind = DECL_ENUM;
+  decl->visibility = VISIBILITY_PRIVATE;
+  decl->name = name;
+  decl->line = 0;
+  decl->col = 0;
+  decl->next = NULL;
+  decl->enm.members = NULL;
+  decl->enm.member_count = 0;
   return decl;
 }
 
@@ -848,6 +876,14 @@ static void dump_decl(const decl_t *decl, int depth) {
     for (const decl_t *member = decl->strct.members; member != NULL;
          member = member->next) {
       dump_decl(member, depth + 1);
+    }
+    break;
+  case DECL_ENUM:
+    printf("Enum %s '%s'\n", visibility_to_str(decl->visibility), decl->name);
+    for (const enum_member_t *member = decl->enm.members; member != NULL;
+         member = member->next) {
+      print_indent(depth + 1);
+      printf("member %s = %lld\n", member->name, member->value);
     }
     break;
   case DECL_GLOBAL:

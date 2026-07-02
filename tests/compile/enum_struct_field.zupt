@@ -1,0 +1,19 @@
+--TEST--
+an enum type can be a struct field: stored at construction and read back
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+struct Pixel {
+  c: Color,
+}
+
+pub fn main(): i32 {
+  let p: Pixel = Pixel { c: Color.Green };
+  return p.c as i32;
+}
+--EXIT--
+1

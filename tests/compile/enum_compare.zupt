@@ -1,0 +1,18 @@
+--TEST--
+enum values compare for equality against enum members
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  let c: Color = Color.Green;
+  if c == Color.Green {
+    return 5;
+  }
+  return 0;
+}
+--EXIT--
+5

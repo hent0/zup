@@ -1,0 +1,14 @@
+--TEST--
+the 'enum' keyword tokenizes to its own token; member names are identifiers
+--ARGS--
+--tokenize
+--FILE--
+enum Color { Red, Green }
+--EXPECT--
+TOKEN_ENUM [1:1]
+TOKEN_ID('Color') [1:6]
+TOKEN_LBRACE [1:12]
+TOKEN_ID('Red') [1:14]
+TOKEN_COMMA [1:17]
+TOKEN_ID('Green') [1:19]
+TOKEN_RBRACE [1:25]

@@ -977,6 +977,42 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
   return decl;
 }
 
+static decl_t *parse_enum(parser_t *parser, Visibility visibility) {
+  token_t kw = expect(parser, TOKEN_ENUM, "expected 'enum'");
+  token_t name = expect(parser, TOKEN_ID, "expected enum name");
+
+  decl_t *decl = ast_enum_init(name.value, parser->arena);
+  decl->visibility = visibility;
+  decl->line = kw.line;
+  decl->col = kw.col;
+
+  expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
+
+  enum_member_t *tail = NULL;
+  long long next_value = 0;
+  while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    token_t member_name = expect(parser, TOKEN_ID, "expected enum member name");
+    enum_member_t *member = ast_enum_member_init(parser->arena);
+    member->name = member_name.value;
+    member->value = next_value++;
+    member->line = member_name.line;
+    member->col = member_name.col;
+
+    if (tail == NULL) {
+      decl->enm.members = member;
+    } else {
+      tail->next = member;
+    }
+    tail = member;
+    decl->enm.member_count++;
+
+    match(parser, TOKEN_COMMA);
+  }
+
+  expect(parser, TOKEN_RBRACE, "expected '}'");
+  return decl;
+}
+
 static Visibility parse_visibility(parser_t *parser) {
   if (match(parser, TOKEN_PUB)) {
     return VISIBILITY_PUBLIC;
@@ -999,6 +1035,8 @@ static decl_t *parse_decl(parser_t *parser) {
     return parse_global_binding(parser, visibility);
   case TOKEN_STRUCT:
     return parse_struct(parser, visibility);
+  case TOKEN_ENUM:
+    return parse_enum(parser, visibility);
   default:
     parse_error(parser, "expected a declaration");
     return NULL;
