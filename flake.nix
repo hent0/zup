@@ -1,5 +1,5 @@
 {
-  description = "Shlange";
+  description = "Zup";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -15,23 +15,25 @@
       pkgs = import nixpkgs {inherit system;};
     in {
       packages.default = pkgs.stdenv.mkDerivation {
-        pname = "slang";
+        pname = "zup";
         version = "0.0.1";
 
         src = ./.;
 
-        nativeBuildInputs = with pkgs; [cmake];
+        nativeBuildInputs = with pkgs; [cmake makeWrapper];
         buildInputs = [];
 
         installPhase = ''
           runHook preInstall
-          install -Dm755 shell $out/bin/slang
+          install -Dm755 zup $out/bin/zup
+          cp -r ../std $out/std
+          wrapProgram $out/bin/zup --prefix PATH : ${pkgs.lib.makeBinPath [pkgs.clang]}
           runHook postInstall
         '';
 
         meta = {
-          description = "Slang";
-          mainProgram = "slang";
+          description = "Zup";
+          mainProgram = "zup";
         };
       };
 
