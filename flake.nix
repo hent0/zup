@@ -41,6 +41,7 @@
         packages = with pkgs; [
           cmake # build system
           clang
+          just
           valgrind # memory debugging
           gdb
         ];
