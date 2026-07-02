@@ -661,9 +661,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     resolve_qualified_type(sema, &expr->cast.target);
     resolve_enum_type(sema, &expr->cast.target);
     TypeKind target = expr->cast.target.kind;
+    bool bytes_to_str = operand.kind == TYPE_SLICE &&
+                        operand.element != NULL &&
+                        operand.element->kind == TYPE_U8 && target == TYPE_STR;
+    bool str_to_bytes = operand.kind == TYPE_STR && target == TYPE_SLICE &&
+                        expr->cast.target.element != NULL &&
+                        expr->cast.target.element->kind == TYPE_U8;
     bool valid = (type_is_numeric(operand.kind) && type_is_numeric(target)) ||
                  (operand.kind == TYPE_ENUM && type_is_integer(target)) ||
-                 (type_is_integer(operand.kind) && target == TYPE_ENUM);
+                 (type_is_integer(operand.kind) && target == TYPE_ENUM) ||
+                 bytes_to_str || str_to_bytes;
     if (operand.ok && !valid) {
       diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
                  type_to_str(exprty_type(operand)),
@@ -671,8 +678,10 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
-      result = (exprty_t){
-          .kind = target, .name = expr->cast.target.name, .ok = operand.ok};
+      result = (exprty_t){.kind = target,
+                          .name = expr->cast.target.name,
+                          .element = expr->cast.target.element,
+                          .ok = operand.ok};
     }
     break;
   }
@@ -1030,6 +1039,47 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     result = (exprty_t){.kind = TYPE_ENUM, .name = enm->name, .ok = true};
     break;
   }
+  case EXPR_SLICE_RANGE: {
+    exprty_t base = check_expr(sema, expr->slice_range.base,
+                               type_from_kind(TYPE_UNKNOWN));
+    exprty_t start =
+        check_expr(sema, expr->slice_range.start, type_from_kind(TYPE_I64));
+    exprty_t end =
+        check_expr(sema, expr->slice_range.end, type_from_kind(TYPE_I64));
+    if (!base.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (base.kind != TYPE_ARRAY && base.kind != TYPE_SLICE &&
+        base.kind != TYPE_STR) {
+      diag_error(sema->src, expr->line, expr->col, "cannot slice %s",
+                 type_to_str(exprty_type(base)));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (start.ok && !type_is_integer(start.kind)) {
+      diag_error(sema->src, expr->slice_range.start->line,
+                 expr->slice_range.start->col,
+                 "slice bound must be an integer, got %s",
+                 type_kind_to_str(start.kind));
+      sema->had_error = true;
+    }
+    if (end.ok && !type_is_integer(end.kind)) {
+      diag_error(sema->src, expr->slice_range.end->line,
+                 expr->slice_range.end->col,
+                 "slice bound must be an integer, got %s",
+                 type_kind_to_str(end.kind));
+      sema->had_error = true;
+    }
+    if (base.kind == TYPE_STR) {
+      result = (exprty_t){.kind = TYPE_STR, .ok = start.ok && end.ok};
+    } else {
+      result = (exprty_t){
+          .kind = TYPE_SLICE, .element = base.element, .ok = start.ok && end.ok};
+    }
+    break;
+  }
   case EXPR_MATCH: {
     exprty_t scrut = check_expr(sema, expr->match_expr.scrutinee,
                                 type_from_kind(TYPE_UNKNOWN));
@@ -1344,6 +1394,13 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_BINDING: {
     resolve_qualified_type(sema, &stmt->binding.type);
     resolve_enum_type(sema, &stmt->binding.type);
+    if (stmt->binding.init == NULL &&
+        stmt->binding.type.kind == TYPE_UNKNOWN) {
+      diag_error(sema->src, stmt->line, stmt->col,
+                 "binding '%s' without an initializer needs a type",
+                 stmt->binding.name);
+      sema->had_error = true;
+    }
     if (stmt->binding.init != NULL) {
       exprty_t init =
           check_expr(sema, stmt->binding.init, stmt->binding.type);

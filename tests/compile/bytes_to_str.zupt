@@ -1,0 +1,15 @@
+--TEST--
+a []u8 slice casts to str: bytes read into a buffer become printable text
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let storage: [5]u8 = [104, 105, 33, 0, 0];
+  let s: str = storage[0..3] as str;
+  std.io.println(s);
+  return s.len as i32;
+}
+--EXPECT--
+hi!
+--EXIT--
+3

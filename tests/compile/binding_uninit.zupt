@@ -1,0 +1,14 @@
+--TEST--
+a binding without an initializer is zero-initialized: arrays, scalars, and bools read back as zero
+--FILE--
+pub fn main(): i32 {
+  let buf: [4]u8;
+  let n: i32;
+  let b: bool;
+  if b {
+    return 1;
+  }
+  return (buf[0] as i32) + (buf[3] as i32) + n;
+}
+--EXIT--
+0

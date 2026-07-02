@@ -1,0 +1,6 @@
+// Raw POSIX syscall wrappers. Flag values below are Linux; on macOS
+// O_CREAT=512, O_TRUNC=1024, O_APPEND=8 — this file is the porting surface.
+pub extern fn open(path: cstr, flags: i32, mode: i32): i32;
+pub extern fn close(fd: i32): i32;
+pub extern fn write(fd: i32, buf: cstr, count: i64): i64;
+pub extern fn read(fd: i32, buf: cstr, count: i64): i64;

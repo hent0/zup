@@ -338,6 +338,12 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       return 1;
     }
     return collect_expr(ctx, expr->index.index);
+  case EXPR_SLICE_RANGE:
+    if (collect_expr(ctx, expr->slice_range.base) != 0 ||
+        collect_expr(ctx, expr->slice_range.start) != 0) {
+      return 1;
+    }
+    return collect_expr(ctx, expr->slice_range.end);
   case EXPR_IMPORT:
     NOT_IMPLEMENTED;
     return 1;
@@ -482,6 +488,25 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest);
 static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr);
 static void emit_slice_from_array(ctx_t *ctx, const char *dest, expr_t *arr);
 
+static const char *zero_value(TypeKind kind) {
+  switch (kind) {
+  case TYPE_BOOL:
+    return "false";
+  case TYPE_F32:
+  case TYPE_F64:
+    return "0.0";
+  case TYPE_CSTR:
+    return "null";
+  case TYPE_STR:
+  case TYPE_SLICE:
+  case TYPE_ARRAY:
+  case TYPE_STRUCT:
+    return "zeroinitializer";
+  default:
+    return "0";
+  }
+}
+
 static unsigned type_bits(TypeKind kind) {
   switch (kind) {
   case TYPE_I8:
@@ -507,6 +532,17 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr);
 static const char *ir_type(ctx_t *ctx, type_t type);
 static value_t emit_value(ctx_t *ctx, expr_t *expr);
 static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest);
+
+static const char *widen_index(ctx_t *ctx, value_t v) {
+  if (type_bits(v.type.kind) >= 64) {
+    return v.ref;
+  }
+  unsigned int reg = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = %s %s %s to i64\n", reg,
+          type_is_signed_integer(v.type.kind) ? "sext" : "zext",
+          type_kind_to_ir(v.type.kind), v.ref);
+  return arena_format(ctx->arena, "%%%u", reg);
+}
 
 static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   switch (expr->kind) {
@@ -572,6 +608,14 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr);
 
 // TODO: Probably needs refatoring
 static value_t emit_cast(ctx_t *ctx, expr_t *expr) {
+  if (is_aggregate(expr->cast.operand->type.kind) &&
+      is_aggregate(expr->cast.target.kind)) {
+    const char *addr = emit_addr(ctx, expr->cast.operand);
+    if (addr == NULL) {
+      addr = emit_value(ctx, expr->cast.operand).ref;
+    }
+    return (value_t){.type = expr->cast.target, .ref = addr};
+  }
   value_t operand = emit_value(ctx, expr->cast.operand);
   TypeKind from = operand.type.kind;
   TypeKind to = expr->cast.target.kind;
@@ -859,6 +903,68 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }
+  case EXPR_SLICE_RANGE: {
+    expr_t *base = expr->slice_range.base;
+    const char *base_addr = NULL;
+    const char *dataref = NULL;
+    if (base->kind == EXPR_STRING) {
+      dataref =
+          arena_format(ctx->arena, "@.str.%d", string_index(ctx, base));
+    } else {
+      base_addr = emit_addr(ctx, base);
+      if (base_addr == NULL) {
+        base_addr = emit_value(ctx, base).ref;
+      }
+    }
+
+    value_t start = emit_value(ctx, expr->slice_range.start);
+    value_t end = emit_value(ctx, expr->slice_range.end);
+    const char *s = widen_index(ctx, start);
+    const char *e = widen_index(ctx, end);
+
+    const char *elem_ir = base->type.kind == TYPE_STR
+                              ? "i8"
+                              : ir_type(ctx, *base->type.element);
+    if (base->type.kind == TYPE_ARRAY) {
+      unsigned int p = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i64 0, i64 %s\n",
+              p, ir_type(ctx, base->type), base_addr, s);
+      dataref = arena_format(ctx->arena, "%%%u", p);
+    } else if (dataref == NULL) {
+      unsigned int pfield = ctx->reg++;
+      fprintf(ctx->out,
+              "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n",
+              pfield, base_addr);
+      unsigned int loaded = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", loaded, pfield);
+      unsigned int p = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i64 %s\n", p,
+              elem_ir, loaded, s);
+      dataref = arena_format(ctx->arena, "%%%u", p);
+    } else {
+      unsigned int p = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i64 %s\n", p,
+              elem_ir, dataref, s);
+      dataref = arena_format(ctx->arena, "%%%u", p);
+    }
+
+    unsigned int len = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = sub i64 %s, %s\n", len, e, s);
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
+    unsigned int f0 = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 0\n",
+            f0, slot);
+    fprintf(ctx->out, "  store ptr %s, ptr %%%u\n", dataref, f0);
+    unsigned int f1 = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 1\n",
+            f1, slot);
+    fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", len, f1);
+    return (value_t){.type = expr->type,
+                     .ref = arena_format(ctx->arena, "%%%u", slot)};
+  }
   case EXPR_MATCH:
     return emit_match(ctx, expr, NULL);
   default:
@@ -927,6 +1033,9 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       name = mangle(ctx,
                     arena_format(ctx->arena, "%s.%s", recv->type.name, member));
       self = emit_addr(ctx, recv);
+      if (self == NULL) {
+        self = emit_value(ctx, recv).ref;
+      }
     }
   } else {
     const char *callee = call->call.callee->id.name;
@@ -1207,6 +1316,9 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
     return;
   }
   const char *src = emit_addr(ctx, expr);
+  if (src == NULL) {
+    src = emit_value(ctx, expr).ref;
+  }
   unsigned int reg = ctx->reg++;
   fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg, ir_type(ctx, expr->type),
           src);
@@ -1408,7 +1520,11 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
 
       expr_t *init = stmt->binding.init;
-      if (is_aggregate(stmt->binding.type.kind)) {
+      if (init == NULL) {
+        fprintf(ctx->out, "  store %s %s, ptr %s\n",
+                ir_type(ctx, stmt->binding.type),
+                zero_value(stmt->binding.type.kind), ptr);
+      } else if (is_aggregate(stmt->binding.type.kind)) {
         emit_aggregate_into(ctx, ptr, stmt->binding.type, init);
       } else {
         value_t value = emit_value(ctx, init);

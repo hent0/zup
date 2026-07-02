@@ -1,0 +1,34 @@
+--TEST--
+std.io.File writes to disk, invalidates on close, and reads back through a []u8 buffer
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.io.stdout().writeln("chained");
+
+  let f: std.io.File = std.io.open("/tmp/zup_file_test.txt", .Write);
+  if !f.isvalid() {
+    return 1;
+  }
+  f.writeln("roundtrip");
+  f.close();
+  if f.isvalid() {
+    return 2;
+  }
+
+  let back: std.io.File = std.io.open("/tmp/zup_file_test.txt", .Read);
+  let storage: [4]u8 = [0, 0, 0, 0];
+  let buf: []u8 = storage;
+  let n: i64 = back.read(buf);
+  back.close();
+  if n == 4 {
+    return storage[0] as i32;
+  }
+  return 3;
+}
+--CLEANUP--
+rm -f /tmp/zup_file_test.txt
+--EXPECT--
+chained
+--EXIT--
+114

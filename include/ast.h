@@ -81,6 +81,7 @@ typedef enum {
   EXPR_ENUM_LITERAL,
   EXPR_ARRAY,
   EXPR_INDEX,
+  EXPR_SLICE_RANGE,
   EXPR_MATCH,
   EXPR_IMPORT,
 } ExprKind;
@@ -162,6 +163,11 @@ struct expr {
       expr_t *base;
       expr_t *index;
     } index;
+    struct {
+      expr_t *base;
+      expr_t *start;
+      expr_t *end;
+    } slice_range;
     struct {
       expr_t *scrutinee;
       match_arm_t *arms;
@@ -352,6 +358,8 @@ expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
 expr_t *ast_enum_literal_init(token_t name, arena_t *arena);
 expr_t *ast_array_init(token_t token, arena_t *arena);
 expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena);
+expr_t *ast_slice_range_init(expr_t *base, expr_t *start, expr_t *end,
+                             arena_t *arena);
 expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena);
 match_arm_t *ast_match_arm_init(arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);

@@ -1,18 +1,92 @@
+const sys = import("sys.zup");
+
 pub extern fn printf(fmt: cstr, ...): i32;
-extern fn dprintf(fd: i32, fmt: cstr, ...): i32;
+
+const stdin_fd = 0;
+const stdout_fd = 1;
+const stderr_fd = 2;
+
+pub enum Mode {
+  Read,
+  Write,
+  Append,
+}
+
+pub struct File {
+  pub fd: i32,
+
+  pub fn write(self, s: str): i64 {
+    return sys.write(self.fd, s.ptr, s.len);
+  }
+
+  pub fn writeln(self, s: str) {
+    self.write(s);
+    self.write("\n");
+  }
+
+  pub fn read(self, buf: []u8): i64 {
+    return sys.read(self.fd, buf.ptr, buf.len);
+  }
+
+  pub fn readln(self, buf: []u8): str {
+    let n: i64 = sys.read(self.fd, buf.ptr, buf.len);
+    if n <= 0 {
+      return "";
+    }
+    let i: i64 = 0;
+    while i < n {
+      if buf[i] == '\n' {
+        return buf[0..i] as str;
+      }
+      i = i + 1;
+    }
+    return buf[0..n] as str;
+  }
+
+  pub fn isvalid(self): bool {
+    return self.fd >= 0;
+  }
+
+  pub fn close(self) {
+    sys.close(self.fd);
+    self.fd = -1;
+  }
+}
+
+pub fn open(path: str, mode: Mode): File {
+  let flags: i32 = match mode {
+    .Read => 0,
+    .Write => 577,
+    .Append => 1089,
+  };
+
+  return File{fd: sys.open(path.ptr, flags, 438)};
+}
+
+pub fn stdin(): File {
+  return File{fd: stdin_fd};
+}
+
+pub fn stdout(): File {
+  return File{fd: stdout_fd};
+}
+
+pub fn stderr(): File {
+  return File{fd: stderr_fd};
+}
 
 pub fn println(fmt: str) {
-  printf("%s\n", fmt);
+  stdout().writeln(fmt);
 }
 
 pub fn print(fmt: str) {
-  printf("%s", fmt);
+  stdout().write(fmt);
 }
 
 pub fn printerrln(fmt: str) {
-  dprintf(2, "%s\n", fmt);
+  stderr().writeln(fmt);
 }
 
 pub fn printerr(fmt: str) {
-  dprintf(2, "%s", fmt);
+  stderr().write(fmt);
 }

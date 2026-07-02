@@ -405,8 +405,14 @@ static expr_t *parse_postfix(parser_t *parser) {
     } else if (check(parser, TOKEN_LBRACKET)) {
       advance(parser);
       expr_t *index = parse_expr(parser);
-      expect(parser, TOKEN_RBRACKET, "expected ']' after index");
-      expr = ast_index_init(expr, index, parser->arena);
+      if (match(parser, TOKEN_DOT_DOT)) {
+        expr_t *end = parse_expr(parser);
+        expect(parser, TOKEN_RBRACKET, "expected ']' after slice range");
+        expr = ast_slice_range_init(expr, index, end, parser->arena);
+      } else {
+        expect(parser, TOKEN_RBRACKET, "expected ']' after index");
+        expr = ast_index_init(expr, index, parser->arena);
+      }
     } else {
       break;
     }

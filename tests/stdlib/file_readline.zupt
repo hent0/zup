@@ -1,0 +1,21 @@
+--TEST--
+File.readln returns the first line of the read chunk as a str, without the newline
+--PREPARE--
+printf 'first line\nsecond\n' > /tmp/zup_readline.txt
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let f: std.io.File = std.io.open("/tmp/zup_readline.txt", .Read);
+  let buf: [32]u8;
+  let line: str = f.readln(buf);
+  f.close();
+  std.io.println(line);
+  return line.len as i32;
+}
+--CLEANUP--
+rm -f /tmp/zup_readline.txt
+--EXPECT--
+first line
+--EXIT--
+10

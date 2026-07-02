@@ -1,0 +1,17 @@
+--TEST--
+range slicing works on arrays, slices, and strs; the result aliases the base
+--FILE--
+pub fn main(): i32 {
+  const xs: [5]i32 = [10, 20, 30, 40, 50];
+  let mid: []i32 = xs[1..4];
+  let sum: i32 = 0;
+  for x in mid {
+    sum = sum + x;
+  }
+  let again: []i32 = mid[1..2];
+  let msg: str = "hello world";
+  let word: str = msg[6..11];
+  return sum + again[0] + (word.len as i32);
+}
+--EXIT--
+125

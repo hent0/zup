@@ -444,6 +444,20 @@ expr_t *ast_index_init(expr_t *base, expr_t *index, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_slice_range_init(expr_t *base, expr_t *start, expr_t *end,
+                             arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_SLICE_RANGE;
+  expr->line = base->line;
+  expr->col = base->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->slice_range.base = base;
+  expr->slice_range.start = start;
+  expr->slice_range.end = end;
+  return expr;
+}
+
 expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_MATCH;
@@ -768,6 +782,12 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Index\n");
     dump_expr(expr->index.base, depth + 1);
     dump_expr(expr->index.index, depth + 1);
+    break;
+  case EXPR_SLICE_RANGE:
+    printf("SliceRange\n");
+    dump_expr(expr->slice_range.base, depth + 1);
+    dump_expr(expr->slice_range.start, depth + 1);
+    dump_expr(expr->slice_range.end, depth + 1);
     break;
   case EXPR_MATCH:
     printf("Match\n");

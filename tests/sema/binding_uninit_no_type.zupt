@@ -1,0 +1,11 @@
+--TEST--
+a binding without an initializer must have a type annotation
+--FILE--
+pub fn main(): i32 {
+  let x;
+  return 0;
+}
+--EXPECTERR--
+zup: error: binding 'x' without an initializer needs a type [2:3]
+--EXIT--
+1
