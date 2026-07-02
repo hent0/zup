@@ -10,6 +10,7 @@ enum {
   OPTIONS_TARGET_IR,
   OPTION_TOKENIZE,
   OPTION_AST,
+  OPTION_STATIC,
   OPTION_KEEP_IR,
   OPTION_VERSION,
   OPTION_HELP,
@@ -19,6 +20,7 @@ static const struct option long_options[] = {
     {"ir", no_argument, 0, OPTIONS_TARGET_IR},
     {"tokenize", no_argument, 0, OPTION_TOKENIZE},
     {"ast", no_argument, 0, OPTION_AST},
+    {"static", no_argument, 0, OPTION_STATIC},
     {"keep-ir", no_argument, 0, OPTION_KEEP_IR},
     {"version", no_argument, 0, OPTION_VERSION},
     {"help", no_argument, 0, OPTION_HELP},
@@ -28,20 +30,14 @@ static const struct option long_options[] = {
 static void print_usage(FILE *stream) {
   fprintf(stream,
           "Usage: zup [OPTION...] <file>\n"
-          "  -o <file>\n"
-          "                     Output path\n"
-          "  -tokenize\n"
-          "                     Output only tokens\n"
-          "  -ir\n"
-          "                     Output only LLVM IR\n"
-          "  -ast\n"
-          "                     Dump ast\n"
-          "  -keep-ir\n"
-          "                     Doesn't remove generare LLVM IR after compile\n"
-          "  -help\n"
-          "                     Give this help list\n"
-          "  -version\n"
-          "                     Print version\n");
+          "  -o <file>          Output path\n"
+          "  -tokenize          Output only tokens\n"
+          "  -ir                Output only LLVM IR\n"
+          "  -ast               Dump ast\n"
+          "  -static            Compile static\n"
+          "  -keep-ir           Doesn't remove generare LLVM IR after compile\n"
+          "  -help              Give this help list\n"
+          "  -version           Print version\n");
 }
 
 static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
@@ -49,6 +45,7 @@ static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
   opts->output = NULL;
   opts->mode = MODE_COMPILE;
   opts->keep_ir = false;
+  opts->compile_static = false;
 
   int c;
   while ((c = getopt_long_only(argc, argv, "o:", long_options, NULL)) != -1) {
@@ -65,6 +62,8 @@ static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
     case OPTION_AST:
       opts->mode = MODE_AST;
       break;
+    case OPTION_STATIC:
+      opts->compile_static = true;
     case OPTION_KEEP_IR:
       opts->keep_ir = true;
       break;

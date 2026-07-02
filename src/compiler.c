@@ -100,7 +100,7 @@ int compiler_compile(compiler_t *compiler, const options_t *opts) {
         opts->output ? opts->output
                      : with_ll_ext(basename_stem(opts->input, &compiler->arena),
                                    &compiler->arena);
-    if (generate_ir(compilation, &compiler->arena,output) == NULL) {
+    if (generate_ir(compilation, &compiler->arena, output) == NULL) {
       return 1;
     }
     return 0;
@@ -111,14 +111,14 @@ int compiler_compile(compiler_t *compiler, const options_t *opts) {
                              : basename_stem(opts->input, &compiler->arena);
     const char *ir = with_ll_ext(output, &compiler->arena);
 
-    if (generate_ir(compilation, &compiler->arena,ir) == NULL) {
+    if (generate_ir(compilation, &compiler->arena, ir) == NULL) {
       return 1;
     }
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
-             "clang -Qunused-arguments -Wno-override-module %s -o %s", ir,
-             output);
+             "clang -Qunused-arguments -Wno-override-module %s%s -o %s",
+             opts->compile_static ? "-static " : "", ir, output);
 
     if (system(cmd) != 0) {
       diag_error_nofile("failed to link '%s'", output);

@@ -16,6 +16,7 @@ typedef struct {
   const char *output;
   CompileMode mode;
   bool keep_ir;
+  bool compile_static;
 } options_t;
 
 typedef struct {
