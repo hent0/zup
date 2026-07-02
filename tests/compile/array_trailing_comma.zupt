@@ -1,0 +1,12 @@
+--TEST--
+an array literal may end with a trailing comma
+--FILE--
+pub fn main(): i32 {
+  const xs: []i32 = [
+    4,
+    7,
+  ];
+  return xs[1];
+}
+--EXIT--
+7

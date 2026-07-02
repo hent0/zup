@@ -686,6 +686,17 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     break;
   }
   case EXPR_STRUCT_LITERAL: {
+    if (expr->struct_literal.type_name == NULL) {
+      if (expected.kind == TYPE_STRUCT && expected.name != NULL) {
+        expr->struct_literal.type_name = expected.name;
+      } else {
+        diag_error(sema->src, expr->line, expr->col,
+                   "cannot infer struct type for literal");
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+    }
     if (expr->struct_literal.module != NULL) {
       decl_t *import =
           modtab_lookup(sema->modules, expr->struct_literal.module);
@@ -1039,11 +1050,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     break;
   }
   case EXPR_ARRAY: {
+    type_t elem_hint =
+        (expected.kind == TYPE_ARRAY || expected.kind == TYPE_SLICE) &&
+                expected.element != NULL
+            ? *expected.element
+            : type_from_kind(TYPE_UNKNOWN);
     type_t elem = {.kind = TYPE_UNKNOWN};
     size_t count = 0;
     bool ok = true;
     for (expr_t *e = expr->array.elements; e != NULL; e = e->next) {
-      exprty_t et = check_expr(sema, e, type_from_kind(TYPE_UNKNOWN));
+      exprty_t et = check_expr(sema, e, elem_hint);
       type_t ety = {.kind = et.kind,
                     .name = et.name,
                     .element = et.element,
@@ -1403,6 +1419,10 @@ static size_t count_bindings(stmt_t *body) {
 }
 
 static void resolve_qualified_type(sema_t *sema, type_t *t) {
+  if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE) {
+    resolve_qualified_type(sema, t->element);
+    return;
+  }
   if (t->kind != TYPE_STRUCT || t->module == NULL) {
     return;
   }

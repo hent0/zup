@@ -1,0 +1,23 @@
+--TEST--
+a slice of imported structs accepts anonymous literals whose enum fields infer across the module boundary
+--PREPARE--
+printf 'pub enum Kind {\n  Section,\n  Eof,\n}\n\npub struct Token {\n  pub kind: Kind,\n}\n' > "${TMPDIR:-/tmp}/zup_tok.zup"
+--FILE--
+const token = import("zup_tok.zup");
+
+pub fn main(): i32 {
+  const tokens: []token.Token = [
+    {kind: .Section},
+    {kind: .Eof},
+  ];
+  if tokens[0].kind == .Section {
+    if tokens[1].kind == .Eof {
+      return 5;
+    }
+  }
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_tok.zup"
+--EXIT--
+5

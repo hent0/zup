@@ -1,0 +1,11 @@
+--TEST--
+an anonymous struct literal without a struct-typed context cannot infer its type
+--FILE--
+pub fn main(): i32 {
+  let x = {v: 1};
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot infer struct type for literal [2:11]
+--EXIT--
+1

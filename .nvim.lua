@@ -17,7 +17,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- Keywords
     vim.fn.matchadd("Keyword",
-      [[\v<(pub|fn|return|as|if|else|const|let|while|for|break|continue|in|extern|struct|enum)>]])
+      [[\v<(pub|fn|return|as|if|else|const|let|while|for|break|continue|in|extern|struct|enum|match)>]])
     -- Types
     vim.fn.matchadd("Type", [[\v<(i8|u8|i16|u16|i32|u32|i64|u64|f32|f64|void|bool|cstr|str|string)>]])
     -- Slice/array type prefixes: []T and [N]T (highlight the brackets when before a type)
@@ -29,7 +29,7 @@ vim.api.nvim_create_autocmd("FileType", {
     -- Comments (line and block, block may span multiple lines)
     vim.fn.matchadd("Comment", [[\v\/\/.*$]])
     vim.fn.matchadd("Comment", [[\v\/\*\_.{-}\*\/]])
-    -- Strings
-    vim.fn.matchadd("String", [[\v".{-}"]])
+    -- Strings (may span multiple lines; \_[^"] matches any char including newline except a closing quote)
+    vim.fn.matchadd("String", [[\v"%(\\.|\_[^"])*"]])
   end,
 })

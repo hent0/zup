@@ -323,12 +323,24 @@ static expr_t *parse_primary(parser_t *parser) {
     expr_t *inner = parse_expr(parser);
     expect(parser, TOKEN_RPAREN, "expected ')'");
     return inner;
+  case TOKEN_LBRACE: {
+    if (parser->no_struct_literal) {
+      parse_error(parser, "expected an expression");
+      return NULL;
+    }
+    expr_t *lit = ast_struct_literal_init(token, parser->arena);
+    lit->struct_literal.type_name = NULL;
+    return parse_struct_body(parser, lit);
+  }
   case TOKEN_LBRACKET: {
     advance(parser);
     expr_t *array = ast_array_init(token, parser->arena);
     expr_t *tail = NULL;
     if (!check(parser, TOKEN_RBRACKET)) {
       do {
+        if (check(parser, TOKEN_RBRACKET)) {
+          break;
+        }
         expr_t *elem = parse_expr(parser);
         if (elem == NULL) {
           break;

@@ -1,0 +1,17 @@
+--TEST--
+an anonymous struct literal infers its type from the annotated binding and from array element context
+--FILE--
+struct P {
+  v: i32,
+}
+
+pub fn main(): i32 {
+  const p: P = {v: 2};
+  const xs: []P = [
+    {v: 4},
+    {v: 7},
+  ];
+  return p.v + xs[0].v + xs[1].v;
+}
+--EXIT--
+13
