@@ -1,0 +1,32 @@
+--TEST--
+'null' is a valid constant default for optional struct fields, parameter defaults, and globals
+--FILE--
+const std = import("std");
+
+const cached: ?i32 = null;
+
+struct Token {
+  kind: i32,
+  value: ?str = null,
+}
+
+fn describe(t: Token, suffix: ?str = null): str {
+  return t.value ?? suffix ?? "none";
+}
+
+pub fn main(): i32 {
+  let bare: Token = Token{kind: 1};
+  let named: Token = Token{kind: 2, value: "ident"};
+
+  std.io.println("{}", describe(bare));
+  std.io.println("{}", describe(bare, "fallback"));
+  std.io.println("{}", describe(named));
+
+  return (cached ?? 7) + bare.kind;
+}
+--EXPECT--
+none
+fallback
+ident
+--EXIT--
+8

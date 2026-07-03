@@ -1372,13 +1372,14 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
 
   for (; param != NULL && param->default_value != NULL; param = param->next) {
     expr_t *def = param->default_value;
-    if (param->type.kind == TYPE_STR && def->kind == EXPR_STRING) {
+    if (is_aggregate(param->type.kind)) {
       unsigned int slot = ctx->reg++;
-      fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
+      fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
+              ir_type(ctx, param->type));
       const char *tmp = arena_format(ctx->arena, "%%%u", slot);
-      emit_struct_into(ctx, tmp, def);
+      emit_aggregate_into(ctx, tmp, param->type, def);
       argref[i] = tmp;
-      argtype[i] = (type_t){.kind = TYPE_STR};
+      argtype[i] = param->type;
       argbyval[i] = true;
     } else {
       value_t v = emit_value(ctx, def);
@@ -2475,6 +2476,13 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_GLOBAL: {
+    if (decl->global.init->kind == EXPR_NULL) {
+      fprintf(ctx->out, "@%s = %s%s %s zeroinitializer\n", decl->name,
+              decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
+              decl->global.mutable ? "global" : "constant",
+              ir_type(ctx, decl->global.type));
+      return 0;
+    }
     value_t value = emit_value(ctx, decl->global.init);
     fprintf(ctx->out, "@%s = %s%s %s %s\n", decl->name,
             decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
