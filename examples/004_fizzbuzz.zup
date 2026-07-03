@@ -11,7 +11,7 @@ pub fn main(): i32 {
     } else if i % 5 == 0 {
         std.io.println("Buzz");
     } else {
-        std.io.printf("%d\n", i);
+        std.io.println("{}", i);
     }
 
     i = i + 1;

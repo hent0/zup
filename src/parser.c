@@ -883,13 +883,27 @@ static type_t parse_return_type(parser_t *parser) {
   return (type_t){.kind = TYPE_VOID};
 }
 
-static param_t *parse_param(parser_t *parser) {
+static param_t *parse_param(parser_t *parser, bool *variadic) {
   bool mutable = !match(parser, TOKEN_CONST);
   token_t id = expect(parser, TOKEN_ID, "expected identifier");
   expect(parser, TOKEN_COLON, "expected ':' after identifier");
-  type_t type = parse_type(parser);
-  if (type.kind == TYPE_UNKNOWN) {
-    return NULL;
+
+  type_t type;
+  if (check(parser, TOKEN_DOT_DOT_DOT)) {
+    token_t dots = advance(parser);
+    type_t *element = arena_alloc(parser->arena, sizeof(type_t));
+    *element = (type_t){
+        .kind = TYPE_STRUCT, .name = "Arg", .line = dots.line, .col = dots.col};
+    type = (type_t){.kind = TYPE_SLICE,
+                    .element = element,
+                    .line = dots.line,
+                    .col = dots.col};
+    *variadic = true;
+  } else {
+    type = parse_type(parser);
+    if (type.kind == TYPE_UNKNOWN) {
+      return NULL;
+    }
   }
 
   expr_t *default_value = NULL;
@@ -929,7 +943,8 @@ static void parse_param_list(parser_t *parser, decl_t *fn,
       break;
     }
 
-    param_t *param = parse_param(parser);
+    bool named_variadic = false;
+    param_t *param = parse_param(parser, &named_variadic);
     if (param == NULL) {
       break;
     }
@@ -941,6 +956,16 @@ static void parse_param_list(parser_t *parser, decl_t *fn,
     }
     p_tail = param;
     fn->fn.params_count++;
+
+    if (named_variadic) {
+      fn->fn.variadic = true;
+      if (!check(parser, TOKEN_RPAREN)) {
+        diag_error(parser->src, parser->current.line, parser->current.col,
+                   "the variadic parameter must be last");
+        parser->had_error = true;
+      }
+      break;
+    }
   }
   expect(parser, TOKEN_RPAREN, "expected ')' after parameters");
 }
@@ -1014,9 +1039,15 @@ static decl_t *parse_method(parser_t *parser, char *struct_name,
   }
 
   while (!check(parser, TOKEN_RPAREN)) {
-    param_t *p = parse_param(parser);
+    bool named_variadic = false;
+    param_t *p = parse_param(parser, &named_variadic);
     if (p == NULL) {
       break;
+    }
+    if (named_variadic) {
+      diag_error(parser->src, parser->current.line, parser->current.col,
+                 "methods cannot take variadic parameters");
+      parser->had_error = true;
     }
     if (tail == NULL) {
       fn->fn.params = p;

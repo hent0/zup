@@ -18,8 +18,8 @@ fn name(c: Color): str {
 }
 
 pub fn main(): i32 {
-  std.io.printf("%s\n", name(Color.Green));
-  std.io.printf("%s\n", name(Color.Blue));
+  std.io.println("{}", name(Color.Green));
+  std.io.println("{}", name(Color.Blue));
   return 0;
 }
 --EXPECT--

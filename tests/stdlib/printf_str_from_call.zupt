@@ -1,7 +1,7 @@
 --TEST--
 a str returned by a method call can be passed to a variadic %s without a named binding
 --FILE--
-const std = import("std");
+extern fn printf(fmt: cstr, ...): i32;
 
 struct Greeter {
   fn greet(self): str {
@@ -11,7 +11,7 @@ struct Greeter {
 
 pub fn main(): i32 {
   let g: Greeter = Greeter {};
-  std.io.printf("%s\n", g.greet());
+  printf("%s\n", g.greet());
   return 0;
 }
 --EXPECT--

@@ -380,14 +380,40 @@ static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   }
 }
 
+static bool vararg_boxable(TypeKind kind) {
+  return type_is_integer(kind) || type_is_float(kind) || kind == TYPE_BOOL ||
+         kind == TYPE_STR || kind == TYPE_ENUM;
+}
+
+static type_t qualify_param_type(sema_t *sema, type_t t, const char *stem) {
+  if (stem == NULL) {
+    return t;
+  }
+  if (t.kind == TYPE_STRUCT && t.name != NULL &&
+      strchr(t.name, '.') == NULL) {
+    t.name = arena_format(sema->arena, "%s.%s", stem, t.name);
+    return t;
+  }
+  if ((t.kind == TYPE_SLICE || t.kind == TYPE_ARRAY ||
+       t.kind == TYPE_OPTIONAL) &&
+      t.element != NULL) {
+    type_t *element = arena_alloc(sema->arena, sizeof(type_t));
+    *element = qualify_param_type(sema, *t.element, stem);
+    t.element = element;
+  }
+  return t;
+}
+
 static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
-                              const char *name) {
+                              const char *name, const char *stem) {
+  bool boxed_variadic = fn->fn.variadic && !fn->fn.is_extern;
+  size_t fixed =
+      boxed_variadic ? fn->fn.params_count - 1 : fn->fn.params_count;
   if (fn->fn.variadic) {
-    if (call->call.arg_count < fn->fn.params_count) {
+    if (call->call.arg_count < fixed) {
       diag_error(sema->src, call->line, call->col,
                  "'%s' expects at least %zu argument%s but got %zu", name,
-                 fn->fn.params_count, fn->fn.params_count == 1 ? "" : "s",
-                 call->call.arg_count);
+                 fixed, fixed == 1 ? "" : "s", call->call.arg_count);
       sema->had_error = true;
     }
   } else {
@@ -415,15 +441,28 @@ static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
   }
 
   param_t *param = fn->fn.params;
-  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
-    exprty_t at = check_expr(
-        sema, arg, param ? param->type : type_from_kind(TYPE_UNKNOWN));
+  size_t index = 0;
+  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next, index++) {
+    if (boxed_variadic && index >= fixed) {
+      exprty_t at = check_expr(sema, arg, type_from_kind(TYPE_UNKNOWN));
+      if (at.ok && !vararg_boxable(at.kind)) {
+        diag_error(sema->src, arg->line, arg->col,
+                   "cannot pass %s as a variadic argument",
+                   type_to_str(exprty_type(at)));
+        sema->had_error = true;
+      }
+      continue;
+    }
+    type_t ptype = param != NULL
+                       ? qualify_param_type(sema, param->type, stem)
+                       : type_from_kind(TYPE_UNKNOWN);
+    exprty_t at = check_expr(sema, arg, ptype);
     if (param != NULL) {
-      if (at.ok && !assignable(param->type, at)) {
+      if (at.ok && !assignable(ptype, at)) {
         diag_error(sema->src, call->line, call->col,
                    "cannot pass %s as argument '%s' of '%s' (expected %s)",
                    type_to_str(exprty_type(at)), param->name, name,
-                   type_to_str(param->type));
+                   type_to_str(ptype));
         sema->had_error = true;
       }
       param = param->next;
@@ -446,7 +485,7 @@ static exprty_t check_call(sema_t *sema, expr_t *call) {
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
-  return check_fn_call(sema, call, fn, name);
+  return check_fn_call(sema, call, fn, name, NULL);
 }
 
 static exprty_t check_module_call(sema_t *sema, expr_t *call, module_t *mod,
@@ -469,7 +508,8 @@ static exprty_t check_module_call(sema_t *sema, expr_t *call, module_t *mod,
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
-  exprty_t result = check_fn_call(sema, call, fn, fn_name);
+  exprty_t result = check_fn_call(sema, call, fn, fn_name,
+                                  module_stem(mod->path, sema->arena));
   if (result.kind == TYPE_STRUCT && result.name != NULL &&
       strchr(result.name, '.') == NULL) {
     result.name = arena_format(
@@ -1782,6 +1822,21 @@ static void resolve_fn_signature(sema_t *sema, decl_t *fn) {
   for (param_t *param = fn->fn.params; param != NULL; param = param->next) {
     resolve_qualified_type(sema, &param->type);
     resolve_enum_type(sema, &param->type);
+
+    if (fn->fn.variadic && !fn->fn.is_extern && param->next == NULL &&
+        param->type.kind == TYPE_SLICE &&
+        param->type.element->kind == TYPE_STRUCT &&
+        typetab_lookup(sema->types, param->type.element->name) == NULL) {
+      for (const modnode_t *node = sema->reachable; node != NULL;
+           node = node->next) {
+        if (module_pub_struct(node->mod, param->type.element->name) != NULL) {
+          param->type.element->name = arena_format(
+              sema->arena, "%s.%s", module_stem(node->mod->path, sema->arena),
+              param->type.element->name);
+          break;
+        }
+      }
+    }
   }
   resolve_qualified_type(sema, &fn->fn.return_type);
   resolve_enum_type(sema, &fn->fn.return_type);

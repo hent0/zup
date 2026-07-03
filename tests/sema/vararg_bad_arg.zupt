@@ -1,0 +1,18 @@
+--TEST--
+only scalars, strs, and enums box as variadic arguments; a struct is rejected
+--FILE--
+const std = import("std");
+
+struct P {
+  v: i32,
+}
+
+pub fn main(): i32 {
+  let p: P = P{v: 1};
+  std.io.println("{}", p);
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot pass P as a variadic argument [9:24]
+--EXIT--
+1

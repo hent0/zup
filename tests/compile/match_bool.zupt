@@ -6,8 +6,8 @@ const std = import("std");
 pub fn main(): i32 {
   const b = true;
   match b {
-    true => std.io.printf("ok\n"),
-    false => std.io.printf("no\n"),
+    true => std.io.println("ok"),
+    false => std.io.println("no"),
   };
   return match b {
     true => 5,

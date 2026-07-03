@@ -1176,12 +1176,22 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
 
   size_t n = call->call.arg_count;
   size_t cap = n > param_count ? n : param_count;
+  if (cap < n + 1) {
+    cap = n + 1;
+  }
   const char **argref =
       arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
   type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (cap ? cap : 1));
   bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (cap ? cap : 1));
+  bool boxed_variadic = fn != NULL && fn->fn.variadic && !fn->fn.is_extern;
+  size_t fixed = boxed_variadic ? fn->fn.params_count - 1 : 0;
+  expr_t *rest = NULL;
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
+    if (boxed_variadic && i == fixed) {
+      rest = arg;
+      break;
+    }
     type_t ptype = param ? param->type : (type_t){.kind = TYPE_UNKNOWN};
     if (ptype.kind == TYPE_STR && arg->kind == EXPR_STRING) {
       unsigned int slot = ctx->reg++;
@@ -1262,6 +1272,88 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     }
     i++;
   }
+
+  if (boxed_variadic) {
+    const char *box = "{ i32, i64, double, { ptr, i64 } }";
+    size_t vcount =
+        call->call.arg_count > fixed ? call->call.arg_count - fixed : 0;
+    unsigned int arr = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca [%zu x %s]\n", arr, vcount, box);
+
+    size_t j = 0;
+    for (expr_t *arg = rest; arg != NULL; arg = arg->next, j++) {
+      unsigned int el = ctx->reg++;
+      fprintf(ctx->out,
+              "  %%%u = getelementptr [%zu x %s], ptr %%%u, i64 0, i64 %zu\n",
+              el, vcount, box, arr, j);
+
+      TypeKind kind = arg->type.kind;
+      int tag;
+      if (kind == TYPE_STR) {
+        tag = 3;
+      } else if (kind == TYPE_BOOL) {
+        tag = 4;
+      } else if (type_is_float(kind)) {
+        tag = 2;
+      } else if (type_is_signed_integer(kind) || kind == TYPE_ENUM) {
+        tag = 0;
+      } else {
+        tag = 1;
+      }
+      unsigned int kf = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 0\n",
+              kf, box, el);
+      fprintf(ctx->out, "  store i32 %d, ptr %%%u\n", tag, kf);
+
+      if (kind == TYPE_STR) {
+        unsigned int sf = ctx->reg++;
+        fprintf(ctx->out,
+                "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 3\n", sf, box,
+                el);
+        emit_aggregate_into(ctx, arena_format(ctx->arena, "%%%u", sf),
+                            (type_t){.kind = TYPE_STR}, arg);
+      } else if (type_is_float(kind)) {
+        value_t v = emit_value(ctx, arg);
+        const char *ref = v.ref;
+        if (kind == TYPE_F32) {
+          unsigned int ext = ctx->reg++;
+          fprintf(ctx->out, "  %%%u = fpext float %s to double\n", ext, ref);
+          ref = arena_format(ctx->arena, "%%%u", ext);
+        }
+        unsigned int ff = ctx->reg++;
+        fprintf(ctx->out,
+                "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 2\n", ff, box,
+                el);
+        fprintf(ctx->out, "  store double %s, ptr %%%u\n", ref, ff);
+      } else {
+        value_t v = emit_value(ctx, arg);
+        const char *ref = widen_index(ctx, v);
+        unsigned int inf = ctx->reg++;
+        fprintf(ctx->out,
+                "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 1\n", inf,
+                box, el);
+        fprintf(ctx->out, "  store i64 %s, ptr %%%u\n", ref, inf);
+      }
+    }
+
+    unsigned int sl = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", sl);
+    unsigned int p0 = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 0\n",
+            p0, sl);
+    fprintf(ctx->out, "  store ptr %%%u, ptr %%%u\n", arr, p0);
+    unsigned int p1 = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 1\n",
+            p1, sl);
+    fprintf(ctx->out, "  store i64 %zu, ptr %%%u\n", vcount, p1);
+
+    argref[i] = arena_format(ctx->arena, "%%%u", sl);
+    argtype[i] = (type_t){.kind = TYPE_SLICE};
+    argbyval[i] = true;
+    i++;
+  }
   n = i;
 
   const char *dest = sret_dest;
@@ -1272,13 +1364,30 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
 
   value_t result;
+  const char *callee_type = NULL;
+  if (fn != NULL && fn->fn.is_extern && fn->fn.variadic) {
+    const char *params = "";
+    const char *psep = "";
+    for (const param_t *p = fn->fn.params; p != NULL; p = p->next) {
+      const char *pt =
+          is_aggregate(p->type.kind) ? "ptr" : ir_type(ctx, p->type);
+      params = arena_format(ctx->arena, "%s%s%s", params, psep, pt);
+      psep = ", ";
+    }
+    callee_type = arena_format(
+        ctx->arena, "%s (%s%s...)",
+        call->type.kind == TYPE_VOID ? "void" : ir_type(ctx, call->type),
+        params, fn->fn.params_count > 0 ? ", " : "");
+  }
+
   if (ret_struct || call->type.kind == TYPE_VOID) {
-    fprintf(ctx->out, "  call void @%s(", name);
+    fprintf(ctx->out, "  call %s @%s(", callee_type ? callee_type : "void",
+            name);
     result = (value_t){.type = call->type, .ref = ret_struct ? dest : NULL};
   } else {
     unsigned int reg = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = call %s @%s(", reg, ir_type(ctx, call->type),
-            name);
+    fprintf(ctx->out, "  %%%u = call %s @%s(", reg,
+            callee_type ? callee_type : ir_type(ctx, call->type), name);
     result = (value_t){.type = call->type,
                        .ref = arena_format(ctx->arena, "%%%u", reg)};
   }

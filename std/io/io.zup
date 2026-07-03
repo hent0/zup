@@ -1,6 +1,22 @@
 const sys = import("sys.zup");
 
-pub extern fn printf(fmt: cstr, ...): i32;
+extern fn snprintf(buf: cstr, size: i64, fmt: cstr, ...): i32;
+
+// Don't reorder!
+enum ArgKind {
+  Int, // 0
+  Uint, // 1
+  Float, // 2
+  Str, // 3
+  Bool, // 4
+}
+
+struct Arg {
+  pub kind: ArgKind,
+  pub i: i64,
+  pub f: f64,
+  pub s: str,
+}
 
 const stdin_fd = 0;
 const stdout_fd = 1;
@@ -24,6 +40,40 @@ pub struct File {
     self.write("\n");
   }
 
+  pub fn writeInt(self, v: i64) {
+    if v == 0 {
+      self.write("0");
+      return;
+    }
+
+    let buf: [20]u8;
+    let i: i64 = 20;
+    let neg: bool = v < 0;
+    let x: i64 = v;
+    if neg {
+      x = 0 - x;
+    }
+
+    while x > 0 {
+      i = i - 1;
+      buf[i] = ((x % 10) + 48) as u8;
+      x = x / 10;
+    }
+
+    if neg {
+      i = i - 1;
+      buf[i] = '-';
+    }
+    self.write(buf[i..20] as str);
+  }
+
+  pub fn writeFloat(self, v: f64) {
+    let buf: [32]u8;
+    let view: []u8 = buf;
+    let n: i32 = snprintf(view.ptr, 32, "%g", v);
+    self.write(buf[0..n] as str);
+  }
+
   pub fn read(self, buf: []u8): i64 {
     return sys.read(self.fd, buf.ptr, buf.len);
   }
@@ -33,13 +83,16 @@ pub struct File {
     if n <= 0 {
       return null;
     }
+
     let i: i64 = 0;
     while i < n {
       if buf[i] == '\n' {
         return buf[0..i] as str;
       }
+
       i = i + 1;
     }
+
     return buf[0..n] as str;
   }
 
@@ -75,18 +128,68 @@ pub fn stderr(): File {
   return File{fd: stderr_fd};
 }
 
-pub fn println(fmt: str) {
-  stdout().writeln(fmt);
+pub fn println(fmt: str, args: ...) {
+  printv(stdout(), fmt, args);
+  stdout().write("\n");
 }
 
-pub fn print(fmt: str) {
-  stdout().write(fmt);
+pub fn print(fmt: str, args: ...) {
+  printv(stdout(), fmt, args);
 }
 
-pub fn printerrln(fmt: str) {
-  stderr().writeln(fmt);
+pub fn printerrln(fmt: str, args: ...) {
+  printv(stderr(), fmt, args);
+  stderr().write("\n");
 }
 
-pub fn printerr(fmt: str) {
-  stderr().write(fmt);
+pub fn printerr(fmt: str, args: ...) {
+  printv(stderr(), fmt, args);
+}
+
+fn boolStr(v: i64): str {
+  if v == 1 {
+    return "true";
+  }
+
+  return "false";
+}
+
+fn put(file: File, s: str) {
+  file.write(s);
+}
+
+fn writeArg(f: File, a: Arg) {
+  match a.kind {
+    .Int => f.writeInt(a.i),
+    .Uint => f.writeInt(a.i),
+    .Float => f.writeFloat(a.f),
+    .Str => put(f, a.s),
+    .Bool => put(f, boolStr(a.i)),
+  };
+}
+
+fn printv(file: File, fmt: str, args: []Arg) {
+  let start: i64 = 0;
+  let i: i64 = 0;
+  let n: i64 = 0;
+
+  while i + 1 < fmt.len {
+    if fmt[i] == '{' {
+      if fmt[i + 1] == '}' {
+        file.write(fmt[start..i]);
+        if n < args.len {
+          writeArg(file, args[n]);
+        }
+
+        n = n + 1;
+        i = i + 2;
+        start = i;
+        continue;
+      }
+    }
+
+    i = i + 1;
+  }
+
+  file.write(fmt[start..fmt.len]);
 }

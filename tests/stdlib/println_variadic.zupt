@@ -1,0 +1,30 @@
+--TEST--
+std.io.println formats {} verbs from boxed variadic args: ints of any width, floats, bools, strs, and enums
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let n: i64 = 1337;
+  let name: str = "zup";
+  let ratio: f64 = 0.5;
+  let ok: bool = true;
+  let small: u8 = 7;
+  let mode: std.io.Mode = .Write;
+
+  std.io.println("{} bytes", n);
+  std.io.println("hello, {}!", name);
+  std.io.println("ratio {} ok {} mode {}", ratio, ok, mode);
+  std.io.println("small {} neg {}", small, -42);
+  std.io.println("plain line, no args");
+  std.io.println("{}{} adjacent", 1, 2);
+  return 0;
+}
+--EXPECT--
+1337 bytes
+hello, zup!
+ratio 0.5 ok true mode 1
+small 7 neg -42
+plain line, no args
+12 adjacent
+--EXIT--
+0

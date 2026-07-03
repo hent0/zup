@@ -1,7 +1,7 @@
-const std = import("std");
+extern fn printf(fmt: cstr, ...): i32;
 
 pub fn main(): i32 {
-  const s = "const std = import(%c%c%c%c%c);%c%cpub fn main(): i32 {%c  const s = %c%s%c;%c  std.io.printf(s, 34, 115, 116, 100, 34, 10, 10, 10, 34, s, 34, 10, 10, 10, 10);%c  return 0;%c}%c";
-  std.io.printf(s, 34, 115, 116, 100, 34, 10, 10, 10, 34, s, 34, 10, 10, 10, 10);
+  const s = "extern fn printf(fmt: cstr, ...): i32;%c%cpub fn main(): i32 {%c  const s = %c%s%c;%c  printf(s, 10, 10, 10, 34, s, 34, 10, 10, 10, 10);%c  return 0;%c}%c";
+  printf(s, 10, 10, 10, 34, s, 34, 10, 10, 10, 10);
   return 0;
 }

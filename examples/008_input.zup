@@ -6,7 +6,7 @@ pub fn main(): i32 {
   std.io.print("Wait a minute, who are you?\n> ");
   let name: str = std.io.stdin().readln(input);
 
-  std.io.printf("Hello, %s", name);
+  std.io.print("Hello, {}", name);
 
   return 0;
 }

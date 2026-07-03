@@ -20,6 +20,6 @@ entry:
 
 define i32 @main() {
 entry:
-  %1 = call i32 @printf(ptr @.str.0, ptr @.str.1)
+  %1 = call i32 (ptr, ...) @printf(ptr @.str.0, ptr @.str.1)
   ret i32 123
 }

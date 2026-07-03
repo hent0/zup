@@ -1,13 +1,13 @@
 --TEST--
-std.io.printf re-exports libc printf: formatted, variadic printing across the module boundary
+a locally declared extern printf passes mixed variadic arguments through the C ABI
 --FILE--
-const std = import("std");
+extern fn printf(fmt: cstr, ...): i32;
 
 pub fn main(): i32 {
-  std.io.printf("%d %s\n", 7, "hi");
+  printf("%d %s %g\n", 7, "hi", 0.5);
   return 0;
 }
 --EXPECT--
-7 hi
+7 hi 0.5
 --EXIT--
 0
