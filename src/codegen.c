@@ -153,7 +153,7 @@ static void add_local(ctx_t *ctx, const char *name, type_t type,
 
 static bool is_aggregate(TypeKind kind) {
   return kind == TYPE_STRUCT || kind == TYPE_STR || kind == TYPE_ARRAY ||
-         kind == TYPE_SLICE;
+         kind == TYPE_SLICE || kind == TYPE_OPTIONAL;
 }
 
 static const decl_t *find_struct(ctx_t *ctx, const char *name) {
@@ -361,10 +361,16 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       }
     }
     return 0;
+  case EXPR_COALESCE:
+    if (collect_expr(ctx, expr->coalesce.lhs) != 0) {
+      return 1;
+    }
+    return collect_expr(ctx, expr->coalesce.rhs);
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
   case EXPR_ENUM_LITERAL:
+  case EXPR_NULL:
     return 0;
   }
   return 0;
@@ -487,6 +493,8 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
 static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest);
 static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr);
 static void emit_slice_from_array(ctx_t *ctx, const char *dest, expr_t *arr);
+static void emit_aggregate_into(ctx_t *ctx, const char *dest, type_t target,
+                                expr_t *expr);
 
 static const char *zero_value(TypeKind kind) {
   switch (kind) {
@@ -501,6 +509,7 @@ static const char *zero_value(TypeKind kind) {
   case TYPE_SLICE:
   case TYPE_ARRAY:
   case TYPE_STRUCT:
+  case TYPE_OPTIONAL:
     return "zeroinitializer";
   default:
     return "0";
@@ -819,9 +828,95 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     return emit_call(ctx, expr, NULL);
   case EXPR_CAST:
     return emit_cast(ctx, expr);
+  case EXPR_NULL: {
+    if (expr->type.kind == TYPE_CSTR) {
+      return (value_t){.type = expr->type, .ref = "null"};
+    }
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, expr->type));
+    fprintf(ctx->out, "  store %s zeroinitializer, ptr %%%u\n",
+            ir_type(ctx, expr->type), slot);
+    return (value_t){.type = expr->type,
+                     .ref = arena_format(ctx->arena, "%%%u", slot)};
+  }
+  case EXPR_COALESCE: {
+    expr_t *lhs = expr->coalesce.lhs;
+    const char *addr = emit_addr(ctx, lhs);
+    if (addr == NULL) {
+      addr = emit_value(ctx, lhs).ref;
+    }
+    unsigned int id = ctx->label++;
+    const char *opt_ir = ir_type(ctx, lhs->type);
+    const char *out_ir = ir_type(ctx, expr->type);
+    bool agg = is_aggregate(expr->type.kind);
+
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca %s\n", slot, out_ir);
+    const char *dest = arena_format(ctx->arena, "%%%u", slot);
+
+    unsigned int f = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", f,
+            opt_ir, addr);
+    unsigned int flag = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, f);
+    fprintf(
+        ctx->out,
+        "  br i1 %%%u, label %%coalesce.some.%u, label %%coalesce.none.%u\n",
+        flag, id, id);
+
+    fprintf(ctx->out, "coalesce.some.%u:\n", id);
+    unsigned int pf = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n", pf,
+            opt_ir, addr);
+    unsigned int pv = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %%%u\n", pv, out_ir, pf);
+    fprintf(ctx->out, "  store %s %%%u, ptr %s\n", out_ir, pv, dest);
+    fprintf(ctx->out, "  br label %%coalesce.end.%u\n", id);
+
+    fprintf(ctx->out, "coalesce.none.%u:\n", id);
+    if (agg) {
+      emit_aggregate_into(ctx, dest, expr->type, expr->coalesce.rhs);
+    } else {
+      value_t rhs = emit_value(ctx, expr->coalesce.rhs);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n", out_ir, rhs.ref, dest);
+    }
+    fprintf(ctx->out, "  br label %%coalesce.end.%u\n", id);
+
+    fprintf(ctx->out, "coalesce.end.%u:\n", id);
+    if (agg) {
+      return (value_t){.type = expr->type, .ref = dest};
+    }
+    unsigned int loaded = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", loaded, out_ir, dest);
+    return (value_t){.type = expr->type,
+                     .ref = arena_format(ctx->arena, "%%%u", loaded)};
+  }
   case EXPR_BINARY: {
     if (binop_is_logical(expr->binary.op)) {
       return emit_logical(ctx, expr);
+    }
+
+    if (expr->binary.lhs->type.kind == TYPE_OPTIONAL ||
+        expr->binary.rhs->type.kind == TYPE_OPTIONAL) {
+      expr_t *opt = expr->binary.lhs->kind != EXPR_NULL ? expr->binary.lhs
+                                                        : expr->binary.rhs;
+      const char *addr = emit_addr(ctx, opt);
+      if (addr == NULL) {
+        addr = emit_value(ctx, opt).ref;
+      }
+      unsigned int f = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n",
+              f, ir_type(ctx, opt->type), addr);
+      unsigned int flag = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, f);
+      if (expr->binary.op == BINOP_EQ) {
+        unsigned int inv = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = xor i1 %%%u, true\n", inv, flag);
+        return (value_t){.type = (type_t){.kind = TYPE_BOOL},
+                         .ref = arena_format(ctx->arena, "%%%u", inv)};
+      }
+      return (value_t){.type = (type_t){.kind = TYPE_BOOL},
+                       .ref = arena_format(ctx->arena, "%%%u", flag)};
     }
 
     if (expr->binary.lhs->type.kind == TYPE_STR) {
@@ -1109,6 +1204,15 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       argref[i] = tmp;
       argtype[i] = ptype;
       argbyval[i] = true;
+    } else if (ptype.kind == TYPE_OPTIONAL &&
+               arg->type.kind != TYPE_OPTIONAL) {
+      unsigned int slot = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, ptype));
+      const char *tmp = arena_format(ctx->arena, "%%%u", slot);
+      emit_aggregate_into(ctx, tmp, ptype, arg);
+      argref[i] = tmp;
+      argtype[i] = ptype;
+      argbyval[i] = true;
     } else if (is_aggregate(arg->type.kind) && arg->kind != EXPR_STRING) {
       const char *addr = emit_addr(ctx, arg);
       if (addr == NULL) {
@@ -1214,8 +1318,32 @@ static void emit_slice_from_array(ctx_t *ctx, const char *dest, expr_t *arr) {
   fprintf(ctx->out, "  store i64 %zu, ptr %%%u\n", arr->type.array_length, l);
 }
 
+static void emit_optional_wrap_into(ctx_t *ctx, const char *dest,
+                                    type_t target, expr_t *expr) {
+  const char *ir = ir_type(ctx, target);
+  unsigned int flag = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", flag,
+          ir, dest);
+  fprintf(ctx->out, "  store i1 true, ptr %%%u\n", flag);
+  unsigned int payload = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n",
+          payload, ir, dest);
+  const char *pdest = arena_format(ctx->arena, "%%%u", payload);
+  if (is_aggregate(target.element->kind)) {
+    emit_aggregate_into(ctx, pdest, *target.element, expr);
+  } else {
+    value_t value = emit_value(ctx, expr);
+    fprintf(ctx->out, "  store %s %s, ptr %s\n",
+            ir_type(ctx, *target.element), value.ref, pdest);
+  }
+}
+
 static void emit_aggregate_into(ctx_t *ctx, const char *dest, type_t target,
                                 expr_t *expr) {
+  if (target.kind == TYPE_OPTIONAL && expr->type.kind != TYPE_OPTIONAL) {
+    emit_optional_wrap_into(ctx, dest, target, expr);
+    return;
+  }
   if (target.kind == TYPE_SLICE && expr->type.kind == TYPE_ARRAY) {
     emit_slice_from_array(ctx, dest, expr);
     return;
@@ -1268,7 +1396,7 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
               reg, sname, dest, index);
       const char *slot = arena_format(ctx->arena, "%%%u", reg);
       if (is_aggregate(field->type.kind)) {
-        emit_struct_into(ctx, slot, fi->value);
+        emit_aggregate_into(ctx, slot, field->type, fi->value);
       } else {
         value_t value = emit_value(ctx, fi->value);
         fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
@@ -1298,7 +1426,7 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
               reg, sname, dest, index);
       const char *slot = arena_format(ctx->arena, "%%%u", reg);
       if (is_aggregate(field->type.kind)) {
-        emit_struct_into(ctx, slot, field->default_value);
+        emit_aggregate_into(ctx, slot, field->type, field->default_value);
       } else {
         value_t value = emit_value(ctx, field->default_value);
         fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, value.type),
@@ -1799,6 +1927,9 @@ static const char *ir_type(ctx_t *ctx, type_t type) {
   if (type.kind == TYPE_ARRAY) {
     return arena_format(ctx->arena, "[%zu x %s]", type.array_length,
                         ir_type(ctx, *type.element));
+  }
+  if (type.kind == TYPE_OPTIONAL) {
+    return arena_format(ctx->arena, "{ i1, %s }", ir_type(ctx, *type.element));
   }
   return type_kind_to_ir(type.kind);
 }

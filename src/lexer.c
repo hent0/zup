@@ -25,6 +25,7 @@ const keyword_t keywords[] = {
     {"import", TOKEN_IMPORT},
     {"enum", TOKEN_ENUM},
     {"match", TOKEN_MATCH},
+    {"null", TOKEN_NULL},
     // Types
     {"i8", TOKEN_I8},
     {"u8", TOKEN_U8},
@@ -399,6 +400,15 @@ token_t lexer_next_token(lexer_t *lexer) {
     }
     return advance_with(
         lexer, token_init(TOKEN_BANG, .line = lexer->line, .col = lexer->col));
+  case '?':
+    if (peek(lexer) == '?') {
+      return advance_with(
+          lexer, advance_with(lexer, token_init(TOKEN_QUESTION_QUESTION,
+                                                .line = lexer->line,
+                                                lexer->col)));
+    }
+    return advance_with(lexer, token_init(TOKEN_QUESTION, .line = lexer->line,
+                                          .col = lexer->col));
   case '=':
     if (peek(lexer) == '=') {
       return advance_with(

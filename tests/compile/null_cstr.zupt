@@ -1,0 +1,13 @@
+--TEST--
+the null literal coerces to a bare cstr for C interop, e.g. time(NULL)
+--FILE--
+extern fn time(t: cstr): i64;
+
+pub fn main(): i32 {
+  if time(null) > 0 {
+    return 5;
+  }
+  return 0;
+}
+--EXIT--
+5

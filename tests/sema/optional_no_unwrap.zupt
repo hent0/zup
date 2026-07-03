@@ -1,0 +1,11 @@
+--TEST--
+an optional does not implicitly unwrap: returning ?i32 where i32 is expected is an error
+--FILE--
+pub fn main(): i32 {
+  let a: ?i32 = 3;
+  return a;
+}
+--EXPECTERR--
+zup: error: cannot return ?i32 from function returning i32 [3:3]
+--EXIT--
+1

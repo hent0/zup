@@ -1,0 +1,12 @@
+--TEST--
+the '??' fallback must be assignable to the optional's payload type
+--FILE--
+pub fn main(): i32 {
+  let a: ?str = null;
+  let b: str = a ?? 5;
+  return 0;
+}
+--EXPECTERR--
+zup: error: '??' fallback has type i32, expected str [3:21]
+--EXIT--
+1

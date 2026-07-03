@@ -8,7 +8,7 @@ const std = import("std");
 pub fn main(): i32 {
   let f: std.io.File = std.io.open("/tmp/zup_readline.txt", .Read);
   let buf: [32]u8;
-  let line: str = f.readln(buf);
+  let line: str = f.readln(buf) ?? "";
   f.close();
   std.io.println(line);
   return line.len as i32;

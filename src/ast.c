@@ -72,6 +72,8 @@ char *type_kind_to_str(TypeKind kind) {
     return "[]str";
   case TYPE_ENUM:
     return "enum";
+  case TYPE_OPTIONAL:
+    return "optional";
   default:
     return "?";
   }
@@ -83,12 +85,15 @@ char *type_to_str(type_t type) {
   case TYPE_ENUM:
     return type.name;
   case TYPE_ARRAY:
-  case TYPE_SLICE: {
+  case TYPE_SLICE:
+  case TYPE_OPTIONAL: {
     static char bufs[8][64];
     static unsigned next = 0;
     char *buf = bufs[next++ % 8];
     if (type.kind == TYPE_SLICE) {
       snprintf(buf, sizeof(bufs[0]), "[]%s", type_to_str(*type.element));
+    } else if (type.kind == TYPE_OPTIONAL) {
+      snprintf(buf, sizeof(bufs[0]), "?%s", type_to_str(*type.element));
     } else {
       snprintf(buf, sizeof(bufs[0]), "[%zu]%s", type.array_length,
                type_to_str(*type.element));
@@ -481,6 +486,28 @@ match_arm_t *ast_match_arm_init(arena_t *arena) {
   return arm;
 }
 
+expr_t *ast_null_init(token_t token, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_NULL;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  return expr;
+}
+
+expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_COALESCE;
+  expr->line = lhs->line;
+  expr->col = lhs->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->coalesce.lhs = lhs;
+  expr->coalesce.rhs = rhs;
+  return expr;
+}
+
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_IMPORT;
@@ -801,6 +828,14 @@ static void dump_expr(const expr_t *expr, int depth) {
       }
       dump_expr(arm->value, depth + 2);
     }
+    break;
+  case EXPR_NULL:
+    printf("Null\n");
+    break;
+  case EXPR_COALESCE:
+    printf("Coalesce\n");
+    dump_expr(expr->coalesce.lhs, depth + 1);
+    dump_expr(expr->coalesce.rhs, depth + 1);
     break;
   case EXPR_IMPORT:
     printf("Import \"%s\"\n", expr->import.path);

@@ -174,7 +174,7 @@ static bool types_equal(type_t a, type_t b) {
     return a.array_length == b.array_length &&
            types_equal(*a.element, *b.element);
   }
-  if (a.kind == TYPE_SLICE) {
+  if (a.kind == TYPE_SLICE || a.kind == TYPE_OPTIONAL) {
     return types_equal(*a.element, *b.element);
   }
   return true;
@@ -183,6 +183,12 @@ static bool types_equal(type_t a, type_t b) {
 static bool assignable(type_t to, exprty_t from) {
   if (to.kind == TYPE_CSTR && from.kind == TYPE_STR) {
     return true;
+  }
+  if (to.kind == TYPE_OPTIONAL && from.kind != TYPE_OPTIONAL) {
+    return assignable(*to.element, from);
+  }
+  if (to.kind == TYPE_OPTIONAL && from.kind == TYPE_OPTIONAL) {
+    return from.element != NULL && types_equal(*to.element, *from.element);
   }
   if (to.kind == TYPE_SLICE &&
       (from.kind == TYPE_ARRAY || from.kind == TYPE_SLICE)) {
@@ -623,6 +629,8 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
 
   return (exprty_t){.kind = method->fn.return_type.kind,
                     .name = method->fn.return_type.name,
+                    .element = method->fn.return_type.element,
+                    .array_length = method->fn.return_type.array_length,
                     .ok = true};
 }
 
@@ -633,18 +641,65 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     break;
   case EXPR_NUMBER: {
+    type_t want = expected;
+    while (want.kind == TYPE_OPTIONAL && want.element != NULL) {
+      want = *want.element;
+    }
     if (number_is_float(expr->number.value)) {
-      TypeKind type = type_is_float(expected.kind) ? expected.kind : TYPE_F64;
+      TypeKind type = type_is_float(want.kind) ? want.kind : TYPE_F64;
       result = (exprty_t){.kind = type, .ok = true};
     } else {
-      TypeKind type =
-          type_is_integer(expected.kind) ? expected.kind : TYPE_I32;
+      TypeKind type = type_is_integer(want.kind) ? want.kind : TYPE_I32;
       if (check_literal_fit(sema, expr, type)) {
         result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       } else {
         result = (exprty_t){.kind = type, .ok = true};
       }
     }
+    break;
+  }
+  case EXPR_NULL:
+    if (expected.kind == TYPE_OPTIONAL && expected.element != NULL) {
+      result = (exprty_t){
+          .kind = TYPE_OPTIONAL, .element = expected.element, .ok = true};
+    } else if (expected.kind == TYPE_CSTR) {
+      result = (exprty_t){.kind = TYPE_CSTR, .ok = true};
+    } else {
+      diag_error(sema->src, expr->line, expr->col,
+                 "cannot infer a type for 'null'");
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+    break;
+  case EXPR_COALESCE: {
+    exprty_t lhs =
+        check_expr(sema, expr->coalesce.lhs, type_from_kind(TYPE_UNKNOWN));
+    if (!lhs.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (lhs.kind != TYPE_OPTIONAL || lhs.element == NULL) {
+      diag_error(sema->src, expr->coalesce.lhs->line, expr->coalesce.lhs->col,
+                 "left side of '\?\?' must be an optional, got %s",
+                 type_to_str(exprty_type(lhs)));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    exprty_t rhs = check_expr(sema, expr->coalesce.rhs, *lhs.element);
+    bool ok = rhs.ok;
+    if (rhs.ok && !assignable(*lhs.element, rhs)) {
+      diag_error(sema->src, expr->coalesce.rhs->line, expr->coalesce.rhs->col,
+                 "'\?\?' fallback has type %s, expected %s",
+                 type_to_str(exprty_type(rhs)), type_to_str(*lhs.element));
+      sema->had_error = true;
+      ok = false;
+    }
+    result = (exprty_t){.kind = lhs.element->kind,
+                        .name = lhs.element->name,
+                        .element = lhs.element->element,
+                        .array_length = lhs.element->array_length,
+                        .ok = ok};
     break;
   }
   case EXPR_STRING:
@@ -719,20 +774,24 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
   }
   case EXPR_BINARY: {
     bool lhs_lit = expr->binary.lhs->kind == EXPR_NUMBER ||
-                   expr->binary.lhs->kind == EXPR_ENUM_LITERAL;
+                   expr->binary.lhs->kind == EXPR_ENUM_LITERAL ||
+                   expr->binary.lhs->kind == EXPR_NULL;
     bool rhs_lit = expr->binary.rhs->kind == EXPR_NUMBER ||
-                   expr->binary.rhs->kind == EXPR_ENUM_LITERAL;
+                   expr->binary.rhs->kind == EXPR_ENUM_LITERAL ||
+                   expr->binary.rhs->kind == EXPR_NULL;
 
     exprty_t lhs, rhs;
     if (rhs_lit && !lhs_lit) {
       lhs = check_expr(sema, expr->binary.lhs, expected);
-      type_t hint = type_is_numeric(lhs.kind) || lhs.kind == TYPE_ENUM
+      type_t hint = type_is_numeric(lhs.kind) || lhs.kind == TYPE_ENUM ||
+                            lhs.kind == TYPE_OPTIONAL || lhs.kind == TYPE_CSTR
                         ? exprty_type(lhs)
                         : expected;
       rhs = check_expr(sema, expr->binary.rhs, hint);
     } else if (lhs_lit && !rhs_lit) {
       rhs = check_expr(sema, expr->binary.rhs, expected);
-      type_t hint = type_is_numeric(rhs.kind) || rhs.kind == TYPE_ENUM
+      type_t hint = type_is_numeric(rhs.kind) || rhs.kind == TYPE_ENUM ||
+                            rhs.kind == TYPE_OPTIONAL || rhs.kind == TYPE_CSTR
                         ? exprty_type(rhs)
                         : expected;
       lhs = check_expr(sema, expr->binary.lhs, hint);
@@ -763,6 +822,12 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     } else if (lhs.kind == TYPE_ENUM && rhs.kind == TYPE_ENUM &&
                lhs.name != NULL && rhs.name != NULL &&
                strcmp(lhs.name, rhs.name) == 0 &&
+               (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
+      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+    } else if ((expr->binary.lhs->kind == EXPR_NULL ||
+                expr->binary.rhs->kind == EXPR_NULL) &&
+               lhs.kind == rhs.kind &&
+               (lhs.kind == TYPE_OPTIONAL || lhs.kind == TYPE_CSTR) &&
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
@@ -1012,6 +1077,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
   }
   case EXPR_ENUM_LITERAL: {
     type_t want = expected;
+    while (want.kind == TYPE_OPTIONAL && want.element != NULL) {
+      want = *want.element;
+    }
     resolve_enum_type(sema, &want);
     decl_t *enm =
         want.name != NULL ? typetab_lookup(sema->types, want.name) : NULL;
@@ -1630,7 +1698,8 @@ static size_t count_bindings(stmt_t *body) {
 }
 
 static void resolve_qualified_type(sema_t *sema, type_t *t) {
-  if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE) {
+  if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE ||
+      t->kind == TYPE_OPTIONAL) {
     resolve_qualified_type(sema, t->element);
     return;
   }
@@ -1664,7 +1733,8 @@ static void resolve_qualified_type(sema_t *sema, type_t *t) {
 }
 
 static void resolve_enum_type(sema_t *sema, type_t *t) {
-  if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE) {
+  if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE ||
+      t->kind == TYPE_OPTIONAL) {
     resolve_enum_type(sema, t->element);
     return;
   }
@@ -1678,7 +1748,8 @@ static void resolve_enum_type(sema_t *sema, type_t *t) {
 }
 
 static bool check_type(sema_t *sema, type_t *type) {
-  if (type->kind == TYPE_ARRAY || type->kind == TYPE_SLICE) {
+  if (type->kind == TYPE_ARRAY || type->kind == TYPE_SLICE ||
+      type->kind == TYPE_OPTIONAL) {
     return check_type(sema, type->element);
   }
   if (type->kind == TYPE_STRUCT) {

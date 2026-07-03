@@ -28,6 +28,7 @@ typedef enum {
   TYPE_ARRAY,
   TYPE_SLICE,
   TYPE_ENUM,
+  TYPE_OPTIONAL,
 } TypeKind;
 
 typedef struct type type_t;
@@ -83,6 +84,8 @@ typedef enum {
   EXPR_INDEX,
   EXPR_SLICE_RANGE,
   EXPR_MATCH,
+  EXPR_NULL,
+  EXPR_COALESCE,
   EXPR_IMPORT,
 } ExprKind;
 
@@ -173,6 +176,10 @@ struct expr {
       match_arm_t *arms;
       size_t arm_count;
     } match_expr;
+    struct {
+      expr_t *lhs;
+      expr_t *rhs;
+    } coalesce;
     struct {
       char *path;
     } import;
@@ -362,6 +369,8 @@ expr_t *ast_slice_range_init(expr_t *base, expr_t *start, expr_t *end,
                              arena_t *arena);
 expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena);
 match_arm_t *ast_match_arm_init(arena_t *arena);
+expr_t *ast_null_init(token_t token, arena_t *arena);
+expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);
 
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);

@@ -1,0 +1,19 @@
+--TEST--
+'?' and '??' tokenize distinctly and 'null' is a keyword
+--ARGS--
+--tokenize
+--FILE--
+let a: ?i32 = x ?? null;
+--EXPECT--
+TOKEN_LET [1:1]
+TOKEN_ID('a') [1:5]
+TOKEN_COLON [1:6]
+TOKEN_QUESTION [1:8]
+TOKEN_I32 [1:9]
+TOKEN_EQUAL [1:13]
+TOKEN_ID('x') [1:15]
+TOKEN_QUESTION_QUESTION [1:17]
+TOKEN_NULL [1:20]
+TOKEN_SEMICOLON [1:24]
+--EXIT--
+0

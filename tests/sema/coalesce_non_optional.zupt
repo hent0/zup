@@ -1,0 +1,11 @@
+--TEST--
+the left side of '??' must be an optional
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 5;
+  return x ?? 1;
+}
+--EXPECTERR--
+zup: error: left side of '??' must be an optional, got i32 [3:10]
+--EXIT--
+1

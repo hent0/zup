@@ -28,10 +28,10 @@ pub struct File {
     return sys.read(self.fd, buf.ptr, buf.len);
   }
 
-  pub fn readln(self, buf: []u8): str {
+  pub fn readln(self, buf: []u8): ?str {
     let n: i64 = sys.read(self.fd, buf.ptr, buf.len);
     if n <= 0 {
-      return "";
+      return null;
     }
     let i: i64 = 0;
     while i < n {

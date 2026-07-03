@@ -57,6 +57,14 @@ static type_t parse_type(parser_t *parser) {
       .col = token.col,
   };
 
+  if (match(parser, TOKEN_QUESTION)) {
+    type_t *element = arena_alloc(parser->arena, sizeof(type_t));
+    *element = parse_type(parser);
+    type.kind = TYPE_OPTIONAL;
+    type.element = element;
+    return type;
+  }
+
   if (match(parser, TOKEN_LBRACKET)) {
     switch (parser->current.kind) {
     case TOKEN_RBRACKET:
@@ -322,6 +330,9 @@ static expr_t *parse_primary(parser_t *parser) {
   }
   case TOKEN_MATCH:
     return parse_match(parser);
+  case TOKEN_NULL:
+    advance(parser);
+    return ast_null_init(token, parser->arena);
   case TOKEN_LPAREN:
     advance(parser);
     expr_t *inner = parse_expr(parser);
@@ -650,7 +661,17 @@ static expr_t *parse_or(parser_t *parser) {
   return left;
 }
 
-static expr_t *parse_expr(parser_t *parser) { return parse_or(parser); }
+static expr_t *parse_expr(parser_t *parser) {
+  expr_t *lhs = parse_or(parser);
+  if (lhs != NULL && match(parser, TOKEN_QUESTION_QUESTION)) {
+    expr_t *rhs = parse_expr(parser);
+    if (rhs == NULL) {
+      return NULL;
+    }
+    return ast_coalesce_init(lhs, rhs, parser->arena);
+  }
+  return lhs;
+}
 
 static stmt_t *parse_stmt(parser_t *parser);
 

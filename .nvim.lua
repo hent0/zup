@@ -22,7 +22,9 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.fn.matchadd("Type", [[\v<(i8|u8|i16|u16|i32|u32|i64|u64|f32|f64|void|bool|cstr|str|string)>]])
     -- Slice/array type prefixes: []T and [N]T (highlight the brackets when before a type)
     vim.fn.matchadd("Type", [[\v\[\d*\](\a)@=]])
-    -- Boolean literals
+    -- Boolean literals; link to Number so themes that paint Boolean like
+    -- Keyword still render them as values, not control-flow words
+    vim.api.nvim_set_hl(0, "Boolean", { link = "Number" })
     vim.fn.matchadd("Boolean", [[\v<(true|false)>]])
     -- Numbers
     vim.fn.matchadd("Number", [[\v<\d+>]])

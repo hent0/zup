@@ -1,0 +1,34 @@
+--TEST--
+optionals: null inference, T-to-?T wrapping at bindings/args/returns, null comparison, and '??' over scalar and str payloads
+--FILE--
+fn pick(v: ?i32): i32 {
+  return v ?? -1;
+}
+
+fn find(key: i32): ?str {
+  if key == 1 {
+    return "one";
+  }
+  return null;
+}
+
+pub fn main(): i32 {
+  let a: ?i32 = null;
+  let b: ?i32 = 5;
+
+  if a == null {
+    if b != null {
+      let x: i32 = a ?? 10;
+      let s: str = find(1) ?? "none";
+      let t: str = find(2) ?? "none";
+      if s.len == 3 {
+        if t.len == 4 {
+          return x + (b ?? 0) + pick(7) + pick(null);
+        }
+      }
+    }
+  }
+  return 0;
+}
+--EXIT--
+21

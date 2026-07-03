@@ -64,6 +64,10 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_EQUAL_EQUAL";
   case TOKEN_FAT_ARROW:
     return "TOKEN_FAT_ARROW";
+  case TOKEN_QUESTION:
+    return "TOKEN_QUESTION";
+  case TOKEN_QUESTION_QUESTION:
+    return "TOKEN_QUESTION_QUESTION";
   case TOKEN_BANG:
     return "TOKEN_BANG";
   case TOKEN_BANG_EQUAL:
@@ -124,6 +128,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_ENUM";
   case TOKEN_MATCH:
     return "TOKEN_MATCH";
+  case TOKEN_NULL:
+    return "TOKEN_NULL";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";
