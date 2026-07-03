@@ -1,0 +1,17 @@
+--TEST--
+an invalid token in an enum body reports an error and terminates instead of looping
+--FILE--
+enum E {
+  A,
+  5,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: expected enum member name (got TOKEN_NUMBER) [3:3]
+zup: error: expected '}' (got TOKEN_NUMBER) [3:3]
+zup: error: expected a declaration (got TOKEN_NUMBER) [3:3]
+--EXIT--
+1

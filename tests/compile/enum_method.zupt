@@ -1,0 +1,34 @@
+--TEST--
+enums declare methods like structs: self is the enum value, matchable and castable
+--FILE--
+const std = import("std");
+
+enum TokenKind {
+  Eof,
+  Id,
+  Number,
+
+  pub fn toString(self): str {
+    return match self {
+      .Eof => "TOKEN_EOF",
+      .Id => "TOKEN_ID",
+      _ => "UNKNOWN TOKEN TYPE",
+    };
+  }
+
+  fn ordinal(self): i32 {
+    return self as i32;
+  }
+}
+
+pub fn main(): i32 {
+  let k: TokenKind = .Id;
+  std.io.println("{}", k.toString());
+  std.io.println("{}", TokenKind.Number.toString());
+  return k.ordinal();
+}
+--EXPECT--
+TOKEN_ID
+UNKNOWN TOKEN TYPE
+--EXIT--
+1

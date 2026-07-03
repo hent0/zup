@@ -500,7 +500,26 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
     }
     return 0;
   }
-  case DECL_ENUM:
+  case DECL_ENUM: {
+    ctx_struct_t *s = arena_alloc(ctx->arena, sizeof(ctx_struct_t));
+    s->name = mangle(ctx, decl->name);
+    s->decl = decl;
+    s->next = ctx->structs;
+    ctx->structs = s;
+    for (decl_t *member = decl->enm.methods; member != NULL;
+         member = member->next) {
+      for (param_t *param = member->fn.params; param != NULL;
+           param = param->next) {
+        collect_expr(ctx, param->default_value);
+      }
+      for (stmt_t *stmt = member->fn.body; stmt != NULL; stmt = stmt->next) {
+        if (collect_stmt(ctx, stmt) != 0) {
+          return 1;
+        }
+      }
+    }
+    return 0;
+  }
   case DECL_IMPORT:
     return 0;
   }
@@ -1195,11 +1214,36 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       }
       is_method = false;
     } else {
-      name = mangle(ctx,
-                    arena_format(ctx->arena, "%s.%s", recv->type.name, member));
+      if (recv->type.kind == TYPE_ENUM && recv->type.name != NULL) {
+        name = NULL;
+        for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
+          if (s->decl->kind == DECL_ENUM &&
+              strcmp(s->decl->name, recv->type.name) == 0) {
+            name = arena_format(ctx->arena, "%s.%s", s->name, member);
+            break;
+          }
+        }
+        if (name == NULL) {
+          name = mangle(ctx, arena_format(ctx->arena, "%s.%s",
+                                          recv->type.name, member));
+        }
+      } else {
+        name = mangle(ctx, arena_format(ctx->arena, "%s.%s", recv->type.name,
+                                        member));
+      }
       self = emit_addr(ctx, recv);
       if (self == NULL) {
-        self = emit_value(ctx, recv).ref;
+        value_t rv = emit_value(ctx, recv);
+        if (is_aggregate(rv.type.kind)) {
+          self = rv.ref;
+        } else {
+          unsigned int slot = ctx->reg++;
+          fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
+                  ir_type(ctx, rv.type));
+          fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, rv.type),
+                  rv.ref, slot);
+          self = arena_format(ctx->arena, "%%%u", slot);
+        }
       }
     }
   } else {
@@ -1213,9 +1257,22 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   size_t param_count = 0;
   if (is_method) {
     expr_t *recv = call->call.callee->field.base;
-    const decl_t *strct = find_struct(ctx, struct_ref(ctx, recv->type.name));
-    if (strct != NULL) {
-      for (decl_t *m = strct->strct.members; m != NULL; m = m->next) {
+    const decl_t *owner = NULL;
+    if (recv->type.kind == TYPE_ENUM && recv->type.name != NULL) {
+      for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
+        if (s->decl->kind == DECL_ENUM &&
+            strcmp(s->decl->name, recv->type.name) == 0) {
+          owner = s->decl;
+          break;
+        }
+      }
+    } else {
+      owner = find_struct(ctx, struct_ref(ctx, recv->type.name));
+    }
+    if (owner != NULL) {
+      decl_t *methods = owner->kind == DECL_STRUCT ? owner->strct.members
+                                                   : owner->enm.methods;
+      for (decl_t *m = methods; m != NULL; m = m->next) {
         if (m->kind == DECL_FN &&
             strcmp(m->name, call->call.callee->field.name) == 0) {
           param = m->fn.params;
@@ -2275,7 +2332,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
 
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
-    if (is_aggregate(param->type.kind)) {
+    if (param->is_self || is_aggregate(param->type.kind)) {
       add_local(ctx, param->name, param->type,
                 arena_format(ctx->arena, "%%%s", param->name));
       continue;
@@ -2425,8 +2482,18 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
             type_kind_to_ir(decl->global.type.kind), value.ref);
     return 0;
   }
+  case DECL_ENUM: {
+    for (decl_t *member = decl->enm.methods; member != NULL;
+         member = member->next) {
+      if (emit_fn(ctx, member,
+                  arena_format(ctx->arena, "%s.%s", decl->name,
+                               member->name)) != 0) {
+        return 1;
+      }
+    }
+    return 0;
+  }
   case DECL_IMPORT:
-  case DECL_ENUM:
     return 0;
   }
   return 0;

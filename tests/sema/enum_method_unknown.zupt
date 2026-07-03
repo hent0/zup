@@ -1,0 +1,16 @@
+--TEST--
+calling a method the enum does not declare is an error
+--FILE--
+enum Color {
+  Red,
+  Green,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Red;
+  return c.nope();
+}
+--EXPECTERR--
+zup: error: enum 'Color' has no method 'nope' [8:12]
+--EXIT--
+1

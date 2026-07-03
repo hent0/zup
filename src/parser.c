@@ -1181,6 +1181,9 @@ static decl_t *parse_struct(parser_t *parser, Visibility visibility) {
     }
 
     token_t fname = expect(parser, TOKEN_ID, "expected field name");
+    if (fname.kind != TOKEN_ID) {
+      break;
+    }
     expect(parser, TOKEN_COLON, "expected ':' after field name");
     type_t ftype = parse_type(parser);
 
@@ -1223,9 +1226,30 @@ static decl_t *parse_enum(parser_t *parser, Visibility visibility) {
   expect(parser, TOKEN_LBRACE, "expected '{' after struct name");
 
   enum_member_t *tail = NULL;
+  decl_t *m_tail = NULL;
   long long next_value = 0;
   while (!check(parser, TOKEN_RBRACE) && !check(parser, TOKEN_EOF)) {
+    if (check(parser, TOKEN_PUB) || check(parser, TOKEN_FN)) {
+      Visibility member_vis =
+          match(parser, TOKEN_PUB) ? VISIBILITY_PUBLIC : VISIBILITY_PRIVATE;
+      decl_t *method = parse_method(parser, decl->name, member_vis);
+      if (method == NULL) {
+        break;
+      }
+      if (m_tail == NULL) {
+        decl->enm.methods = method;
+      } else {
+        m_tail->next = method;
+      }
+      m_tail = method;
+      decl->enm.method_count++;
+      continue;
+    }
+
     token_t member_name = expect(parser, TOKEN_ID, "expected enum member name");
+    if (member_name.kind != TOKEN_ID) {
+      break;
+    }
     enum_member_t *member = ast_enum_member_init(parser->arena);
     member->name = member_name.value;
     member->value = next_value++;

@@ -693,6 +693,8 @@ decl_t *ast_enum_init(char *name, arena_t *arena) {
   decl->next = NULL;
   decl->enm.members = NULL;
   decl->enm.member_count = 0;
+  decl->enm.methods = NULL;
+  decl->enm.method_count = 0;
   return decl;
 }
 
@@ -1013,6 +1015,10 @@ static void dump_decl(const decl_t *decl, int depth) {
          member = member->next) {
       print_indent(depth + 1);
       printf("member %s = %lld\n", member->name, member->value);
+    }
+    for (const decl_t *method = decl->enm.methods; method != NULL;
+         method = method->next) {
+      dump_decl(method, depth + 1);
     }
     break;
   case DECL_GLOBAL:

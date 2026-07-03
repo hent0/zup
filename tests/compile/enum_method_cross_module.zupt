@@ -1,0 +1,20 @@
+--TEST--
+a pub method of an imported enum dispatches across the module boundary
+--PREPARE--
+printf 'pub enum Kind {\n  Section,\n  Eof,\n\n  pub fn label(self): str {\n    return match self {\n      .Section => "section",\n      .Eof => "eof",\n    };\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_mtok.zup"
+--FILE--
+const tok = import("zup_mtok.zup");
+
+const std = import("std");
+
+pub fn main(): i32 {
+  let k: tok.Kind = .Eof;
+  std.io.println("{}", k.label());
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_mtok.zup"
+--EXPECT--
+eof
+--EXIT--
+0

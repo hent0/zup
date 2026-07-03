@@ -598,7 +598,43 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   if (!recv.ok) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
-  if (recv.kind != TYPE_STRUCT) {
+  decl_t *method = NULL;
+  bool imported = is_imported_type(recv.name);
+  if (recv.kind == TYPE_STRUCT) {
+    decl_t *strct = typetab_lookup(sema->types, recv.name);
+    method = strct != NULL && strct->kind == DECL_STRUCT
+                 ? struct_method(strct, field->field.name)
+                 : NULL;
+    if (method == NULL) {
+      diag_error(sema->src, field->line, field->col,
+                 "struct '%s' has no method '%s'", recv.name,
+                 field->field.name);
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+  } else if (recv.kind == TYPE_ENUM && recv.name != NULL) {
+    decl_t *enm = typetab_lookup(sema->types, recv.name);
+    if (enm == NULL) {
+      enm = imports_pub_enum(sema, recv.name);
+      if (enm != NULL) {
+        imported = true;
+      }
+    }
+    if (enm != NULL && enm->kind == DECL_ENUM) {
+      for (decl_t *m = enm->enm.methods; m != NULL; m = m->next) {
+        if (m->kind == DECL_FN && strcmp(m->name, field->field.name) == 0) {
+          method = m;
+          break;
+        }
+      }
+    }
+    if (method == NULL) {
+      diag_error(sema->src, field->line, field->col,
+                 "enum '%s' has no method '%s'", recv.name, field->field.name);
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+  } else {
     diag_error(sema->src, field->line, field->col,
                "cannot call method '%s' on non-struct type %s",
                field->field.name,
@@ -606,20 +642,10 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
-
-  decl_t *strct = typetab_lookup(sema->types, recv.name);
-  decl_t *method = strct != NULL && strct->kind == DECL_STRUCT
-                       ? struct_method(strct, field->field.name)
-                       : NULL;
-  if (method == NULL) {
+  if (imported && method->visibility != VISIBILITY_PUBLIC) {
     diag_error(sema->src, field->line, field->col,
-               "struct '%s' has no method '%s'", recv.name, field->field.name);
-    sema->had_error = true;
-    return (exprty_t){.kind = TYPE_VOID, .ok = false};
-  }
-  if (is_imported_type(recv.name) && method->visibility != VISIBILITY_PUBLIC) {
-    diag_error(sema->src, field->line, field->col,
-               "method '%s' of struct '%s' is not public", field->field.name,
+               "method '%s' of %s '%s' is not public", field->field.name,
+               recv.kind == TYPE_ENUM ? "enum" : "struct",
                bare_type_name(recv.name));
     sema->had_error = true;
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
@@ -1961,6 +1987,10 @@ static void check_enum(sema_t *sema, const decl_t *enm) {
       }
     }
   }
+  for (decl_t *method = enm->enm.methods; method != NULL;
+       method = method->next) {
+    check_fn(sema, method);
+  }
 }
 
 static void check_fn(sema_t *sema, decl_t *fn) {
@@ -2194,11 +2224,11 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
     resolve_fn_signature(&sema, tab.fns[i]);
   }
   for (size_t i = 0; i < local_type_count; i++) {
-    if (types.structs[i].decl->kind != DECL_STRUCT) {
-      continue;
-    }
-    for (decl_t *m = types.structs[i].decl->strct.members; m != NULL;
-         m = m->next) {
+    decl_t *owner = types.structs[i].decl;
+    decl_t *members = owner->kind == DECL_STRUCT ? owner->strct.members
+                      : owner->kind == DECL_ENUM ? owner->enm.methods
+                                                 : NULL;
+    for (decl_t *m = members; m != NULL; m = m->next) {
       resolve_fn_signature(&sema, m);
     }
   }

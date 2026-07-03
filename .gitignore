@@ -5,3 +5,4 @@ tests/**/*.diff
 tests/**/*.out
 tests/**/*.err
 tester
+stage2

@@ -338,6 +338,8 @@ struct decl {
     struct {
       enum_member_t *members;
       size_t member_count;
+      decl_t *methods;
+      size_t method_count;
     } enm;
   };
 };
