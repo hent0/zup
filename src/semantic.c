@@ -150,6 +150,7 @@ typedef struct {
   const source_t *src;
   scope_t *globals;
   scope_t *scope;
+  const decl_t *current_fn;
   arena_t *arena;
   unsigned int loop_depth;
   bool had_error;
@@ -335,6 +336,7 @@ static bool is_const_init(const expr_t *expr) {
 }
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected);
+static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn);
 static void resolve_qualified_type(sema_t *sema, type_t *t);
 static void resolve_enum_type(sema_t *sema, type_t *t);
 
@@ -1262,15 +1264,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         result = (exprty_t){.kind = TYPE_VOID, .ok = false};
         break;
       }
-    } else if (scrut.kind != TYPE_BOOL) {
+    } else if (scrut.kind != TYPE_BOOL && !type_is_integer(scrut.kind)) {
       diag_error(sema->src, expr->match_expr.scrutinee->line,
                  expr->match_expr.scrutinee->col,
-                 "match requires an enum or bool value, got %s",
+                 "match requires an enum, bool, or integer value, got %s",
                  type_to_str(exprty_type(scrut)));
       sema->had_error = true;
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
+    bool int_scrut = type_is_integer(scrut.kind);
     if (expr->match_expr.arms == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "match must have at least one arm");
@@ -1282,8 +1285,12 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     size_t member_count = enm != NULL ? enm->enm.member_count : 2;
     bool *covered = arena_alloc(
         sema->arena, sizeof(bool) * (member_count ? member_count : 1));
+    long long *seen = arena_alloc(
+        sema->arena, sizeof(long long) * expr->match_expr.arm_count);
+    size_t seen_count = 0;
     bool has_wildcard = false;
     bool has_condition = false;
+    bool has_block = false;
     bool have_rtype = false;
     bool ok = true;
     exprty_t rtype = {.kind = TYPE_UNKNOWN};
@@ -1302,6 +1309,25 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         exprty_t pat = check_expr(sema, arm->pattern, exprty_type(scrut));
         if (!pat.ok) {
           ok = false;
+        } else if (int_scrut) {
+          if (arm->pattern->kind != EXPR_NUMBER) {
+            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                       "match pattern must be an integer constant");
+            sema->had_error = true;
+            ok = false;
+          } else {
+            long long value = strtoll(arm->pattern->number.value, NULL, 0);
+            for (size_t i = 0; i < seen_count; i++) {
+              if (seen[i] == value) {
+                diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                           "duplicate match arm for %lld", value);
+                sema->had_error = true;
+                ok = false;
+                break;
+              }
+            }
+            seen[seen_count++] = value;
+          }
         } else if (enm == NULL) {
           if (arm->pattern->kind == EXPR_BOOLEAN) {
             size_t index = arm->pattern->boolean.value ? 1 : 0;
@@ -1349,6 +1375,21 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         }
       }
 
+      if (arm->body != NULL) {
+        has_block = true;
+        if (sema->current_fn == NULL) {
+          diag_error(sema->src, arm->line, arm->col,
+                     "a match arm block is only allowed inside a function");
+          sema->had_error = true;
+          ok = false;
+        } else {
+          for (stmt_t *s = arm->body; s != NULL; s = s->next) {
+            check_stmt(sema, s, sema->current_fn);
+          }
+        }
+        continue;
+      }
+
       type_t hint = have_rtype ? exprty_type(rtype) : expected;
       exprty_t value = check_expr(sema, arm->value, hint);
       if (!value.ok) {
@@ -1367,7 +1408,13 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     }
 
     if (!has_wildcard) {
-      if (enm == NULL) {
+      if (int_scrut) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "match on %s must have a '_' arm",
+                   type_kind_to_str(scrut.kind));
+        sema->had_error = true;
+        ok = false;
+      } else if (enm == NULL) {
         if (has_condition) {
           if (!(covered[0] && covered[1])) {
             diag_error(sema->src, expr->line, expr->col,
@@ -1403,7 +1450,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       }
     }
 
-    if (!have_rtype) {
+    if (has_block) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = ok};
+    } else if (!have_rtype) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     } else {
       result = (exprty_t){.kind = rtype.kind,
@@ -2057,6 +2106,7 @@ static void check_fn(sema_t *sema, decl_t *fn) {
   }
 
   sema->scope = &scope;
+  sema->current_fn = fn;
 
   for (stmt_t *stmt = fn->fn.body; stmt != NULL; stmt = stmt->next) {
     check_stmt(sema, stmt, fn);
@@ -2069,6 +2119,7 @@ static void check_fn(sema_t *sema, decl_t *fn) {
   }
 
   sema->scope = NULL;
+  sema->current_fn = NULL;
 }
 
 static bool check_entry_point(const symtab_t *tab, const source_t *src) {

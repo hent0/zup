@@ -480,6 +480,7 @@ match_arm_t *ast_match_arm_init(arena_t *arena) {
   match_arm_t *arm = arena_alloc(arena, sizeof(match_arm_t));
   arm->pattern = NULL;
   arm->value = NULL;
+  arm->body = NULL;
   arm->line = 0;
   arm->col = 0;
   arm->next = NULL;
@@ -746,6 +747,7 @@ static void print_indent(int depth) {
 }
 
 static void dump_expr(const expr_t *expr, int depth);
+static void dump_stmt(const stmt_t *stmt, int depth);
 
 static void dump_binary(const expr_t *expr, int depth) {
   printf("Binary %s\n", binop_to_str(expr->binary.op));
@@ -842,7 +844,12 @@ static void dump_expr(const expr_t *expr, int depth) {
       if (arm->pattern != NULL) {
         dump_expr(arm->pattern, depth + 2);
       }
-      dump_expr(arm->value, depth + 2);
+      if (arm->value != NULL) {
+        dump_expr(arm->value, depth + 2);
+      }
+      for (const stmt_t *s = arm->body; s != NULL; s = s->next) {
+        dump_stmt(s, depth + 2);
+      }
     }
     break;
   case EXPR_NULL:

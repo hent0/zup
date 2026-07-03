@@ -18,6 +18,6 @@ pub fn main(): i32 {
 --CLEANUP--
 rm -f "${TMPDIR:-/tmp}/zup_fix_cyc_a.zup" "${TMPDIR:-/tmp}/zup_fix_cyc_b.zup"
 --EXPECTERR--
-zup: error: circular import 'zup_fix_cyc_a.zup' [1:1]
+zup: error: circular import 'zup_fix_cyc_a.zup' zup_fix_cyc_b.zup [1:1]
 --EXIT--
 1

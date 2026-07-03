@@ -91,10 +91,12 @@ typedef enum {
 } ExprKind;
 
 typedef struct expr expr_t;
+typedef struct stmt stmt_t;
 typedef struct match_arm match_arm_t;
 struct match_arm {
   expr_t *pattern; // NULL for the '_' arm
-  expr_t *value;
+  expr_t *value;   // NULL when the arm is a statement block
+  stmt_t *body;    // NULL when the arm is an expression
   unsigned int line;
   unsigned int col;
   match_arm_t *next;
@@ -205,7 +207,6 @@ typedef enum {
   STMT_DEFER,
 } StmtKind;
 
-typedef struct stmt stmt_t;
 struct stmt {
   StmtKind kind;
   unsigned int line;

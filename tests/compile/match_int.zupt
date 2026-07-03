@@ -1,0 +1,51 @@
+--TEST--
+match on integers takes char-literal patterns and statement-block arms, mutating state in place
+--FILE--
+const std = import("std");
+
+struct Cursor {
+  line: i32,
+  col: i32,
+
+  fn advance(self, c: u8) {
+    match c {
+      '\n' => {
+        self.line++;
+        self.col = 1;
+      },
+      '\t' => {
+        self.col += 4;
+      },
+      _ => {
+        self.col++;
+      }
+    }
+  }
+}
+
+pub fn main(): i32 {
+  let cur: Cursor = Cursor{line: 1, col: 1};
+  cur.advance('a');
+  cur.advance('a');
+  cur.advance('\n');
+  cur.advance('\t');
+
+  let name: str = match ('\t' as u8) {
+    '\n' => "newline",
+    9 => "tab",
+    _ => "other",
+  };
+  std.io.println("{}", name);
+
+  match cur.line {
+    2 => std.io.println("line two"),
+    _ => std.io.println("line ?"),
+  }
+
+  return cur.line * 10 + cur.col;
+}
+--EXPECT--
+tab
+line two
+--EXIT--
+25

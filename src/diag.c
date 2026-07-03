@@ -4,12 +4,11 @@
 
 void diag_error(const source_t *src, unsigned int line, unsigned int col,
                 const char *fmt, ...) {
-  (void)src;
   va_list args;
   va_start(args, fmt);
   fputs("zup: error: ", stderr);
   vfprintf(stderr, fmt, args);
-  fprintf(stderr, " [%u:%u]\n", line, col);
+  fprintf(stderr, " %s [%u:%u]\n", src->path, line, col);
   va_end(args);
 }
 

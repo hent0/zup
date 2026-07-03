@@ -84,6 +84,8 @@ typedef struct {
   unsigned int label;
   unsigned int loop_label;
   bool uses_str_eq;
+  type_t fn_ret;
+  const char *fn_name;
 
   const char *prefix;
   module_t *module;
@@ -293,6 +295,8 @@ static void emit_string_globals(ctx_t *ctx) {
   }
 }
 
+static int collect_stmt(ctx_t *ctx, stmt_t *stmt);
+
 static int collect_expr(ctx_t *ctx, expr_t *expr) {
   if (expr == NULL) {
     return 0;
@@ -365,8 +369,13 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       if (arm->pattern != NULL && collect_expr(ctx, arm->pattern) != 0) {
         return 1;
       }
-      if (collect_expr(ctx, arm->value) != 0) {
+      if (arm->value != NULL && collect_expr(ctx, arm->value) != 0) {
         return 1;
+      }
+      for (stmt_t *s = arm->body; s != NULL; s = s->next) {
+        if (collect_stmt(ctx, s) != 0) {
+          return 1;
+        }
       }
     }
     return 0;
@@ -1691,6 +1700,9 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
           dest);
 }
 
+static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn);
+static bool block_terminates(stmt_t *body);
+
 static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   unsigned int id = ctx->label++;
   bool is_void = expr->type.kind == TYPE_VOID;
@@ -1718,6 +1730,13 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
               "%%match.arm.%u.%zu\n",
               cmp, id, i, id, i + 1);
       fprintf(ctx->out, "match.body.%u.%zu:\n", id, i);
+    }
+    if (arm->body != NULL) {
+      emit_block(ctx, arm->body, ctx->fn_ret, ctx->fn_name);
+      if (!block_terminates(arm->body)) {
+        fprintf(ctx->out, "  br label %%match.end.%u\n", id);
+      }
+      continue;
     }
     if (is_void) {
       emit_value(ctx, arm->value);
@@ -2302,6 +2321,8 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->defers = NULL;
   ctx->defer_count = 0;
   ctx->loop_defer_base = 0;
+  ctx->fn_ret = decl->fn.return_type;
+  ctx->fn_name = name;
 
   bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "define %s%s @%s(",

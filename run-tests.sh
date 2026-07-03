@@ -211,7 +211,10 @@ while IFS= read -r test; do
     fi
 
     actual=$(cat "$tmp_stdout")
-    actual_err=$(cat "$tmp_stderr")
+    # Diagnostics include the source path; the temp input path is not
+    # predictable from inside a test, so normalize it away, and reduce
+    # fixture paths to their basenames.
+    actual_err=$(sed "s: $tmp_src::g; s:${TMPDIR:-/tmp}/::g" "$tmp_stderr")
 
     ok=true
     $has_expect && [ "$actual" != "$expect" ] && ok=false

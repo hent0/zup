@@ -247,6 +247,8 @@ static expr_t *parse_struct_literal(parser_t *parser, token_t type_name) {
                            ast_struct_literal_init(type_name, parser->arena));
 }
 
+static stmt_t *parse_block(parser_t *parser);
+
 static expr_t *parse_match(parser_t *parser) {
   token_t kw = parser->current;
   advance(parser);
@@ -271,7 +273,11 @@ static expr_t *parse_match(parser_t *parser) {
       arm->pattern = parse_expr(parser);
     }
     expect(parser, TOKEN_FAT_ARROW, "expected '=>' after match pattern");
-    arm->value = parse_expr(parser);
+    if (check(parser, TOKEN_LBRACE)) {
+      arm->body = parse_block(parser);
+    } else {
+      arm->value = parse_expr(parser);
+    }
 
     if (tail == NULL) {
       expr->match_expr.arms = arm;
@@ -281,7 +287,7 @@ static expr_t *parse_match(parser_t *parser) {
     tail = arm;
     expr->match_expr.arm_count++;
 
-    if (!match(parser, TOKEN_COMMA)) {
+    if (!match(parser, TOKEN_COMMA) && arm->body == NULL) {
       break;
     }
   }
@@ -952,7 +958,11 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return stmt;
   }
 
-  expect(parser, TOKEN_SEMICOLON, "expected ';' after expression statement");
+  if (expr->kind == EXPR_MATCH) {
+    match(parser, TOKEN_SEMICOLON);
+  } else {
+    expect(parser, TOKEN_SEMICOLON, "expected ';' after expression statement");
+  }
   return ast_expr_stmt_init(start, expr, parser->arena);
 }
 

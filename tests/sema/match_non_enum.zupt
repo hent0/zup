@@ -1,12 +1,12 @@
 --TEST--
-match requires an enum or bool scrutinee
+match requires an enum, bool, or integer scrutinee
 --FILE--
 pub fn main(): i32 {
-  return match 3 {
+  return match "x" {
     _ => 0,
   };
 }
 --EXPECTERR--
-zup: error: match requires an enum or bool value, got i32 [2:16]
+zup: error: match requires an enum, bool, or integer value, got str [2:16]
 --EXIT--
 1
