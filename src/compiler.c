@@ -32,6 +32,10 @@ static void close_output(FILE *fd) {
 }
 
 static const char *basename_stem(const char *path, arena_t *arena) {
+  if (strcmp(path, "-") == 0) {
+    return "out";
+  }
+
   const char *slash = strrchr(path, '/');
   const char *base = slash ? slash + 1 : path;
   const char *dot = strrchr(base, '.');

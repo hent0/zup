@@ -1,9 +1,8 @@
 #include "utils.h"
 #include "arena.h"
 #include "compiler.h"
-#include "diag.h"
-#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void print_escaped(const char *bytes, size_t len) {
@@ -23,9 +22,44 @@ void print_escaped(const char *bytes, size_t len) {
   }
 }
 
-// Reads a file into `out`. Returns -1 without emitting a diagnostic; callers
-// report the failure with the context they have (entry file vs. import site).
+int read_stdin(const char *path, arena_t *arena, source_t *out) {
+  size_t capacity = 4096;
+  size_t len = 0;
+  char *tmp = malloc(capacity);
+  if (tmp == NULL) {
+    return -1;
+  }
+
+  size_t n;
+  while ((n = fread(tmp + len, 1, capacity - len, stdin)) > 0) {
+    len += n;
+    if (len == capacity) {
+      capacity *= 2;
+      char *grown = realloc(tmp, capacity);
+      if (grown == NULL) {
+        free(tmp);
+        return -1;
+      }
+      tmp = grown;
+    }
+  }
+
+  char *buffer = arena_alloc(arena, len + 1);
+  memcpy(buffer, tmp, len);
+  buffer[len] = '\0';
+  free(tmp);
+
+  out->path = path;
+  out->src = buffer;
+  out->len = len;
+  return 0;
+}
+
 int read_entire_file(const char *path, arena_t *arena, source_t *out) {
+  if (strcmp(path, "-") == 0) {
+    return read_stdin(path, arena, out);
+  }
+
   FILE *fd = fopen(path, "r");
   if (fd == NULL) {
     return -1;
