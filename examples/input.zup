@@ -1,0 +1,13 @@
+const std = import("std");
+
+pub fn main(): i32 {
+  let input: [64]u8;
+
+  std.io.print("Wait a minute, who are you?\n> ");
+  let name: str = std.io.stdin().readln(input);
+
+  std.io.print("Hello, ");
+  std.io.println(name);
+
+  return 0;
+}
