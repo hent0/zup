@@ -26,6 +26,7 @@ const keyword_t keywords[] = {
     {"enum", TOKEN_ENUM},
     {"match", TOKEN_MATCH},
     {"null", TOKEN_NULL},
+    {"defer", TOKEN_DEFER},
     // Types
     {"i8", TOKEN_I8},
     {"u8", TOKEN_U8},

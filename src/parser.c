@@ -837,6 +837,15 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return ast_stmt_init(token, STMT_CONTINUE, parser->arena);
   }
 
+  if (check(parser, TOKEN_DEFER)) {
+    token_t token = expect(parser, TOKEN_DEFER, "expected 'defer'");
+    expr_t *value = parse_expr(parser);
+    expect(parser, TOKEN_SEMICOLON, "expected ';' after defer");
+    stmt_t *stmt = ast_stmt_init(token, STMT_DEFER, parser->arena);
+    stmt->defer_stmt.expr = value;
+    return stmt;
+  }
+
   if (!starts_expr(parser->current.kind)) {
     parse_error(parser, "expected statement");
     return NULL;

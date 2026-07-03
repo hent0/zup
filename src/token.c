@@ -130,6 +130,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_MATCH";
   case TOKEN_NULL:
     return "TOKEN_NULL";
+  case TOKEN_DEFER:
+    return "TOKEN_DEFER";
   // Types
   case TOKEN_VOID:
     return "TOKEN_VOID";

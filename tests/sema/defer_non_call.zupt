@@ -1,0 +1,11 @@
+--TEST--
+defer expects a call: an arbitrary expression has no effect to defer
+--FILE--
+pub fn main(): i32 {
+  defer 5;
+  return 0;
+}
+--EXPECTERR--
+zup: error: defer expects a function or method call [2:9]
+--EXIT--
+1

@@ -196,6 +196,7 @@ typedef enum {
   STMT_FOR,
   STMT_BREAK,
   STMT_CONTINUE,
+  STMT_DEFER,
 } StmtKind;
 
 typedef struct stmt stmt_t;
@@ -237,6 +238,9 @@ struct stmt {
       expr_t *iterable;
       stmt_t *body;
     } for_loop;
+    struct {
+      expr_t *expr;
+    } defer_stmt;
   };
 };
 

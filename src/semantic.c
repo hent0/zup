@@ -1651,6 +1651,17 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     }
     break;
   }
+  case STMT_DEFER: {
+    if (stmt->defer_stmt.expr->kind != EXPR_CALL) {
+      diag_error(sema->src, stmt->defer_stmt.expr->line,
+                 stmt->defer_stmt.expr->col,
+                 "defer expects a function or method call");
+      sema->had_error = true;
+      break;
+    }
+    check_expr(sema, stmt->defer_stmt.expr, type_from_kind(TYPE_UNKNOWN));
+    break;
+  }
   }
 }
 

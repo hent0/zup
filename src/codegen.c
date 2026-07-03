@@ -57,6 +57,12 @@ struct ctx_extern {
   ctx_extern_t *next;
 };
 
+typedef struct ctx_defer ctx_defer_t;
+struct ctx_defer {
+  expr_t *expr;
+  ctx_defer_t *next;
+};
+
 typedef struct {
   FILE *out;
   arena_t *arena;
@@ -70,6 +76,9 @@ typedef struct {
   ctx_struct_t *structs;
   ctx_fn_t *fns;
   ctx_extern_t *externs;
+  ctx_defer_t *defers;
+  size_t defer_count;
+  size_t loop_defer_base;
 
   unsigned int reg;
   unsigned int label;
@@ -421,6 +430,8 @@ static int collect_stmt(ctx_t *ctx, stmt_t *stmt) {
       }
     }
     return 0;
+  case STMT_DEFER:
+    return collect_expr(ctx, stmt->defer_stmt.expr);
   case STMT_BREAK:
   case STMT_CONTINUE:
     return 0;
@@ -1508,6 +1519,23 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
                    .ref = arena_format(ctx->arena, "%%%u", reg)};
 }
 
+static int emit_expr(ctx_t *ctx, expr_t *expr);
+
+static void emit_defers(ctx_t *ctx, size_t base) {
+  size_t remaining = ctx->defer_count - base;
+  for (ctx_defer_t *d = ctx->defers; d != NULL && remaining > 0;
+       d = d->next, remaining--) {
+    emit_expr(ctx, d->expr);
+  }
+}
+
+static void pop_defers(ctx_t *ctx, size_t base) {
+  while (ctx->defer_count > base) {
+    ctx->defers = ctx->defers->next;
+    ctx->defer_count--;
+  }
+}
+
 static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
                        const char *fn_name) {
   expr_t *value = stmt->ret.value;
@@ -1518,17 +1546,20 @@ static int emit_return(ctx_t *ctx, stmt_t *stmt, type_t type,
       return 1;
     }
 
+    emit_defers(ctx, 0);
     fprintf(ctx->out, "  ret void\n");
     return 0;
   }
 
   if (is_aggregate(type.kind)) {
     emit_aggregate_into(ctx, "%sret", type, value);
+    emit_defers(ctx, 0);
     fprintf(ctx->out, "  ret void\n");
     return 0;
   }
 
   value_t val = emit_value(ctx, value);
+  emit_defers(ctx, 0);
   fprintf(ctx->out, "  ret %s %s\n", ir_type(ctx, type), val.ref);
   return 0;
 }
@@ -1624,6 +1655,8 @@ static bool stmt_assigns(stmt_t *body, const char *name) {
 }
 
 static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
+  size_t defer_base = ctx->defer_count;
+  bool terminated = false;
   for (stmt_t *stmt = body; stmt != NULL; stmt = stmt->next) {
     switch (stmt->kind) {
     case STMT_RETURN:
@@ -1686,19 +1719,35 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       break;
     }
     case STMT_BREAK: {
+      emit_defers(ctx, ctx->loop_defer_base);
       fprintf(ctx->out, "  br label %%endwhile.%d\n", ctx->loop_label);
       break;
     }
     case STMT_CONTINUE: {
+      emit_defers(ctx, ctx->loop_defer_base);
       fprintf(ctx->out, "  br label %%cond.%d\n", ctx->loop_label);
+      break;
+    }
+    case STMT_DEFER: {
+      ctx_defer_t *node = arena_alloc(ctx->arena, sizeof(ctx_defer_t));
+      node->expr = stmt->defer_stmt.expr;
+      node->next = ctx->defers;
+      ctx->defers = node;
+      ctx->defer_count++;
       break;
     }
     }
 
     if (stmt_terminates(stmt)) {
+      terminated = true;
       break;
     }
   }
+
+  if (!terminated) {
+    emit_defers(ctx, defer_base);
+  }
+  pop_defers(ctx, defer_base);
 
   return 0;
 }
@@ -1710,7 +1759,9 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
 
   unsigned int label = ctx->label++;
   unsigned int outer = ctx->loop_label;
+  size_t outer_defer_base = ctx->loop_defer_base;
   ctx->loop_label = label;
+  ctx->loop_defer_base = ctx->defer_count;
 
   fprintf(ctx->out, "  br label %%cond.%d\n", label);
   fprintf(ctx->out, "cond.%d:\n", label);
@@ -1727,6 +1778,7 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   fprintf(ctx->out, "endwhile.%d:\n", label);
 
   ctx->loop_label = outer;
+  ctx->loop_defer_base = outer_defer_base;
   return 0;
 }
 
@@ -1749,7 +1801,9 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
 
   unsigned int label = ctx->label++;
   unsigned int outer = ctx->loop_label;
+  size_t outer_defer_base = ctx->loop_defer_base;
   ctx->loop_label = label;
+  ctx->loop_defer_base = ctx->defer_count;
 
   fprintf(ctx->out, "  br label %%cond.%d\n", label);
   fprintf(ctx->out, "cond.%d:\n", label);
@@ -1778,6 +1832,7 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
 
   fprintf(ctx->out, "endwhile.%d:\n", label);
   ctx->loop_label = outer;
+  ctx->loop_defer_base = outer_defer_base;
   return 0;
 }
 
@@ -1810,7 +1865,9 @@ static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
 
   unsigned int label = ctx->label++;
   unsigned int outer = ctx->loop_label;
+  size_t outer_defer_base = ctx->loop_defer_base;
   ctx->loop_label = label;
+  ctx->loop_defer_base = ctx->defer_count;
 
   fprintf(ctx->out, "  br label %%cond.%u\n", label);
   fprintf(ctx->out, "cond.%u:\n", label);
@@ -1876,6 +1933,7 @@ static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
 
   fprintf(ctx->out, "endwhile.%u:\n", label);
   ctx->loop_label = outer;
+  ctx->loop_defer_base = outer_defer_base;
   return 0;
 }
 
@@ -1977,6 +2035,9 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->loop_label = 0;
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
+  ctx->defers = NULL;
+  ctx->defer_count = 0;
+  ctx->loop_defer_base = 0;
 
   bool sret = is_aggregate(decl->fn.return_type.kind);
   fprintf(ctx->out, "define %s%s @%s(",

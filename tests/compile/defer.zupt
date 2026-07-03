@@ -1,0 +1,42 @@
+--TEST--
+defer runs at block exit: end of block, each loop iteration, break, and LIFO before return
+--FILE--
+const std = import("std");
+
+fn scoped(): i32 {
+  defer std.io.println("fn-defer-1");
+  defer std.io.println("fn-defer-2");
+
+  if true {
+    defer std.io.println("if-defer");
+    std.io.println("if-body");
+  }
+
+  let i: i32 = 0;
+  while i < 2 {
+    defer std.io.println("loop-defer");
+    if i == 1 {
+      break;
+    }
+    std.io.println("loop-body");
+    i = i + 1;
+  }
+
+  std.io.println("before-return");
+  return 7;
+}
+
+pub fn main(): i32 {
+  return scoped();
+}
+--EXPECT--
+if-body
+if-defer
+loop-body
+loop-defer
+loop-defer
+before-return
+fn-defer-2
+fn-defer-1
+--EXIT--
+7

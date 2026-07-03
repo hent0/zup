@@ -918,6 +918,10 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
   case STMT_CONTINUE:
     printf("Continue\n");
     break;
+  case STMT_DEFER:
+    printf("Defer\n");
+    dump_expr(stmt->defer_stmt.expr, depth + 1);
+    break;
   }
 }
 

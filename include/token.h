@@ -61,6 +61,7 @@ typedef enum {
   TOKEN_ENUM,
   TOKEN_MATCH,
   TOKEN_NULL,
+  TOKEN_DEFER,
   // Types
   TOKEN_VOID,
   TOKEN_I8,
