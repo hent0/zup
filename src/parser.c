@@ -874,7 +874,49 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return NULL;
   }
 
-  if (match(parser, TOKEN_EQUAL)) {
+  bool compound = true;
+  BinaryOp compound_op = BINOP_ADD;
+  switch (parser->current.kind) {
+  case TOKEN_PLUS_EQUAL:
+    compound_op = BINOP_ADD;
+    break;
+  case TOKEN_MINUS_EQUAL:
+    compound_op = BINOP_SUB;
+    break;
+  case TOKEN_STAR_EQUAL:
+    compound_op = BINOP_MUL;
+    break;
+  case TOKEN_SLASH_EQUAL:
+    compound_op = BINOP_DIV;
+    break;
+  case TOKEN_PERCENT_EQUAL:
+    compound_op = BINOP_REM;
+    break;
+  case TOKEN_AMPERSAND_EQUAL:
+    compound_op = BINOP_BITAND;
+    break;
+  case TOKEN_PIPE_EQUAL:
+    compound_op = BINOP_BITOR;
+    break;
+  case TOKEN_CARET_EQUAL:
+    compound_op = BINOP_BITXOR;
+    break;
+  case TOKEN_LESS_LESS_EQUAL:
+    compound_op = BINOP_SHL;
+    break;
+  case TOKEN_GREATER_GREATER_EQUAL:
+    compound_op = BINOP_SHR;
+    break;
+  default:
+    compound = false;
+    break;
+  }
+  bool coalesce = parser->current.kind == TOKEN_QUESTION_QUESTION_EQUAL;
+
+  if (match(parser, TOKEN_EQUAL) || compound || coalesce) {
+    if (compound || coalesce) {
+      advance(parser);
+    }
     if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD &&
         expr->kind != EXPR_INDEX) {
       parse_error(parser, "invalid assignment target");
@@ -885,7 +927,11 @@ static stmt_t *parse_stmt(parser_t *parser) {
       return NULL;
     }
     expect(parser, TOKEN_SEMICOLON, "expected ';' after assignment");
-    return ast_assign_init(start, expr, value, parser->arena);
+    stmt_t *stmt = ast_assign_init(start, expr, value, parser->arena);
+    stmt->assign.compound = compound;
+    stmt->assign.coalesce = coalesce;
+    stmt->assign.op = compound_op;
+    return stmt;
   }
 
   expect(parser, TOKEN_SEMICOLON, "expected ';' after expression statement");

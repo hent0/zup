@@ -1,0 +1,12 @@
+--TEST--
+'??=' requires an optional target
+--FILE--
+pub fn main(): i32 {
+  let x: i32 = 1;
+  x ??= 2;
+  return 0;
+}
+--EXPECTERR--
+zup: error: left side of '??=' must be an optional, got i32 [3:3]
+--EXIT--
+1

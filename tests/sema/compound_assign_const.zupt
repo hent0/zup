@@ -1,0 +1,12 @@
+--TEST--
+compound assignment respects const bindings
+--FILE--
+pub fn main(): i32 {
+  const c: i32 = 1;
+  c += 1;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'c' [3:3]
+--EXIT--
+1

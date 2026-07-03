@@ -1,0 +1,12 @@
+--TEST--
+compound assignment requires numeric operands (integers for bitwise ops)
+--FILE--
+pub fn main(): i32 {
+  let s: str = "a";
+  s += "b";
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '+=' to str and str [3:3]
+--EXIT--
+1

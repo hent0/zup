@@ -1,0 +1,35 @@
+--TEST--
+compound assignments load-op-store: arithmetic, bitwise, shifts, on locals, fields, elements, and floats
+--FILE--
+struct P {
+  v: i32,
+}
+
+pub fn main(): i32 {
+  let x: i32 = 10;
+  x += 5;
+  x -= 3;
+  x *= 4;
+  x /= 2;
+  x %= 7;
+
+  let bits: i32 = 12;
+  bits &= 10;
+  bits |= 1;
+  bits ^= 2;
+  bits <<= 2;
+  bits >>= 1;
+
+  let arr: [2]i32 = [1, 2];
+  arr[0] += 41;
+
+  let p: P = P{v: 1};
+  p.v += 4;
+
+  let f: f64 = 1.5;
+  f *= 2.0;
+
+  return x + bits + arr[0] + p.v + (f as i32);
+}
+--EXIT--
+75

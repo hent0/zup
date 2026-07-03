@@ -1,0 +1,26 @@
+--TEST--
+'??=' stores the fallback only when the optional is null, evaluating it lazily
+--FILE--
+const std = import("std");
+
+fn loud(v: i32): i32 {
+  std.io.println("eval {}", v);
+  return v;
+}
+
+pub fn main(): i32 {
+  let a: ?i32 = null;
+  a ??= loud(5);
+  a ??= loud(9);
+
+  let s: ?str = null;
+  s ??= "fallback";
+  std.io.println("{}", s ?? "");
+
+  return a ?? 0;
+}
+--EXPECT--
+eval 5
+fallback
+--EXIT--
+5

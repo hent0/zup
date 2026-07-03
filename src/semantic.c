@@ -1606,7 +1606,43 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       break;
     }
 
+    if (stmt->assign.coalesce) {
+      if (lhs.ok && (lhs.kind != TYPE_OPTIONAL || lhs.element == NULL)) {
+        diag_error(sema->src, stmt->line, stmt->col,
+                   "left side of '\?\?=' must be an optional, got %s",
+                   type_to_str(exprty_type(lhs)));
+        sema->had_error = true;
+        check_expr(sema, stmt->assign.value, type_from_kind(TYPE_UNKNOWN));
+        break;
+      }
+      type_t elem =
+          lhs.ok ? *lhs.element : type_from_kind(TYPE_UNKNOWN);
+      exprty_t fallback = check_expr(sema, stmt->assign.value, elem);
+      if (lhs.ok && fallback.ok && !assignable(elem, fallback)) {
+        diag_error(sema->src, stmt->assign.value->line,
+                   stmt->assign.value->col,
+                   "'\?\?=' fallback has type %s, expected %s",
+                   type_to_str(exprty_type(fallback)), type_to_str(elem));
+        sema->had_error = true;
+      }
+      break;
+    }
     exprty_t value = check_expr(sema, stmt->assign.value, exprty_type(lhs));
+    if (stmt->assign.compound) {
+      bool bitwise = !binop_is_arithmetic(stmt->assign.op);
+      bool valid = lhs.kind == value.kind &&
+                   (bitwise ? type_is_integer(lhs.kind)
+                            : type_is_numeric(lhs.kind));
+      if (lhs.ok && value.ok && !valid) {
+        diag_error(sema->src, stmt->line, stmt->col,
+                   "cannot apply '%s=' to %s and %s",
+                   binop_to_str(stmt->assign.op),
+                   type_to_str(exprty_type(lhs)),
+                   type_to_str(exprty_type(value)));
+        sema->had_error = true;
+      }
+      break;
+    }
     if (lhs.ok && value.ok) {
       type_t to = {.kind = lhs.kind, .name = lhs.name};
       if (!assignable(to, value)) {

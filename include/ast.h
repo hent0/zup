@@ -232,6 +232,9 @@ struct stmt {
     struct {
       expr_t *target;
       expr_t *value;
+      bool compound;
+      bool coalesce;
+      BinaryOp op;
     } assign;
     struct {
       expr_t *cond;

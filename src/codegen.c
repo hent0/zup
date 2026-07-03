@@ -1867,6 +1867,41 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     }
     case STMT_ASSIGN: {
       const char *addr = emit_addr(ctx, stmt->assign.target);
+      if (stmt->assign.coalesce) {
+        unsigned int id = ctx->label++;
+        const char *ir = ir_type(ctx, stmt->assign.target->type);
+        unsigned int fp = ctx->reg++;
+        fprintf(ctx->out,
+                "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", fp, ir,
+                addr);
+        unsigned int flag = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, fp);
+        fprintf(ctx->out,
+                "  br i1 %%%u, label %%coal.end.%u, label %%coal.set.%u\n",
+                flag, id, id);
+        fprintf(ctx->out, "coal.set.%u:\n", id);
+        emit_optional_wrap_into(ctx, addr, stmt->assign.target->type,
+                                stmt->assign.value);
+        fprintf(ctx->out, "  br label %%coal.end.%u\n", id);
+        fprintf(ctx->out, "coal.end.%u:\n", id);
+        break;
+      }
+      if (stmt->assign.compound) {
+        TypeKind kind = stmt->assign.target->type.kind;
+        const char *ir = ir_type(ctx, stmt->assign.target->type);
+        unsigned int old = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", old, ir, addr);
+        value_t value = emit_value(ctx, stmt->assign.value);
+        const char *op = type_is_float(kind)
+                             ? binop_to_ir_float(stmt->assign.op)
+                             : binop_to_ir(stmt->assign.op,
+                                           type_is_signed_integer(kind));
+        unsigned int result = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = %s %s %%%u, %s\n", result, op, ir, old,
+                value.ref);
+        fprintf(ctx->out, "  store %s %%%u, ptr %s\n", ir, result, addr);
+        break;
+      }
       if (is_aggregate(stmt->assign.target->type.kind)) {
         emit_aggregate_into(ctx, addr, stmt->assign.target->type,
                             stmt->assign.value);
