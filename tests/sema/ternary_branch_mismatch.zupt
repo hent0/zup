@@ -1,0 +1,11 @@
+--TEST--
+both ternary branches must have the same type
+--FILE--
+pub fn main(): i32 {
+  let x = true ? 1 : "no";
+  return 0;
+}
+--EXPECTERR--
+zup: error: ternary branches must have the same type, got i32 and str [2:22]
+--EXIT--
+1

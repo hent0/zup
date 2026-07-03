@@ -661,8 +661,25 @@ static expr_t *parse_or(parser_t *parser) {
   return left;
 }
 
+static expr_t *parse_ternary(parser_t *parser) {
+  expr_t *cond = parse_or(parser);
+  if (cond == NULL || !match(parser, TOKEN_QUESTION)) {
+    return cond;
+  }
+  expr_t *then = parse_ternary(parser);
+  if (then == NULL) {
+    return NULL;
+  }
+  expect(parser, TOKEN_COLON, "expected ':' in ternary expression");
+  expr_t *els = parse_ternary(parser);
+  if (els == NULL) {
+    return NULL;
+  }
+  return ast_ternary_init(cond, then, els, parser->arena);
+}
+
 static expr_t *parse_expr(parser_t *parser) {
-  expr_t *lhs = parse_or(parser);
+  expr_t *lhs = parse_ternary(parser);
   if (lhs != NULL && match(parser, TOKEN_QUESTION_QUESTION)) {
     expr_t *rhs = parse_expr(parser);
     if (rhs == NULL) {

@@ -147,11 +147,7 @@ pub fn printerr(fmt: str, args: ...) {
 }
 
 fn boolStr(v: i64): str {
-  if v == 1 {
-    return "true";
-  }
-
-  return "false";
+  return v == 1 ? "true" : "false";
 }
 
 fn put(file: File, s: str) {

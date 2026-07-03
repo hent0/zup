@@ -86,6 +86,7 @@ typedef enum {
   EXPR_MATCH,
   EXPR_NULL,
   EXPR_COALESCE,
+  EXPR_TERNARY,
   EXPR_IMPORT,
 } ExprKind;
 
@@ -180,6 +181,11 @@ struct expr {
       expr_t *lhs;
       expr_t *rhs;
     } coalesce;
+    struct {
+      expr_t *cond;
+      expr_t *then;
+      expr_t *els;
+    } ternary;
     struct {
       char *path;
     } import;
@@ -375,6 +381,8 @@ expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena);
 match_arm_t *ast_match_arm_init(arena_t *arena);
 expr_t *ast_null_init(token_t token, arena_t *arena);
 expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena);
+expr_t *ast_ternary_init(expr_t *cond, expr_t *then, expr_t *els,
+                         arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);
 
 stmt_t *ast_return_init(token_t token, expr_t *value, arena_t *arena);

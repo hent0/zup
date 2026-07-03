@@ -1,0 +1,20 @@
+--TEST--
+only the taken ternary branch is evaluated
+--FILE--
+const std = import("std");
+
+fn loud(v: i32): i32 {
+  std.io.println("eval {}", v);
+  return v;
+}
+
+pub fn main(): i32 {
+  let x: i32 = true ? loud(1) : loud(2);
+  let y: i32 = false ? loud(3) : loud(4);
+  return x + y;
+}
+--EXPECT--
+eval 1
+eval 4
+--EXIT--
+5

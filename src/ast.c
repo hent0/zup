@@ -508,6 +508,20 @@ expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_ternary_init(expr_t *cond, expr_t *then, expr_t *els,
+                         arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_TERNARY;
+  expr->line = cond->line;
+  expr->col = cond->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->ternary.cond = cond;
+  expr->ternary.then = then;
+  expr->ternary.els = els;
+  return expr;
+}
+
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_IMPORT;
@@ -836,6 +850,12 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Coalesce\n");
     dump_expr(expr->coalesce.lhs, depth + 1);
     dump_expr(expr->coalesce.rhs, depth + 1);
+    break;
+  case EXPR_TERNARY:
+    printf("Ternary\n");
+    dump_expr(expr->ternary.cond, depth + 1);
+    dump_expr(expr->ternary.then, depth + 1);
+    dump_expr(expr->ternary.els, depth + 1);
     break;
   case EXPR_IMPORT:
     printf("Import \"%s\"\n", expr->import.path);

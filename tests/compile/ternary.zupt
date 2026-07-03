@@ -1,0 +1,21 @@
+--TEST--
+ternary selects by condition: in bindings, returns, chained right-associatively, and with str branches
+--FILE--
+const std = import("std");
+
+fn pick(flag: bool): i32 {
+  return flag ? 1 : 2;
+}
+
+pub fn main(): i32 {
+  let a: i32 = true ? 10 : 20;
+  let b: i32 = false ? 10 : 20;
+  let s: str = a > b ? "bigger" : "smaller";
+  std.io.println("{}", s);
+  let chained: i32 = false ? 1 : true ? 2 : 3;
+  return pick(true) + pick(false) + a + b + chained;
+}
+--EXPECT--
+smaller
+--EXIT--
+35

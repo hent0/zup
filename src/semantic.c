@@ -711,6 +711,33 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
     }
     break;
+  case EXPR_TERNARY: {
+    exprty_t cond =
+        check_expr(sema, expr->ternary.cond, type_from_kind(TYPE_BOOL));
+    if (cond.ok && cond.kind != TYPE_BOOL) {
+      diag_error(sema->src, expr->ternary.cond->line, expr->ternary.cond->col,
+                 "ternary condition must be bool, got %s",
+                 type_kind_to_str(cond.kind));
+      sema->had_error = true;
+    }
+    exprty_t then = check_expr(sema, expr->ternary.then, expected);
+    type_t hint = then.ok ? exprty_type(then) : expected;
+    exprty_t els = check_expr(sema, expr->ternary.els, hint);
+    bool ok = cond.ok && cond.kind == TYPE_BOOL && then.ok && els.ok;
+    if (then.ok && els.ok && !assignable(exprty_type(then), els)) {
+      diag_error(sema->src, expr->ternary.els->line, expr->ternary.els->col,
+                 "ternary branches must have the same type, got %s and %s",
+                 type_to_str(exprty_type(then)), type_to_str(exprty_type(els)));
+      sema->had_error = true;
+      ok = false;
+    }
+    result = (exprty_t){.kind = then.kind,
+                        .name = then.name,
+                        .element = then.element,
+                        .array_length = then.array_length,
+                        .ok = ok};
+    break;
+  }
   case EXPR_COALESCE: {
     exprty_t lhs =
         check_expr(sema, expr->coalesce.lhs, type_from_kind(TYPE_UNKNOWN));

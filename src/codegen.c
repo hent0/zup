@@ -375,6 +375,12 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       return 1;
     }
     return collect_expr(ctx, expr->coalesce.rhs);
+  case EXPR_TERNARY:
+    if (collect_expr(ctx, expr->ternary.cond) != 0 ||
+        collect_expr(ctx, expr->ternary.then) != 0) {
+      return 1;
+    }
+    return collect_expr(ctx, expr->ternary.els);
   case EXPR_NUMBER:
   case EXPR_ID:
   case EXPR_BOOLEAN:
@@ -1073,6 +1079,59 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
   }
   case EXPR_MATCH:
     return emit_match(ctx, expr, NULL);
+  case EXPR_TERNARY: {
+    value_t cond = emit_value(ctx, expr->ternary.cond);
+    unsigned int id = ctx->label++;
+    bool is_void = expr->type.kind == TYPE_VOID;
+    bool agg = is_aggregate(expr->type.kind);
+    const char *dest = NULL;
+    if (!is_void) {
+      unsigned int slot = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
+              ir_type(ctx, expr->type));
+      dest = arena_format(ctx->arena, "%%%u", slot);
+    }
+    fprintf(ctx->out,
+            "  br i1 %s, label %%tern.then.%u, label %%tern.else.%u\n",
+            cond.ref, id, id);
+
+    fprintf(ctx->out, "tern.then.%u:\n", id);
+    if (is_void) {
+      emit_value(ctx, expr->ternary.then);
+    } else if (agg) {
+      emit_aggregate_into(ctx, dest, expr->type, expr->ternary.then);
+    } else {
+      value_t v = emit_value(ctx, expr->ternary.then);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, expr->type),
+              v.ref, dest);
+    }
+    fprintf(ctx->out, "  br label %%tern.end.%u\n", id);
+
+    fprintf(ctx->out, "tern.else.%u:\n", id);
+    if (is_void) {
+      emit_value(ctx, expr->ternary.els);
+    } else if (agg) {
+      emit_aggregate_into(ctx, dest, expr->type, expr->ternary.els);
+    } else {
+      value_t v = emit_value(ctx, expr->ternary.els);
+      fprintf(ctx->out, "  store %s %s, ptr %s\n", ir_type(ctx, expr->type),
+              v.ref, dest);
+    }
+    fprintf(ctx->out, "  br label %%tern.end.%u\n", id);
+
+    fprintf(ctx->out, "tern.end.%u:\n", id);
+    if (is_void) {
+      return (value_t){.type = expr->type, .ref = NULL};
+    }
+    if (agg) {
+      return (value_t){.type = expr->type, .ref = dest};
+    }
+    unsigned int loaded = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", loaded,
+            ir_type(ctx, expr->type), dest);
+    return (value_t){.type = expr->type,
+                     .ref = arena_format(ctx->arena, "%%%u", loaded)};
+  }
   default:
     return (value_t){
         .type = (type_t){.kind = TYPE_UNKNOWN},
@@ -1684,6 +1743,9 @@ static int emit_expr(ctx_t *ctx, expr_t *expr) {
     return 0;
   case EXPR_MATCH:
     emit_match(ctx, expr, NULL);
+    return 0;
+  case EXPR_TERNARY:
+    emit_value(ctx, expr);
     return 0;
   default:
     NOT_IMPLEMENTED;
