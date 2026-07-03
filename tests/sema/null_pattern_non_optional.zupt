@@ -1,0 +1,14 @@
+--TEST--
+a 'null' pattern only makes sense against an optional scrutinee
+--FILE--
+pub fn main(): i32 {
+  let c: u8 = 10;
+  return match c {
+    null => 1,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: a 'null' pattern requires an optional scrutinee [4:5]
+--EXIT--
+1

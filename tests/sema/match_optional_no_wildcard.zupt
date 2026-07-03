@@ -1,0 +1,14 @@
+--TEST--
+a match on an optional must end with '_'
+--FILE--
+pub fn main(): i32 {
+  let c: ?u8 = 10;
+  return match c {
+    10 => 1,
+    null => 2,
+  };
+}
+--EXPECTERR--
+zup: error: match on ?u8 must have a '_' arm [3:10]
+--EXIT--
+1

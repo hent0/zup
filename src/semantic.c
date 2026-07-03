@@ -925,6 +925,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                (lhs.kind == TYPE_OPTIONAL || lhs.kind == TYPE_CSTR) &&
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+    } else if ((lhs.kind == TYPE_OPTIONAL) != (rhs.kind == TYPE_OPTIONAL) &&
+               (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE) &&
+               (lhs.kind == TYPE_OPTIONAL ? lhs : rhs).element != NULL &&
+               (type_is_numeric((lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind) ||
+                (lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind == TYPE_ENUM ||
+                (lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind == TYPE_BOOL) &&
+               types_equal(*(lhs.kind == TYPE_OPTIONAL ? lhs : rhs).element,
+                           exprty_type(lhs.kind == TYPE_OPTIONAL ? rhs
+                                                                 : lhs))) {
+      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
                (type_is_float(lhs.kind) &&
                 !binop_is_arithmetic(expr->binary.op))) {
@@ -1250,21 +1260,30 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
+    bool opt_scrut = scrut.kind == TYPE_OPTIONAL && scrut.element != NULL;
+    exprty_t inner = scrut;
+    if (opt_scrut) {
+      inner = (exprty_t){.kind = scrut.element->kind,
+                         .name = scrut.element->name,
+                         .element = scrut.element->element,
+                         .array_length = scrut.element->array_length,
+                         .ok = true};
+    }
     decl_t *enm = NULL;
-    if (scrut.kind == TYPE_ENUM && scrut.name != NULL) {
-      enm = typetab_lookup(sema->types, scrut.name);
+    if (inner.kind == TYPE_ENUM && inner.name != NULL) {
+      enm = typetab_lookup(sema->types, inner.name);
       if (enm == NULL) {
-        enm = imports_pub_enum(sema, scrut.name);
+        enm = imports_pub_enum(sema, inner.name);
       }
       if (enm == NULL || enm->kind != DECL_ENUM) {
         diag_error(sema->src, expr->match_expr.scrutinee->line,
                    expr->match_expr.scrutinee->col, "unknown enum '%s'",
-                   scrut.name);
+                   inner.name);
         sema->had_error = true;
         result = (exprty_t){.kind = TYPE_VOID, .ok = false};
         break;
       }
-    } else if (scrut.kind != TYPE_BOOL && !type_is_integer(scrut.kind)) {
+    } else if (inner.kind != TYPE_BOOL && !type_is_integer(inner.kind)) {
       diag_error(sema->src, expr->match_expr.scrutinee->line,
                  expr->match_expr.scrutinee->col,
                  "match requires an enum, bool, or integer value, got %s",
@@ -1273,7 +1292,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    bool int_scrut = type_is_integer(scrut.kind);
+    bool int_scrut = type_is_integer(inner.kind);
     if (expr->match_expr.arms == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "match must have at least one arm");
@@ -1288,6 +1307,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     long long *seen = arena_alloc(
         sema->arena, sizeof(long long) * expr->match_expr.arm_count);
     size_t seen_count = 0;
+    bool seen_null = false;
     bool has_wildcard = false;
     bool has_condition = false;
     bool has_block = false;
@@ -1305,8 +1325,24 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
           sema->had_error = true;
           ok = false;
         }
+      } else if (arm->pattern->kind == EXPR_NULL) {
+        if (!opt_scrut) {
+          diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                     "a 'null' pattern requires an optional scrutinee");
+          sema->had_error = true;
+          ok = false;
+        } else {
+          check_expr(sema, arm->pattern, exprty_type(scrut));
+          if (seen_null) {
+            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                       "duplicate match arm for 'null'");
+            sema->had_error = true;
+            ok = false;
+          }
+          seen_null = true;
+        }
       } else {
-        exprty_t pat = check_expr(sema, arm->pattern, exprty_type(scrut));
+        exprty_t pat = check_expr(sema, arm->pattern, exprty_type(inner));
         if (!pat.ok) {
           ok = false;
         } else if (int_scrut) {
@@ -1349,11 +1385,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
             has_condition = true;
           }
         } else if (pat.kind != TYPE_ENUM || pat.name == NULL ||
-                   strcmp(pat.name, scrut.name) != 0 ||
+                   strcmp(pat.name, inner.name) != 0 ||
                    arm->pattern->kind != EXPR_NUMBER) {
           diag_error(sema->src, arm->pattern->line, arm->pattern->col,
                      "match pattern must be a member of enum '%s'",
-                     bare_type_name(scrut.name));
+                     bare_type_name(inner.name));
           sema->had_error = true;
           ok = false;
         } else {
@@ -1408,10 +1444,10 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     }
 
     if (!has_wildcard) {
-      if (int_scrut) {
+      if (opt_scrut || int_scrut) {
         diag_error(sema->src, expr->line, expr->col,
                    "match on %s must have a '_' arm",
-                   type_kind_to_str(scrut.kind));
+                   type_to_str(exprty_type(scrut)));
         sema->had_error = true;
         ok = false;
       } else if (enm == NULL) {

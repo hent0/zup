@@ -1,0 +1,29 @@
+--TEST--
+an optional compares against a payload value: null is never equal, '!=' is the negation
+--FILE--
+fn some(v: u8): ?u8 {
+  return v;
+}
+
+fn none(): ?u8 {
+  return null;
+}
+
+pub fn main(): i32 {
+  let hit: i32 = 0;
+  if some('/') == '/' {
+    hit += 1;
+  }
+  if some('x') != '/' {
+    hit += 2;
+  }
+  if none() == '/' {
+    hit += 4;
+  }
+  if none() != '/' {
+    hit += 8;
+  }
+  return hit;
+}
+--EXIT--
+11

@@ -1,0 +1,36 @@
+--TEST--
+match unwraps an optional scrutinee: payload constants match values and 'null' matches the empty case
+--FILE--
+const std = import("std");
+
+fn peek(i: i64, src: str): ?u8 {
+  if i + 1 < src.len {
+    return src[i + 1];
+  }
+  return null;
+}
+
+fn classify(c: ?u8): str {
+  return match c {
+    '/' => "slash",
+    '*' => "star",
+    null => "end",
+    _ => "other",
+  };
+}
+
+pub fn main(): i32 {
+  let src: str = "a/*";
+  std.io.println("{}", classify(peek(0, src)));
+  std.io.println("{}", classify(peek(1, src)));
+  std.io.println("{}", classify(peek(2, src)));
+  std.io.println("{}", classify(peek(5, src)));
+  return 0;
+}
+--EXPECT--
+slash
+star
+end
+end
+--EXIT--
+0

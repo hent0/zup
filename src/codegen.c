@@ -943,8 +943,13 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
 
     if (expr->binary.lhs->type.kind == TYPE_OPTIONAL ||
         expr->binary.rhs->type.kind == TYPE_OPTIONAL) {
-      expr_t *opt = expr->binary.lhs->kind != EXPR_NULL ? expr->binary.lhs
-                                                        : expr->binary.rhs;
+      expr_t *l = expr->binary.lhs;
+      expr_t *r = expr->binary.rhs;
+      expr_t *opt = l->kind == EXPR_NULL                ? r
+                    : r->kind == EXPR_NULL              ? l
+                    : l->type.kind == TYPE_OPTIONAL     ? l
+                                                        : r;
+      expr_t *other = opt == l ? r : l;
       const char *addr = emit_addr(ctx, opt);
       if (addr == NULL) {
         addr = emit_value(ctx, opt).ref;
@@ -954,6 +959,31 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
               f, ir_type(ctx, opt->type), addr);
       unsigned int flag = ctx->reg++;
       fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, f);
+
+      if (other->kind != EXPR_NULL) {
+        const char *elem_ir = ir_type(ctx, *opt->type.element);
+        unsigned int pp = ctx->reg++;
+        fprintf(ctx->out,
+                "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n", pp,
+                ir_type(ctx, opt->type), addr);
+        unsigned int pv = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = load %s, ptr %%%u\n", pv, elem_ir, pp);
+        value_t o = emit_value(ctx, other);
+        unsigned int eq = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = icmp eq %s %%%u, %s\n", eq, elem_ir, pv,
+                o.ref);
+        unsigned int both = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = and i1 %%%u, %%%u\n", both, flag, eq);
+        if (expr->binary.op == BINOP_NE) {
+          unsigned int inv = ctx->reg++;
+          fprintf(ctx->out, "  %%%u = xor i1 %%%u, true\n", inv, both);
+          return (value_t){.type = (type_t){.kind = TYPE_BOOL},
+                           .ref = arena_format(ctx->arena, "%%%u", inv)};
+        }
+        return (value_t){.type = (type_t){.kind = TYPE_BOOL},
+                         .ref = arena_format(ctx->arena, "%%%u", both)};
+      }
+
       if (expr->binary.op == BINOP_EQ) {
         unsigned int inv = ctx->reg++;
         fprintf(ctx->out, "  %%%u = xor i1 %%%u, true\n", inv, flag);
@@ -1706,7 +1736,36 @@ static bool block_terminates(stmt_t *body);
 static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   unsigned int id = ctx->label++;
   bool is_void = expr->type.kind == TYPE_VOID;
-  value_t scrut = emit_value(ctx, expr->match_expr.scrutinee);
+  expr_t *scrutinee = expr->match_expr.scrutinee;
+
+  const char *scrut_ref;
+  const char *scrut_ir;
+  const char *flag_ref = NULL;
+  if (scrutinee->type.kind == TYPE_OPTIONAL) {
+    const char *opt_ir = ir_type(ctx, scrutinee->type);
+    const char *addr = emit_addr(ctx, scrutinee);
+    if (addr == NULL) {
+      addr = emit_value(ctx, scrutinee).ref;
+    }
+    unsigned int fp = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", fp,
+            opt_ir, addr);
+    unsigned int fl = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", fl, fp);
+    unsigned int pp = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n", pp,
+            opt_ir, addr);
+    const char *elem_ir = ir_type(ctx, *scrutinee->type.element);
+    unsigned int pv = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %%%u\n", pv, elem_ir, pp);
+    flag_ref = arena_format(ctx->arena, "%%%u", fl);
+    scrut_ref = arena_format(ctx->arena, "%%%u", pv);
+    scrut_ir = elem_ir;
+  } else {
+    value_t scrut = emit_value(ctx, scrutinee);
+    scrut_ref = scrut.ref;
+    scrut_ir = ir_type(ctx, scrut.type);
+  }
 
   if (!is_void && dest == NULL) {
     unsigned int slot = ctx->reg++;
@@ -1721,10 +1780,22 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
        arm = arm->next, i++) {
     fprintf(ctx->out, "match.arm.%u.%zu:\n", id, i);
     if (arm->pattern != NULL && arm->next != NULL) {
-      value_t pat = emit_value(ctx, arm->pattern);
-      unsigned int cmp = ctx->reg++;
-      fprintf(ctx->out, "  %%%u = icmp eq %s %s, %s\n", cmp,
-              ir_type(ctx, scrut.type), scrut.ref, pat.ref);
+      unsigned int cmp;
+      if (arm->pattern->kind == EXPR_NULL) {
+        cmp = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", cmp, flag_ref);
+      } else {
+        value_t pat = emit_value(ctx, arm->pattern);
+        unsigned int eq = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = icmp eq %s %s, %s\n", eq, scrut_ir,
+                scrut_ref, pat.ref);
+        if (flag_ref != NULL) {
+          cmp = ctx->reg++;
+          fprintf(ctx->out, "  %%%u = and i1 %s, %%%u\n", cmp, flag_ref, eq);
+        } else {
+          cmp = eq;
+        }
+      }
       fprintf(ctx->out,
               "  br i1 %%%u, label %%match.body.%u.%zu, label "
               "%%match.arm.%u.%zu\n",
