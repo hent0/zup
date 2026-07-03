@@ -378,6 +378,12 @@ token_t lexer_next_token(lexer_t *lexer) {
   case '\'':
     return char_literal(lexer);
   case '+':
+    if (peek(lexer) == '+') {
+      return advance_with(
+          lexer, advance_with(lexer, token_init(TOKEN_PLUS_PLUS,
+                                                .line = lexer->line,
+                                                lexer->col)));
+    }
     if (peek(lexer) == '=') {
       return advance_with(
           lexer, advance_with(lexer, token_init(TOKEN_PLUS_EQUAL,
@@ -387,6 +393,12 @@ token_t lexer_next_token(lexer_t *lexer) {
     return advance_with(
         lexer, token_init(TOKEN_PLUS, .line = lexer->line, .col = lexer->col));
   case '-':
+    if (peek(lexer) == '-') {
+      return advance_with(
+          lexer, advance_with(lexer, token_init(TOKEN_MINUS_MINUS,
+                                                .line = lexer->line,
+                                                lexer->col)));
+    }
     if (peek(lexer) == '=') {
       return advance_with(
           lexer, advance_with(lexer, token_init(TOKEN_MINUS_EQUAL,

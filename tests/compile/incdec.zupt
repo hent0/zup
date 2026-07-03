@@ -1,0 +1,28 @@
+--TEST--
+'x++' and 'x--' are statements that adjust locals, elements, and fields by one
+--FILE--
+struct P {
+  v: i32,
+}
+
+pub fn main(): i32 {
+  let x: i32 = 5;
+  x++;
+  x++;
+  x--;
+
+  let arr: [2]u8 = [10, 20];
+  arr[1]++;
+
+  let p: P = P{v: 1};
+  p.v--;
+
+  let i: i32 = 0;
+  while i < 3 {
+    i++;
+  }
+
+  return x + (arr[1] as i32) + p.v + i;
+}
+--EXIT--
+30

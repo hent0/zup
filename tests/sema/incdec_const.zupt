@@ -1,0 +1,12 @@
+--TEST--
+'++' respects const bindings
+--FILE--
+pub fn main(): i32 {
+  const c: i32 = 1;
+  c++;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'c' [3:3]
+--EXIT--
+1

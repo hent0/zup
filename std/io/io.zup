@@ -55,13 +55,13 @@ pub struct File {
     }
 
     while x > 0 {
-      i -= 1;
+      i--;
       buf[i] = ((x % 10) + 48) as u8;
       x /= 10;
     }
 
     if neg {
-      i -= 1;
+      i--;
       buf[i] = '-';
     }
     self.write(buf[i..20] as str);
@@ -90,7 +90,7 @@ pub struct File {
         return buf[0..i] as str;
       }
 
-      i += 1;
+      i++;
     }
 
     return buf[0..n] as str;
@@ -177,14 +177,14 @@ fn printv(file: File, fmt: str, args: []Arg) {
           writeArg(file, args[n]);
         }
 
-        n += 1;
+        n++;
         i += 2;
         start = i;
         continue;
       }
     }
 
-    i += 1;
+    i++;
   }
 
   file.write(fmt[start..fmt.len]);

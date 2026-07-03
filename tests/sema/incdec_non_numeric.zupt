@@ -1,0 +1,12 @@
+--TEST--
+'++' only applies to numeric values
+--FILE--
+pub fn main(): i32 {
+  let s: str = "a";
+  s++;
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot apply '+=' to str and i32 [3:3]
+--EXIT--
+1

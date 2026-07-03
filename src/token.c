@@ -70,6 +70,10 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_QUESTION_QUESTION";
   case TOKEN_QUESTION_QUESTION_EQUAL:
     return "TOKEN_QUESTION_QUESTION_EQUAL";
+  case TOKEN_PLUS_PLUS:
+    return "TOKEN_PLUS_PLUS";
+  case TOKEN_MINUS_MINUS:
+    return "TOKEN_MINUS_MINUS";
   case TOKEN_PLUS_EQUAL:
     return "TOKEN_PLUS_EQUAL";
   case TOKEN_MINUS_EQUAL:

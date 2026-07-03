@@ -874,6 +874,24 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return NULL;
   }
 
+  if (check(parser, TOKEN_PLUS_PLUS) || check(parser, TOKEN_MINUS_MINUS)) {
+    bool increment = parser->current.kind == TOKEN_PLUS_PLUS;
+    token_t op = advance(parser);
+    if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD &&
+        expr->kind != EXPR_INDEX) {
+      parse_error(parser, "invalid assignment target");
+      return NULL;
+    }
+    expect(parser, TOKEN_SEMICOLON,
+           increment ? "expected ';' after '++'" : "expected ';' after '--'");
+    token_t one = {.value = "1", .line = op.line, .col = op.col};
+    stmt_t *stmt = ast_assign_init(
+        start, expr, ast_number_init(one, parser->arena), parser->arena);
+    stmt->assign.compound = true;
+    stmt->assign.op = increment ? BINOP_ADD : BINOP_SUB;
+    return stmt;
+  }
+
   bool compound = true;
   BinaryOp compound_op = BINOP_ADD;
   switch (parser->current.kind) {
