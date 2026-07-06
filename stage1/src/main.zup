@@ -1,6 +1,13 @@
 const std = import("std");
 const lexer = import("lexer.zup");
 
+enum Mode {
+  Compile,
+  Tokenize,
+  Ir,
+  Ast,
+}
+
 pub fn main(args: []str): i32 {
   if args.len < 2 {
     std.io.printerrln("error: no input provided");

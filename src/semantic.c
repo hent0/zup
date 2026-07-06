@@ -165,11 +165,32 @@ typedef struct {
   bool ok;
 } exprty_t;
 
+// Enum names may appear module-qualified ("io.Mode") or bare ("Mode")
+// depending on where the type was resolved; when exactly one side is
+// qualified, fall back to comparing the bare names.
+static bool enum_name_eq(const char *a, const char *b) {
+  if (a == NULL || b == NULL) {
+    return false;
+  }
+  if (strcmp(a, b) == 0) {
+    return true;
+  }
+  const char *adot = strrchr(a, '.');
+  const char *bdot = strrchr(b, '.');
+  if ((adot != NULL) == (bdot != NULL)) {
+    return false;
+  }
+  return strcmp(adot != NULL ? adot + 1 : a, bdot != NULL ? bdot + 1 : b) == 0;
+}
+
 static bool types_equal(type_t a, type_t b) {
   if (a.kind != b.kind) {
     return false;
   }
-  if (a.kind == TYPE_STRUCT || a.kind == TYPE_ENUM) {
+  if (a.kind == TYPE_ENUM) {
+    return enum_name_eq(a.name, b.name);
+  }
+  if (a.kind == TYPE_STRUCT) {
     return a.name != NULL && b.name != NULL && strcmp(a.name, b.name) == 0;
   }
   if (a.kind == TYPE_ARRAY) {
@@ -199,7 +220,10 @@ static bool assignable(type_t to, exprty_t from) {
   if (to.kind != from.kind) {
     return false;
   }
-  if (to.kind == TYPE_STRUCT || to.kind == TYPE_ENUM) {
+  if (to.kind == TYPE_ENUM) {
+    return enum_name_eq(to.name, from.name);
+  }
+  if (to.kind == TYPE_STRUCT) {
     return from.name != NULL && to.name != NULL &&
            strcmp(to.name, from.name) == 0;
   }
@@ -405,7 +429,7 @@ static type_t qualify_param_type(sema_t *sema, type_t t, const char *stem) {
   if (stem == NULL) {
     return t;
   }
-  if (t.kind == TYPE_STRUCT && t.name != NULL &&
+  if ((t.kind == TYPE_STRUCT || t.kind == TYPE_ENUM) && t.name != NULL &&
       strchr(t.name, '.') == NULL) {
     t.name = arena_format(sema->arena, "%s.%s", stem, t.name);
     return t;
@@ -1012,8 +1036,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (lhs.kind == TYPE_ENUM && rhs.kind == TYPE_ENUM &&
-               lhs.name != NULL && rhs.name != NULL &&
-               strcmp(lhs.name, rhs.name) == 0 &&
+               enum_name_eq(lhs.name, rhs.name) &&
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if ((expr->binary.lhs->kind == EXPR_NULL ||
@@ -1306,7 +1329,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     }
     expr->kind = EXPR_NUMBER;
     expr->number.value = arena_format(sema->arena, "%lld", member->value);
-    result = (exprty_t){.kind = TYPE_ENUM, .name = enm->name, .ok = true};
+    result = (exprty_t){.kind = TYPE_ENUM, .name = want.name, .ok = true};
     break;
   }
   case EXPR_SLICE_RANGE: {
@@ -2077,6 +2100,8 @@ static void resolve_qualified_type(sema_t *sema, type_t *t) {
   }
   if (module_pub_enum(mod, t->name) != NULL) {
     t->kind = TYPE_ENUM;
+    t->name = arena_format(sema->arena, "%s.%s",
+                           module_stem(mod->path, sema->arena), t->name);
     t->module = NULL;
     return;
   }
@@ -2451,7 +2476,8 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
     const char *stem = module_stem(n->mod->path, arena);
     for (decl_t *m = n->mod->unit->root->container.members; m != NULL;
          m = m->next) {
-      if (m->kind == DECL_STRUCT && m->visibility == VISIBILITY_PUBLIC) {
+      if ((m->kind == DECL_STRUCT || m->kind == DECL_ENUM) &&
+          m->visibility == VISIBILITY_PUBLIC) {
         types.structs[types.count++] = (typeent_t){
             .name = arena_format(arena, "%s.%s", stem, m->name), .decl = m};
       }
