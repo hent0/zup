@@ -1,0 +1,20 @@
+--TEST--
+range patterns require an integer scrutinee
+--FILE--
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+pub fn main(): i32 {
+  let c: Color = .Red;
+  return match c {
+    .Red....Blue => 1,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: range patterns require an integer scrutinee [10:13]
+--EXIT--
+1

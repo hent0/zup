@@ -1,0 +1,13 @@
+--TEST--
+a range pattern whose low bound exceeds its high bound is empty
+--FILE--
+pub fn main(): i32 {
+  return match 3 {
+    9...1 => 1,
+    _ => 0,
+  };
+}
+--EXPECTERR--
+zup: error: range pattern is empty [3:5]
+--EXIT--
+1

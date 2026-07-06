@@ -271,6 +271,25 @@ static expr_t *parse_match(parser_t *parser) {
       advance(parser);
     } else {
       arm->pattern = parse_expr(parser);
+      if (match(parser, TOKEN_DOT_DOT_DOT)) {
+        arm->pattern_end = parse_expr(parser);
+      }
+    }
+    if (check(parser, TOKEN_COMMA)) {
+      if (arm->pattern == NULL) {
+        parse_error(parser, "'_' cannot be combined with other patterns");
+        return NULL;
+      }
+      advance(parser);
+      arm->or_next = true;
+      if (tail == NULL) {
+        expr->match_expr.arms = arm;
+      } else {
+        tail->next = arm;
+      }
+      tail = arm;
+      expr->match_expr.arm_count++;
+      continue;
     }
     expect(parser, TOKEN_FAT_ARROW, "expected '=>' after match pattern");
     if (check(parser, TOKEN_LBRACE)) {

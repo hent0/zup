@@ -1,0 +1,43 @@
+--TEST--
+'lo...hi' range patterns match integers inclusively, on plain and optional scrutinees
+--FILE--
+const std = import("std");
+
+fn classify(c: u8): str {
+  return match c {
+    'a'...'z' => "lower",
+    'A'...'Z' => "upper",
+    '0'...'9' => "digit",
+    '_' => "underscore",
+    _ => "other",
+  };
+}
+
+fn peeked(c: ?u8): str {
+  return match c {
+    'a'...'z' => "lower",
+    null => "none",
+    _ => "other",
+  };
+}
+
+fn signedBand(v: i32): i32 {
+  return match v {
+    -5...5 => 1,
+    _ => 0,
+  };
+}
+
+pub fn main(): i32 {
+  std.io.println("{} {} {} {} {}", classify('a'), classify('z'),
+                 classify('Q'), classify('7'), classify('_'));
+  std.io.println("{} {}", classify('`'), classify('{'));
+  std.io.println("{} {}", peeked('m'), peeked(null));
+  return signedBand(-5) + signedBand(5) + signedBand(6) * 10;
+}
+--EXPECT--
+lower lower upper digit underscore
+other other
+lower none
+--EXIT--
+2

@@ -1,0 +1,51 @@
+--TEST--
+comma-separated patterns share one arm: constants, ranges, and enum members OR together
+--FILE--
+const std = import("std");
+
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+fn kind(c: u8): str {
+  return match c {
+    ' ', '\t', '\n' => "space",
+    '0'...'9' => "digit",
+    _ => "other",
+  };
+}
+
+fn warm(c: Color): bool {
+  return match c {
+    .Red, .Green => true,
+    .Blue => false,
+  };
+}
+
+pub fn main(): i32 {
+  std.io.println("{} {} {} {}", std.ascii.isAlpa('q'), std.ascii.isAlnum('9'),
+                 std.ascii.isAlpa('9'), std.ascii.isAlpa('Z'));
+  std.io.println("{} {} {}", kind(' '), kind('7'), kind('x'));
+  let hits: i32 = 0;
+  match 'b' {
+    'a', 'b' => {
+      hits += 1;
+    },
+    _ => {
+      hits += 100;
+    }
+  }
+  if warm(.Green) {
+    if !warm(.Blue) {
+      hits += 2;
+    }
+  }
+  return hits;
+}
+--EXPECT--
+true true false true
+space digit other
+--EXIT--
+3

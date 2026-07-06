@@ -310,6 +310,19 @@ static module_t *resolve_module_path(const sema_t *sema, const expr_t *expr) {
   return NULL;
 }
 
+static bool pattern_int_value(const expr_t *e, long long *out) {
+  if (e->kind == EXPR_NUMBER) {
+    *out = strtoll(e->number.value, NULL, 0);
+    return true;
+  }
+  if (e->kind == EXPR_UNARY && e->unary.op == UNOP_NEG &&
+      e->unary.operand->kind == EXPR_NUMBER) {
+    *out = -strtoll(e->unary.operand->number.value, NULL, 0);
+    return true;
+  }
+  return false;
+}
+
 static bool is_imported_type(const char *name) {
   return name != NULL && strchr(name, '.') != NULL;
 }
@@ -1432,16 +1445,40 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         }
       } else {
         exprty_t pat = check_expr(sema, arm->pattern, exprty_type(inner));
-        if (!pat.ok) {
+        if (arm->pattern_end != NULL && !int_scrut) {
+          diag_error(sema->src, arm->pattern_end->line, arm->pattern_end->col,
+                     "range patterns require an integer scrutinee");
+          sema->had_error = true;
+          ok = false;
+        } else if (!pat.ok) {
           ok = false;
         } else if (int_scrut) {
-          if (arm->pattern->kind != EXPR_NUMBER) {
+          long long lo = 0;
+          long long hi = 0;
+          if (!pattern_int_value(arm->pattern, &lo)) {
             diag_error(sema->src, arm->pattern->line, arm->pattern->col,
                        "match pattern must be an integer constant");
             sema->had_error = true;
             ok = false;
+          } else if (arm->pattern_end != NULL) {
+            exprty_t pe =
+                check_expr(sema, arm->pattern_end, exprty_type(inner));
+            if (!pe.ok) {
+              ok = false;
+            } else if (!pattern_int_value(arm->pattern_end, &hi)) {
+              diag_error(sema->src, arm->pattern_end->line,
+                         arm->pattern_end->col,
+                         "match pattern must be an integer constant");
+              sema->had_error = true;
+              ok = false;
+            } else if (lo > hi) {
+              diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                         "range pattern is empty");
+              sema->had_error = true;
+              ok = false;
+            }
           } else {
-            long long value = strtoll(arm->pattern->number.value, NULL, 0);
+            long long value = lo;
             for (size_t i = 0; i < seen_count; i++) {
               if (seen[i] == value) {
                 diag_error(sema->src, arm->pattern->line, arm->pattern->col,
@@ -1498,6 +1535,10 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
             }
           }
         }
+      }
+
+      if (arm->or_next) {
+        continue;
       }
 
       if (arm->body != NULL) {

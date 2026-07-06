@@ -479,8 +479,10 @@ expr_t *ast_match_init(token_t token, expr_t *scrutinee, arena_t *arena) {
 match_arm_t *ast_match_arm_init(arena_t *arena) {
   match_arm_t *arm = arena_alloc(arena, sizeof(match_arm_t));
   arm->pattern = NULL;
+  arm->pattern_end = NULL;
   arm->value = NULL;
   arm->body = NULL;
+  arm->or_next = false;
   arm->line = 0;
   arm->col = 0;
   arm->next = NULL;
@@ -843,6 +845,9 @@ static void dump_expr(const expr_t *expr, int depth) {
       printf("Arm%s\n", arm->pattern == NULL ? " _" : "");
       if (arm->pattern != NULL) {
         dump_expr(arm->pattern, depth + 2);
+      }
+      if (arm->pattern_end != NULL) {
+        dump_expr(arm->pattern_end, depth + 2);
       }
       if (arm->value != NULL) {
         dump_expr(arm->value, depth + 2);

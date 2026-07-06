@@ -369,6 +369,10 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       if (arm->pattern != NULL && collect_expr(ctx, arm->pattern) != 0) {
         return 1;
       }
+      if (arm->pattern_end != NULL &&
+          collect_expr(ctx, arm->pattern_end) != 0) {
+        return 1;
+      }
       if (arm->value != NULL && collect_expr(ctx, arm->value) != 0) {
         return 1;
       }
@@ -1779,6 +1783,9 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   const char *scrut_ref;
   const char *scrut_ir;
   const char *flag_ref = NULL;
+  TypeKind scrut_kind = scrutinee->type.kind == TYPE_OPTIONAL
+                            ? scrutinee->type.element->kind
+                            : scrutinee->type.kind;
   if (scrutinee->type.kind == TYPE_OPTIONAL) {
     const char *opt_ir = ir_type(ctx, scrutinee->type);
     const char *addr = emit_addr(ctx, scrutinee);
@@ -1814,14 +1821,34 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
   fprintf(ctx->out, "  br label %%match.arm.%u.0\n", id);
 
   size_t i = 0;
+  bool group_pending = false;
   for (match_arm_t *arm = expr->match_expr.arms; arm != NULL;
        arm = arm->next, i++) {
     fprintf(ctx->out, "match.arm.%u.%zu:\n", id, i);
-    if (arm->pattern != NULL && arm->next != NULL) {
+    if (arm->or_next || (arm->pattern != NULL && arm->next != NULL)) {
       unsigned int cmp;
       if (arm->pattern->kind == EXPR_NULL) {
         cmp = ctx->reg++;
         fprintf(ctx->out, "  %%%u = xor i1 %s, true\n", cmp, flag_ref);
+      } else if (arm->pattern_end != NULL) {
+        value_t lo = emit_value(ctx, arm->pattern);
+        value_t hi = emit_value(ctx, arm->pattern_end);
+        bool sgn = type_is_signed_integer(scrut_kind);
+        unsigned int ge = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = icmp %s %s %s, %s\n", ge,
+                sgn ? "sge" : "uge", scrut_ir, scrut_ref, lo.ref);
+        unsigned int le = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = icmp %s %s %s, %s\n", le,
+                sgn ? "sle" : "ule", scrut_ir, scrut_ref, hi.ref);
+        unsigned int within = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = and i1 %%%u, %%%u\n", within, ge, le);
+        if (flag_ref != NULL) {
+          cmp = ctx->reg++;
+          fprintf(ctx->out, "  %%%u = and i1 %s, %%%u\n", cmp, flag_ref,
+                  within);
+        } else {
+          cmp = within;
+        }
       } else {
         value_t pat = emit_value(ctx, arm->pattern);
         unsigned int eq = ctx->reg++;
@@ -1834,12 +1861,24 @@ static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest) {
           cmp = eq;
         }
       }
+      size_t body_index = i;
+      for (const match_arm_t *g = arm; g->or_next; g = g->next) {
+        body_index++;
+      }
       fprintf(ctx->out,
               "  br i1 %%%u, label %%match.body.%u.%zu, label "
               "%%match.arm.%u.%zu\n",
-              cmp, id, i, id, i + 1);
+              cmp, id, body_index, id, i + 1);
+      if (arm->or_next) {
+        group_pending = true;
+        continue;
+      }
+      fprintf(ctx->out, "match.body.%u.%zu:\n", id, i);
+    } else if (group_pending) {
+      fprintf(ctx->out, "  br label %%match.body.%u.%zu\n", id, i);
       fprintf(ctx->out, "match.body.%u.%zu:\n", id, i);
     }
+    group_pending = false;
     if (arm->body != NULL) {
       emit_block(ctx, arm->body, ctx->fn_ret, ctx->fn_name);
       if (!block_terminates(arm->body)) {

@@ -94,9 +94,11 @@ typedef struct expr expr_t;
 typedef struct stmt stmt_t;
 typedef struct match_arm match_arm_t;
 struct match_arm {
-  expr_t *pattern; // NULL for the '_' arm
-  expr_t *value;   // NULL when the arm is a statement block
-  stmt_t *body;    // NULL when the arm is an expression
+  expr_t *pattern;     // NULL for the '_' arm
+  expr_t *pattern_end; // non-NULL for an inclusive 'lo...hi' range pattern
+  expr_t *value;       // NULL when the arm is a statement block
+  stmt_t *body;        // NULL when the arm is an expression
+  bool or_next;        // this pattern shares the next arm's body ('a', 'b' =>)
   unsigned int line;
   unsigned int col;
   match_arm_t *next;
