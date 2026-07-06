@@ -4,3 +4,4 @@ pub extern fn open(path: cstr, flags: i32, mode: i32): i32;
 pub extern fn close(fd: i32): i32;
 pub extern fn write(fd: i32, buf: cstr, count: i64): i64;
 pub extern fn read(fd: i32, buf: cstr, count: i64): i64;
+pub extern fn lseek(fd: i32, offset: i64, whence: i32): i64;

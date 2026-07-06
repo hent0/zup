@@ -1,0 +1,25 @@
+--TEST--
+an instance method cannot be called through the type, and a type fn cannot be called on an instance
+--FILE--
+struct Point {
+  x: i32,
+
+  fn origin(): Point {
+    return Point{x: 0};
+  }
+
+  fn dist(self): i32 {
+    return self.x;
+  }
+}
+
+pub fn main(): i32 {
+  let p: Point = Point.origin();
+  let q: Point = p.origin();
+  return Point.dist();
+}
+--EXPECTERR--
+zup: error: 'origin' does not take 'self'; call it through the type [15:20]
+zup: error: method 'dist' of struct 'Point' requires an instance [16:16]
+--EXIT--
+1

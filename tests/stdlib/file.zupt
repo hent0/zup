@@ -7,12 +7,12 @@ pub fn main(): i32 {
   std.io.stdout().writeln("chained");
 
   let f: std.io.File = std.io.open("/tmp/zup_file_test.txt", .Write);
-  if !f.isvalid() {
+  if !f.isValid() {
     return 1;
   }
   f.writeln("roundtrip");
   f.close();
-  if f.isvalid() {
+  if f.isValid() {
     return 2;
   }
 

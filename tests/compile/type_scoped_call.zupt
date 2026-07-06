@@ -1,0 +1,37 @@
+--TEST--
+a container fn without 'self' is called through the type, Zig-style
+--FILE--
+struct Point {
+  x: i32,
+  y: i32,
+
+  fn origin(): Point {
+    return Point{x: 0, y: 0};
+  }
+
+  fn make(x: i32, y: i32): Point {
+    return Point{x: x, y: y};
+  }
+
+  fn dist(self): i32 {
+    return self.x + self.y;
+  }
+}
+
+enum Kind {
+  Low,
+  High,
+
+  fn fromScore(score: i32): Kind {
+    return score < 50 ? Kind.Low : Kind.High;
+  }
+}
+
+pub fn main(): i32 {
+  let o: Point = Point.origin();
+  let p: Point = Point.make(3, 4);
+  let k: Kind = Kind.fromScore(90);
+  return o.dist() + p.dist() + (k as i32);
+}
+--EXIT--
+8

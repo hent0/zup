@@ -1,0 +1,23 @@
+--TEST--
+File.size reports the byte count and rewinds so a full read still works
+--PREPARE--
+printf 'exactly twenty bytes' > /tmp/zup_size.txt
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  const f = std.io.open("/tmp/zup_size.txt", .Read);
+  defer f.close();
+
+  const size = f.size();
+  let buf: [32]u8;
+  let n: i64 = f.read(buf);
+  std.io.println("{}", buf[0..n]  as str);
+  return (size + n) as i32;
+}
+--CLEANUP--
+rm -f /tmp/zup_size.txt
+--EXPECT--
+exactly twenty bytes
+--EXIT--
+40

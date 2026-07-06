@@ -78,6 +78,12 @@ pub struct File {
     return sys.read(self.fd, buf.ptr, buf.len);
   }
 
+  pub fn size(self): i64 {
+    const end = sys.lseek(self.fd, 0, 2);
+    sys.lseek(self.fd, 0, 0);
+    return end;
+  }
+
   pub fn readln(self, buf: []u8): ?str {
     let n: i64 = sys.read(self.fd, buf.ptr, buf.len);
     if n <= 0 {
@@ -96,7 +102,7 @@ pub struct File {
     return buf[0..n] as str;
   }
 
-  pub fn isvalid(self): bool {
+  pub fn isValid(self): bool {
     return self.fd >= 0;
   }
 

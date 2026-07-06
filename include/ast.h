@@ -134,6 +134,7 @@ struct expr {
       expr_t *callee;
       expr_t *args;
       size_t arg_count;
+      bool type_scoped;
     } call;
     struct {
       expr_t *operand;

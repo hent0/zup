@@ -1,0 +1,22 @@
+--TEST--
+std.mem.Arena.init allocates zeroed heap memory, copies strings, and survives block growth
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let a: std.mem.Arena = std.mem.Arena.init();
+  defer a.destroy();
+
+  const hello = a.copyStr("hello");
+  const big = a.alloc(10000);
+  const world = a.copyStr("world");
+
+  std.io.println("{} {}", hello, world);
+  std.io.println("{} {} {}", hello.len, big.len, big[9999]);
+  return 0;
+}
+--EXPECT--
+hello world
+5 10000 0
+--EXIT--
+0

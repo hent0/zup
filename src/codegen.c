@@ -613,6 +613,9 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   }
   case EXPR_FIELD: {
     const char *base = emit_addr(ctx, expr->field.base);
+    if (base == NULL && is_aggregate(expr->field.base->type.kind)) {
+      base = emit_value(ctx, expr->field.base).ref;
+    }
     type_t base_type = expr->field.base->type;
     if (base_type.kind == TYPE_STR || base_type.kind == TYPE_SLICE) {
       int index = strcmp(expr->field.name, "ptr") == 0 ? 0 : 1;
@@ -632,6 +635,9 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
   }
   case EXPR_INDEX: {
     const char *base = emit_addr(ctx, expr->index.base);
+    if (base == NULL && is_aggregate(expr->index.base->type.kind)) {
+      base = emit_value(ctx, expr->index.base).ref;
+    }
     value_t idx = emit_value(ctx, expr->index.index);
     if (expr->index.base->type.kind == TYPE_SLICE ||
         expr->index.base->type.kind == TYPE_STR) {
@@ -1080,6 +1086,8 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     if (base->kind == EXPR_STRING) {
       dataref =
           arena_format(ctx->arena, "@.str.%d", string_index(ctx, base));
+    } else if (base->type.kind == TYPE_CSTR) {
+      dataref = emit_value(ctx, base).ref;
     } else {
       base_addr = emit_addr(ctx, base);
       if (base_addr == NULL) {
@@ -1092,9 +1100,10 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     const char *s = widen_index(ctx, start);
     const char *e = widen_index(ctx, end);
 
-    const char *elem_ir = base->type.kind == TYPE_STR
-                              ? "i8"
-                              : ir_type(ctx, *base->type.element);
+    const char *elem_ir =
+        base->type.kind == TYPE_STR || base->type.kind == TYPE_CSTR
+            ? "i8"
+            : ir_type(ctx, *base->type.element);
     if (base->type.kind == TYPE_ARRAY) {
       unsigned int p = ctx->reg++;
       fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i64 0, i64 %s\n",
@@ -1233,11 +1242,35 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr) {
 }
 
 static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
-  bool is_method = call->call.callee->kind == EXPR_FIELD;
+  bool is_method =
+      call->call.callee->kind == EXPR_FIELD && !call->call.type_scoped;
   const char *name;
   const char *self = NULL;
   const decl_t *fn = NULL;
-  if (is_method) {
+  if (call->call.type_scoped) {
+    const char *tname = call->call.callee->field.base->type.name;
+    const char *member = call->call.callee->field.name;
+    const char *ref = struct_ref(ctx, tname);
+    name = NULL;
+    for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
+      if (strcmp(s->name, ref) == 0) {
+        name = arena_format(ctx->arena, "%s.%s", s->name, member);
+        decl_t *members = s->decl->kind == DECL_STRUCT ? s->decl->strct.members
+                                                       : s->decl->enm.methods;
+        for (decl_t *m = members; m != NULL; m = m->next) {
+          if (m->kind == DECL_FN && strcmp(m->name, member) == 0) {
+            fn = m;
+            break;
+          }
+        }
+        break;
+      }
+    }
+    if (name == NULL) {
+      name = mangle(ctx,
+                    arena_format(ctx->arena, "%s.%s", tname, member));
+    }
+  } else if (is_method) {
     expr_t *recv = call->call.callee->field.base;
     const char *member = call->call.callee->field.name;
     module_t *mod = module_path(ctx, recv);
@@ -1392,7 +1425,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     } else if (is_aggregate(arg->type.kind) && arg->kind != EXPR_STRING) {
       const char *addr = emit_addr(ctx, arg);
       if (addr == NULL) {
-        addr = emit_value(ctx, arg).ref;
+        unsigned int slot = ctx->reg++;
+        fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
+                ir_type(ctx, arg->type));
+        addr = arena_format(ctx->arena, "%%%u", slot);
+        emit_aggregate_into(ctx, addr, arg->type, arg);
       }
       argref[i] = addr;
       argtype[i] = arg->type;
@@ -1412,13 +1449,14 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   for (; param != NULL && param->default_value != NULL; param = param->next) {
     expr_t *def = param->default_value;
     if (is_aggregate(param->type.kind)) {
+      type_t dt =
+          def->type.kind != TYPE_UNKNOWN ? def->type : param->type;
       unsigned int slot = ctx->reg++;
-      fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
-              ir_type(ctx, param->type));
+      fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, dt));
       const char *tmp = arena_format(ctx->arena, "%%%u", slot);
-      emit_aggregate_into(ctx, tmp, param->type, def);
+      emit_aggregate_into(ctx, tmp, dt, def);
       argref[i] = tmp;
-      argtype[i] = param->type;
+      argtype[i] = dt;
       argbyval[i] = true;
     } else {
       value_t v = emit_value(ctx, def);

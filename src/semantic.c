@@ -151,6 +151,7 @@ typedef struct {
   scope_t *globals;
   scope_t *scope;
   const decl_t *current_fn;
+  const char *module_stem;
   arena_t *arena;
   unsigned int loop_depth;
   bool had_error;
@@ -582,6 +583,82 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
                               : field->field.base->field.name;
     return check_module_call(sema, call, mod, display);
   }
+  decl_t *ts_owner = NULL;
+  const char *ts_stem = NULL;
+  if (field->field.base->kind == EXPR_ID &&
+      (sema->scope == NULL ||
+       scope_lookup(sema->scope, field->field.base->id.name) == NULL) &&
+      (sema->globals == NULL ||
+       scope_lookup(sema->globals, field->field.base->id.name) == NULL)) {
+    ts_owner = typetab_lookup(sema->types, field->field.base->id.name);
+  } else if (field->field.base->kind == EXPR_FIELD) {
+    module_t *owner_mod =
+        resolve_module_path(sema, field->field.base->field.base);
+    if (owner_mod != NULL) {
+      ts_owner = module_pub_struct(owner_mod, field->field.base->field.name);
+      if (ts_owner == NULL) {
+        ts_owner = module_pub_enum(owner_mod, field->field.base->field.name);
+      }
+      if (ts_owner != NULL) {
+        ts_stem = module_stem(owner_mod->path, sema->arena);
+      }
+    }
+  }
+  if (ts_owner != NULL &&
+      (ts_owner->kind == DECL_STRUCT || ts_owner->kind == DECL_ENUM)) {
+    const char *kind_str = ts_owner->kind == DECL_ENUM ? "enum" : "struct";
+    decl_t *members = ts_owner->kind == DECL_STRUCT ? ts_owner->strct.members
+                                                    : ts_owner->enm.methods;
+    decl_t *fn = NULL;
+    for (decl_t *m = members; m != NULL; m = m->next) {
+      if (m->kind == DECL_FN && strcmp(m->name, field->field.name) == 0) {
+        fn = m;
+        break;
+      }
+    }
+    if (fn == NULL) {
+      if (ts_owner->kind == DECL_ENUM && field->field.base->kind == EXPR_ID) {
+        diag_error(sema->src, field->line, field->col,
+                   "enum '%s' has no function '%s'", ts_owner->name,
+                   field->field.name);
+      } else {
+        diag_error(sema->src, field->line, field->col,
+                   "%s '%s' has no function '%s'", kind_str, ts_owner->name,
+                   field->field.name);
+      }
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+    if (fn->fn.params != NULL && fn->fn.params->is_self) {
+      diag_error(sema->src, field->line, field->col,
+                 "method '%s' of %s '%s' requires an instance",
+                 field->field.name, kind_str, ts_owner->name);
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+    if (ts_stem != NULL && fn->visibility != VISIBILITY_PUBLIC) {
+      diag_error(sema->src, field->line, field->col,
+                 "method '%s' of %s '%s' is not public", field->field.name,
+                 kind_str, ts_owner->name);
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+    const char *qualified =
+        ts_stem != NULL
+            ? arena_format(sema->arena, "%s.%s", ts_stem, ts_owner->name)
+            : ts_owner->name;
+    field->field.base->type =
+        (type_t){.kind = ts_owner->kind == DECL_ENUM ? TYPE_ENUM : TYPE_STRUCT,
+                 .name = (char *)qualified};
+    call->call.type_scoped = true;
+    exprty_t r = check_fn_call(sema, call, fn, field->field.name, ts_stem);
+    if (ts_stem != NULL && r.kind == TYPE_STRUCT && r.name != NULL &&
+        strchr(r.name, '.') == NULL) {
+      r.name = arena_format(sema->arena, "%s.%s", ts_stem, r.name);
+    }
+    return r;
+  }
+
   if (field->field.base->kind == EXPR_FIELD &&
       resolve_module_path(sema, field->field.base->field.base) != NULL) {
     expr_t *base = field->field.base;
@@ -655,6 +732,13 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
 
   param_t *param = method->fn.params;
   bool has_self = param != NULL && param->is_self;
+  if (!has_self) {
+    diag_error(sema->src, field->line, field->col,
+               "'%s' does not take 'self'; call it through the type",
+               field->field.name);
+    sema->had_error = true;
+    return (exprty_t){.kind = TYPE_VOID, .ok = false};
+  }
   if (has_self) {
     param = param->next;
   }
@@ -1224,7 +1308,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       break;
     }
     if (base.kind != TYPE_ARRAY && base.kind != TYPE_SLICE &&
-        base.kind != TYPE_STR) {
+        base.kind != TYPE_STR && base.kind != TYPE_CSTR) {
       diag_error(sema->src, expr->line, expr->col, "cannot slice %s",
                  type_to_str(exprty_type(base)));
       sema->had_error = true;
@@ -1247,6 +1331,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     }
     if (base.kind == TYPE_STR) {
       result = (exprty_t){.kind = TYPE_STR, .ok = start.ok && end.ok};
+    } else if (base.kind == TYPE_CSTR) {
+      type_t *elem = arena_alloc(sema->arena, sizeof(type_t));
+      *elem = (type_t){.kind = TYPE_U8};
+      result = (exprty_t){
+          .kind = TYPE_SLICE, .element = elem, .ok = start.ok && end.ok};
     } else {
       result = (exprty_t){
           .kind = TYPE_SLICE, .element = base.element, .ok = start.ok && end.ok};
@@ -1755,7 +1844,7 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       break;
     }
     if (lhs.ok && value.ok) {
-      type_t to = {.kind = lhs.kind, .name = lhs.name};
+      type_t to = exprty_type(lhs);
       if (!assignable(to, value)) {
         if (target->kind == EXPR_FIELD) {
           diag_error(sema->src, stmt->assign.value->line,
@@ -2090,7 +2179,8 @@ static void check_fn(sema_t *sema, decl_t *fn) {
                    "default parameters cannot be combined with variadic '...'");
         sema->had_error = true;
       }
-      if (!is_const_init(param->default_value)) {
+      if (!is_const_init(param->default_value) &&
+          param->default_value->kind != EXPR_STRUCT_LITERAL) {
         diag_error(sema->src, param->default_value->line,
                    param->default_value->col,
                    "parameter default must be a constant");
@@ -2104,6 +2194,17 @@ static void check_fn(sema_t *sema, decl_t *fn) {
                      type_kind_to_str(dty.kind), param->name,
                      type_to_str(param->type));
           sema->had_error = true;
+        }
+        if (sema->module_stem != NULL &&
+            param->default_value->kind == EXPR_STRUCT_LITERAL &&
+            param->default_value->struct_literal.type_name != NULL &&
+            strchr(param->default_value->struct_literal.type_name, '.') ==
+                NULL) {
+          char *qualified = arena_format(
+              sema->arena, "%s.%s", sema->module_stem,
+              param->default_value->struct_literal.type_name);
+          param->default_value->struct_literal.type_name = qualified;
+          param->default_value->type.name = qualified;
         }
       }
       seen_default = true;
@@ -2291,6 +2392,8 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       .src = unit->src,
       .globals = &globals,
       .scope = NULL,
+      .module_stem =
+          require_main ? NULL : module_stem(unit->src->path, arena),
       .arena = arena,
       .had_error = false,
   };
@@ -2320,6 +2423,8 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
     }
   }
 
+  check_globals(&sema, root, &globals);
+
   for (size_t i = 0; i < local_type_count; i++) {
     if (types.structs[i].decl->kind == DECL_ENUM) {
       check_enum(&sema, types.structs[i].decl);
@@ -2327,8 +2432,6 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       check_struct(&sema, types.structs[i].decl);
     }
   }
-
-  check_globals(&sema, root, &globals);
 
   for (size_t i = 0; i < tab.count; i++) {
     check_fn(&sema, tab.fns[i]);

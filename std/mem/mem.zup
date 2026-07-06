@@ -1,0 +1,95 @@
+extern fn malloc(size: i64): cstr;
+extern fn free(p: cstr);
+extern fn memcpy(dst: cstr, src: cstr, n: i64): cstr;
+extern fn memset(p: cstr, value: i32, n: i64): cstr;
+extern fn abort();
+
+pub struct ArenaOpt {
+  pub initial_capacity: i64 = 4096,
+}
+
+pub struct Arena {
+  blocks: [48][]u8,
+  count: i64,
+  offset: i64,
+  initial_capacity: i64,
+
+  pub fn init(opts: ArenaOpt = {}): Arena {
+    let a: Arena;
+    a.initial_capacity = opts.initial_capacity;
+    return a;
+  }
+
+  pub fn destroy(self) {
+    let i: i64 = 0;
+    while i < self.count {
+      free(self.blocks[i].ptr);
+      i++;
+    }
+    self.count = 0;
+    self.offset = 0;
+  }
+
+  pub fn alloc(self, size: i64): []u8 {
+    let aligned: i64 = (size + 7) / 8 * 8;
+
+    if self.count == 0 || self.offset + aligned > self.current().len {
+      self.grow(aligned);
+    }
+
+    const block = self.current();
+    const out = block[self.offset..self.offset + size];
+    memset(out.ptr, 0, size);
+    self.offset += aligned;
+    return out;
+  }
+
+  pub fn copyStr(self, s: str): str {
+    const dst = self.alloc(s.len);
+    memcpy(dst.ptr, s.ptr, s.len);
+    return dst as str;
+  }
+
+  pub fn copyBytes(self, src: []u8): []u8 {
+    const dst = self.alloc(src.len);
+    memcpy(dst.ptr, src.ptr, src.len);
+    return dst;
+  }
+
+  pub fn reset(self) {
+    let i: i64 = 1;
+    while i < self.count {
+      free(self.blocks[i].ptr);
+      i++;
+    }
+    if self.count > 1 {
+      self.count = 1;
+    }
+    self.offset = 0;
+  }
+
+  fn current(self): []u8 {
+    return self.blocks[self.count - 1];
+  }
+
+  fn grow(self, at_least: i64) {
+    if self.count == 48 {
+      abort();
+    }
+
+    let capacity: i64 = self.initial_capacity;
+    if capacity == 0 {
+      capacity = 4096;
+    }
+    if self.count > 0 {
+      capacity = self.current().len * 2;
+    }
+    if capacity < at_least {
+      capacity = at_least;
+    }
+
+    self.blocks[self.count] = malloc(capacity)[0..capacity];
+    self.count++;
+    self.offset = 0;
+  }
+}
