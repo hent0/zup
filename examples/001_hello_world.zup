@@ -2,7 +2,7 @@ const std = import("std");
 
 // Single line comment
 pub fn /** Stupid comment here */ main(): i32 {
-  std.io.print("Hello, world!");
+  std.io.println("Hello, world!");
   /**
    * Multiline comment
    */
