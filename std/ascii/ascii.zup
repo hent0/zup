@@ -1,0 +1,18 @@
+pub fn isAlpa(c: u8): bool {
+  return match c {
+    'a'...'z',
+    'A'...'Z' => true,
+    _ => false,
+  };
+}
+
+pub fn isDigit(c: u8): bool {
+  return match c {
+    '0'...'9' => true,
+    _ => false,
+  };
+}
+
+pub fn isAlnum(c: u8): bool {
+  return isAlpa(c) || isDigit(c);
+}
