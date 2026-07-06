@@ -1304,8 +1304,8 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
                                           recv->type.name, member));
         }
       } else {
-        name = mangle(ctx, arena_format(ctx->arena, "%s.%s", recv->type.name,
-                                        member));
+        name = arena_format(ctx->arena, "%s.%s",
+                            struct_ref(ctx, recv->type.name), member);
       }
       self = emit_addr(ctx, recv);
       if (self == NULL) {

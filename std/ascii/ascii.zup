@@ -1,4 +1,4 @@
-pub fn isAlpa(c: u8): bool {
+pub fn isAlpha(c: u8): bool {
   return match c {
     'a'...'z',
     'A'...'Z' => true,
@@ -14,5 +14,5 @@ pub fn isDigit(c: u8): bool {
 }
 
 pub fn isAlnum(c: u8): bool {
-  return isAlpa(c) || isDigit(c);
+  return isAlpha(c) || isDigit(c);
 }

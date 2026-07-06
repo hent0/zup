@@ -25,8 +25,8 @@ fn warm(c: Color): bool {
 }
 
 pub fn main(): i32 {
-  std.io.println("{} {} {} {}", std.ascii.isAlpa('q'), std.ascii.isAlnum('9'),
-                 std.ascii.isAlpa('9'), std.ascii.isAlpa('Z'));
+  std.io.println("{} {} {} {}", std.ascii.isAlpha('q'), std.ascii.isAlnum('9'),
+                 std.ascii.isAlpha('9'), std.ascii.isAlpha('Z'));
   std.io.println("{} {} {}", kind(' '), kind('7'), kind('x'));
   let hits: i32 = 0;
   match 'b' {
