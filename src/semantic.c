@@ -2200,6 +2200,13 @@ static void check_enum(sema_t *sema, const decl_t *enm) {
         sema->had_error = true;
         break;
       }
+      if (prev->value == member->value) {
+        diag_error(sema->src, member->line, member->col,
+                   "duplicate enum value %lld for member '%s' (already used by '%s')",
+                   member->value, member->name, prev->name);
+        sema->had_error = true;
+        break;
+      }
     }
   }
   for (decl_t *method = enm->enm.methods; method != NULL;

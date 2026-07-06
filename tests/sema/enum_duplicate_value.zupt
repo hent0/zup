@@ -1,0 +1,16 @@
+--TEST--
+two enum members resolving to the same value is an error
+--FILE--
+enum E {
+  A = 1,
+  B = 0,
+  C,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: duplicate enum value 1 for member 'C' (already used by 'A') [4:3]
+--EXIT--
+1

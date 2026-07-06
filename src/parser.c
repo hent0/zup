@@ -1281,9 +1281,25 @@ static decl_t *parse_enum(parser_t *parser, Visibility visibility) {
     }
     enum_member_t *member = ast_enum_member_init(parser->arena);
     member->name = member_name.value;
-    member->value = next_value++;
     member->line = member_name.line;
     member->col = member_name.col;
+
+    if (match(parser, TOKEN_EQUAL)) {
+      bool negative = match(parser, TOKEN_MINUS);
+      token_t num =
+          expect(parser, TOKEN_NUMBER, "expected integer value for enum member");
+      if (num.kind != TOKEN_NUMBER) {
+        break;
+      }
+      if (strchr(num.value, '.') != NULL) {
+        diag_error(parser->src, num.line, num.col,
+                   "enum member value must be an integer");
+        parser->had_error = true;
+      }
+      long long value = strtoll(num.value, NULL, 0);
+      next_value = negative ? -value : value;
+    }
+    member->value = next_value++;
 
     if (tail == NULL) {
       decl->enm.members = member;

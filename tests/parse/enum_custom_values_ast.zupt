@@ -1,0 +1,27 @@
+--TEST--
+enum members accept explicit values; implicit members continue from the last explicit one
+--ARGS--
+--ast
+--FILE--
+enum Mode {
+  Compile = 255,
+  Tokenize,
+  Ir,
+  Ast = 500,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECT--
+Container (file) (2 members)
+  Enum priv 'Mode'
+    member Compile = 255
+    member Tokenize = 256
+    member Ir = 257
+    member Ast = 500
+  FnDecl pub 'main' -> i32
+    Return
+      Number literal 0
+--EXIT--
+0

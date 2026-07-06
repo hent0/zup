@@ -1,0 +1,26 @@
+--TEST--
+explicit enum values (decimal, hex, char) are used at runtime and auto-increment continues from them
+--FILE--
+enum Mode {
+  Compile = 255,
+  Tokenize,
+  Ir,
+  Ast = 500,
+}
+
+enum Opt {
+  Output = 'o',
+  Next,
+  Mask = 0x10,
+}
+
+pub fn main(): i32 {
+  const seq = (Mode.Ir as i32) - (Mode.Compile as i32);
+  const explicit = (Mode.Ast as i32) - 500;
+  const ch = (Opt.Output as i32) - 111;
+  const chnext = (Opt.Next as i32) - 112;
+  const hex = (Opt.Mask as i32) - 16;
+  return seq + explicit + ch + chnext + hex;
+}
+--EXIT--
+2

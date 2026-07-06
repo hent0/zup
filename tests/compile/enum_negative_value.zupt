@@ -1,0 +1,14 @@
+--TEST--
+enum members accept negative explicit values and count upward from them
+--FILE--
+enum Level {
+  Low = -2,
+  Mid,
+  High,
+}
+
+pub fn main(): i32 {
+  return (Level.Mid as i32) + (Level.High as i32) + 1;
+}
+--EXIT--
+0
