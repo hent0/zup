@@ -16,3 +16,11 @@ pub fn isDigit(c: u8): bool {
 pub fn isAlnum(c: u8): bool {
   return isAlpha(c) || isDigit(c);
 }
+
+pub fn isHex(c: u8): bool {
+  return isDigit(c) || match c {
+      'a'...'f',
+      'A'...'F' => true,
+      _ => false,
+  };
+}
