@@ -1,0 +1,408 @@
+pub const std = import("std");
+pub const token = import("token.zup");
+
+pub struct Lexer {
+  src: str,
+  line: u32,
+  col: u32,
+  cursor: u32,
+  current: u8,
+  arena: std.mem.Arena,
+
+  pub fn init(src: str, arena: std.mem.Arena): Lexer {
+    return {
+      src: src,
+      line: 1,
+      col: 1,
+      cursor: 0,
+      current: src[0],
+      arena: arena,
+    };
+  }
+
+  pub fn nextToken(self): token.Token {
+    self.skipComments();
+
+    if self.atEof() {
+      return token.Token.init(.Eof);
+    }
+
+    if self.isIdStart() {
+      return self.id();
+    }
+
+    if std.ascii.isDigit(self.current) {
+      return self.number();
+    }
+
+    return match self.current {
+      '(' => self.advanceWith(token.Token.init(.Lparen, self.line, self.col)),
+      ')' => self.advanceWith(token.Token.init(.Rparen, self.line, self.col)),
+      '{' => self.advanceWith(token.Token.init(.Lbrace, self.line, self.col)),
+      '}' => self.advanceWith(token.Token.init(.Rbrace, self.line, self.col)),
+      '[' => self.advanceWith(token.Token.init(.Lbracket, self.line, self.col)),
+      ']' => self.advanceWith(token.Token.init(.Rbracket, self.line, self.col)),
+      ';' => self.advanceWith(token.Token.init(.Semicolon, self.line, self.col)),
+      ':' => self.advanceWith(token.Token.init(.Colon, self.line, self.col)),
+      ',' => self.advanceWith(token.Token.init(.Comma, self.line, self.col)),
+      '"' => self.stringLiteral(),
+      '\'' => self.charLiteral(),
+      '+' => match self.peek() {
+        '+' => self.advanceWith(token.Token.init(.PlusPlus, self.line, self.col), 2),
+        '=' => self.advanceWith(token.Token.init(.PlusEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Plus, self.line, self.col)),
+      },
+      '-' => match self.peek() {
+        '-' => self.advanceWith(token.Token.init(.MinusMinus, self.line, self.col), 2),
+        '=' => self.advanceWith(token.Token.init(.MinusEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Minus, self.line, self.col)),
+      },
+      '*' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.StarEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Star, self.line, self.col)),
+      },
+      '/' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.SlashEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Slash, self.line, self.col)),
+      },
+      '%' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.PercentEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Percent, self.line, self.col)),
+      },
+      '!' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.BangEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Bang, self.line, self.col)),
+      },
+      '?' => match self.peek() {
+        '?' => match self.peek(2) {
+          '=' => self.advanceWith(token.Token.init(.QuestionQuestionEqual, self.line, self.col), 3),
+          _ => self.advanceWith(token.Token.init(.QuestionQuestion, self.line, self.col), 2),
+        },
+        _ => self.advanceWith(token.Token.init(.Question, self.line, self.col)),
+      },
+      '=' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.EqualEqual, self.line, self.col), 2),
+        '>' => self.advanceWith(token.Token.init(.FatArrow, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Equal, self.line, self.col)),
+      },
+      '<' => match self.peek() {
+        '<' => match self.peek(2) {
+          '=' => self.advanceWith(token.Token.init(.LessLessEqual, self.line, self.col), 3),
+          _ => self.advanceWith(token.Token.init(.LessLess, self.line, self.col), 2),
+        },
+        '=' => self.advanceWith(token.Token.init(.LessEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Less, self.line, self.col)),
+      },
+      '>' => match self.peek() {
+        '>' => match self.peek(2) {
+          '=' => self.advanceWith(token.Token.init(.GreaterGreaterEqual, self.line, self.col), 3),
+          _ => self.advanceWith(token.Token.init(.GreaterGreater, self.line, self.col), 2),
+        },
+        '=' => self.advanceWith(token.Token.init(.GreaterEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Greater, self.line, self.col)),
+      },
+      '&' => match self.peek() {
+        '&' => self.advanceWith(token.Token.init(.AmpersandAmpersand, self.line, self.col), 2),
+        '=' => self.advanceWith(token.Token.init(.AmpersandEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Ampersand, self.line, self.col)),
+      },
+      '|' => match self.peek() {
+        '|' => self.advanceWith(token.Token.init(.PipePipe, self.line, self.col), 2),
+        '=' => self.advanceWith(token.Token.init(.PipeEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Pipe, self.line, self.col)),
+      },
+      '^' => match self.peek() {
+        '=' => self.advanceWith(token.Token.init(.CaretEqual, self.line, self.col), 2),
+        _ => self.advanceWith(token.Token.init(.Caret, self.line, self.col)),
+      },
+      '.' => match self.peek() {
+        '.' => match self.peek(2) {
+          '.' => self.advanceWith(token.Token.init(.DotDotDot, self.line, self.col), 3),
+          _ => self.advanceWith(token.Token.init(.DotDot, self.line, self.col), 2),
+        },
+        _ => self.advanceWith(token.Token.init(.Dot, self.line, self.col)),
+      },
+      _ => token.Token.init(.Eof, self.line, self.col),
+    };
+  }
+
+  fn atEof(self): bool {
+    return (self.cursor as i64) >= self.src.len;
+  }
+
+  fn advance(self, n: u32 = 1) {
+    if self.atEof() {
+      return;
+    }
+
+    if n > 1 {
+      for i in (0 as u32)..n {
+        self.advance();
+      }
+      return;
+    }
+
+    match self.current {
+      '\n' => {
+        self.line++;
+        self.col = 1;
+      },
+      _ => {
+        self.col++;
+      }
+    }
+
+    self.cursor++;
+    self.current = self.src[self.cursor];
+  }
+
+  fn advanceWith(self, tok: token.Token, n: u32 = 1): token.Token {
+    self.advance(n);
+    return tok;
+  }
+
+  fn peek(self, n: u32 = 1): ?u8 {
+    if (self.cursor + n) as i64 >= self.src.len {
+      return null;
+    }
+
+    return self.src[self.cursor + n];
+  }
+
+  fn skipWhitespace(self) {
+    while ! self.atEof() && (self.current == ' ' || self.current == '\t' || self.current == '\n') {
+      self.advance();
+    }
+  }
+
+  fn skipComments(self) {
+    self.skipWhitespace();
+    if (self.current != '/') {
+      return;
+    }
+
+    match self.peek() {
+      '/' => {
+        while ! self.atEof() && self.current != '\n' {
+          self.advance();
+        }
+      },
+      '*' => {
+        while ! self.atEof() && !(self.current == '*' && self.peek() == '/') {
+          self.advance();
+        }
+        self.advance();
+        self.advance();
+      },
+      _ => { return; }
+    }
+    self.skipComments();
+  }
+
+  fn isIdStart(self): bool {
+    return std.ascii.isAlpha(self.current) || self.current == '_';
+  }
+
+  fn isIdCharacter(self): bool {
+    return self.isIdStart() || std.ascii.isDigit(self.current);
+  }
+
+  fn id(self): token.Token {
+    const start = self.cursor;
+    const line = self.line;
+    const col = self.col;
+
+    while self.isIdCharacter() {
+      self.advance();
+    }
+
+    const value = self.arena.copyStr(self.src[start..self.cursor]);
+
+    return match true {
+      value == "pub" => token.Token.init(.Pub, line, col, value),
+      value == "fn" => token.Token.init(.Fn, line, col, value),
+      value == "return" => token.Token.init(.Return, line, col, value),
+      value == "as" => token.Token.init(.As, line, col, value),
+      value == "_" => token.Token.init(.Underscore, line, col, value),
+      value == "if" => token.Token.init(.If, line, col, value),
+      value == "else" => token.Token.init(.Else, line, col, value),
+      value == "const" => token.Token.init(.Const, line, col, value),
+      value == "let" => token.Token.init(.Let, line, col, value),
+      value == "while" => token.Token.init(.While, line, col, value),
+      value == "for" => token.Token.init(.For, line, col, value),
+      value == "break" => token.Token.init(.Break, line, col, value),
+      value == "continue" => token.Token.init(.Continue, line, col, value),
+      value == "in" => token.Token.init(.In, line, col, value),
+      value == "extern" => token.Token.init(.Extern, line, col, value),
+      value == "import" => token.Token.init(.Import, line, col, value),
+      value == "enum" => token.Token.init(.Enum, line, col, value),
+      value == "match" => token.Token.init(.Match, line, col, value),
+      value == "null" => token.Token.init(.Null, line, col, value),
+      value == "defer" => token.Token.init(.Defer, line, col, value),
+      // Types
+      value == "i8" => token.Token.init(.I8, line, col, value),
+      value == "u8" => token.Token.init(.U8, line, col, value),
+      value == "i16" => token.Token.init(.I16, line, col, value),
+      value == "u16" => token.Token.init(.U16, line, col, value),
+      value == "i32" => token.Token.init(.I32, line, col, value),
+      value == "u32" => token.Token.init(.U32, line, col, value),
+      value == "i64" => token.Token.init(.I64, line, col, value),
+      value == "u64" => token.Token.init(.U64, line, col, value),
+      value == "f32" => token.Token.init(.F32, line, col, value),
+      value == "f64" => token.Token.init(.F64, line, col, value),
+      value == "void" => token.Token.init(.Void, line, col, value),
+      value == "bool" => token.Token.init(.Bool, line, col, value),
+      value == "true" => token.Token.init(.True, line, col, value),
+      value == "false" => token.Token.init(.False, line, col, value),
+      value == "cstr" => token.Token.init(.Cstr, line, col, value),
+      value == "str" => token.Token.init(.Str, line, col, value),
+      value == "struct" => token.Token.init(.Struct, line, col, value),
+      _ => token.Token.init(.Id, line, col, value),
+    };
+  }
+
+  fn number(self): token.Token {
+    const start = self.cursor;
+    const line = self.line;
+    const col = self.col;
+
+    if self.current == '0' && (self.peek() == 'x' || self.peek() == 'X') {
+      self.advance(2);
+      while std.ascii.isHex(self.current) {
+        self.advance();
+      }
+
+      return token.Token.init(.Number, line, col, self.arena.copyStr(self.src[start..self.cursor]));
+    }
+
+    while std.ascii.isDigit(self.current) {
+      self.advance();
+    }
+
+    if self.current == '.' && std.ascii.isDigit(self.peek() ?? 0) {
+      self.advance();
+      while std.ascii.isDigit(self.current) {
+        self.advance();
+      }
+    }
+
+    if self.current == 'e' || self.current == 'E' {
+      self.exponent();
+    }
+
+    return token.Token.init(.Number, line, col, self.arena.copyStr(self.src[start..self.cursor]));
+  }
+
+  fn exponent(self) {
+    const after = self.peek() ?? 0;
+    const signed = after == '+' || after == '-';
+    if !std.ascii.isDigit(signed ? (self.peek(2) ?? 0) : after) {
+      return;
+    }
+    self.advance();
+    if signed {
+      self.advance();
+    }
+
+    while std.ascii.isDigit(self.current) {
+      self.advance();
+    }
+  }
+
+  fn stringLiteral(self): token.Token {
+    const line = self.line;
+    const col = self.col;
+    self.advance();
+
+    const start = self.cursor;
+    let escaped = false;
+    while !self.atEof() && self.current != '"' {
+      if self.current == '\\' {
+        escaped = true;
+        self.advance();
+      }
+      self.advance();
+    }
+
+    if self.atEof() {
+      return token.Token.init(.Invalid, line, col);
+    }
+
+    const raw = self.src[start..self.cursor];
+    self.advance();
+
+    if !escaped {
+      return token.Token.init(.String, line, col, raw);
+    }
+
+    let buf: []u8 = self.arena.alloc(raw.len);
+    let n: i64 = 0;
+    let i: i64 = 0;
+    while i < raw.len {
+      let c: u8 = raw[i];
+      if c == '\\' && i + 1 < raw.len {
+        i++;
+        c = match raw[i] {
+          'n' => '\n',
+          't' => '\t',
+          '0' => 0,
+          _ => raw[i],
+        };
+      }
+      buf[n] = c;
+      n++;
+      i++;
+    }
+
+    return token.Token.init(.String, line, col, buf[0..n] as str);
+  }
+
+  fn charLiteral(self): token.Token {
+    const line = self.line;
+    const col = self.col;
+    self.advance();
+
+    if self.atEof() || self.current == '\'' {
+      return token.Token.init(.Invalid, line, col);
+    }
+
+    let byte: u8 = self.current;
+    if byte == '\\' {
+      self.advance();
+      byte = match self.current {
+        'n' => '\n',
+        't' => '\t',
+        '0' => 0,
+        _ => self.current,
+      };
+    }
+    self.advance();
+
+    if self.current != '\'' {
+      return token.Token.init(.Invalid, line, col);
+    }
+    self.advance();
+
+    return token.Token.init(.Number, line, col, self.byteToStr(byte));
+  }
+
+  fn byteToStr(self, b: u8): str {
+    let buf: []u8 = self.arena.alloc(3);
+    if b == 0 {
+      buf[0] = '0';
+      return buf[0..1] as str;
+    }
+    let v: u8 = b;
+    let i: i64 = 3;
+    while v > 0 {
+      i--;
+      buf[i] = (v % 10) + '0';
+      v = v / 10;
+    }
+    return buf[i..3] as str;
+  }
+
+  fn debug(self) {
+    std.io.println("'{}', line: {}, col: {}", self.current, self.line, self.col);
+  }
+}

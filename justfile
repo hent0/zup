@@ -10,13 +10,16 @@ build *extraFlags='':
 run *args='': build
   @./build/zup {{args}}
 
-test-build: build
-  ./build/zup examples/001.zup -ir
-  clang -Qunused-arguments -Wno-override-module a.ll -o a.out
+# Build stage1
+stage1 *args='': build
+  @./build/zup stage1/src/main.zup -o build/stage1
 
 # Test
 test *args='': build
   @./run-tests.sh {{args}}
+
+test-stage1 *args='': stage1
+  @ZUP_BIN=build/stage1 ./run-tests.sh {{args}}
 
 # Clean
 clean:

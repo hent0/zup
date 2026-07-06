@@ -1,0 +1,257 @@
+const std = import("std");
+
+pub enum TokenKind {
+  Invalid,
+  Eof,
+  Id,
+  Pub,
+  Fn,
+  Lparen,
+  Rparen,
+  Lbrace,
+  Rbrace,
+  Lbracket,
+  Rbracket,
+  Return,
+  Number,
+  Colon,
+  Semicolon,
+  Comma,
+  As,
+  Plus,
+  Minus,
+  Star,
+  Slash,
+  Percent,
+  Equal,
+  EqualEqual,
+  FatArrow,
+  Question,
+  QuestionQuestion,
+  QuestionQuestionEqual,
+  PlusPlus,
+  MinusMinus,
+  PlusEqual,
+  MinusEqual,
+  StarEqual,
+  SlashEqual,
+  PercentEqual,
+  AmpersandEqual,
+  PipeEqual,
+  CaretEqual,
+  LessLessEqual,
+  GreaterGreaterEqual,
+  Bang,
+  BangEqual,
+  Less,
+  LessLess,
+  LessEqual,
+  Greater,
+  GreaterGreater,
+  GreaterEqual,
+  Underscore,
+  If,
+  Else,
+  Const,
+  Let,
+  While,
+  For,
+  Break,
+  Continue,
+  In,
+  Dot,
+  DotDot,
+  DotDotDot,
+  Ampersand,
+  AmpersandAmpersand,
+  Pipe,
+  PipePipe,
+  Caret,
+  Extern,
+  Import,
+  Enum,
+  Match,
+  Null,
+  Defer,
+  // Types
+  Void,
+  I8,
+  U8,
+  I16,
+  U16,
+  I32,
+  U32,
+  I64,
+  U64,
+  F32,
+  F64,
+  String,
+  Bool,
+  True,
+  False,
+  Cstr,
+  Str,
+  Struct,
+
+  pub fn toString(self): str {
+    return match self {
+      .Invalid => "INVALID TOKEN",
+      .Eof => "TOKEN_EOF",
+      .Id => "TOKEN_ID",
+      .Pub => "TOKEN_PUB",
+      .Fn => "TOKEN_FN",
+      .Lparen => "TOKEN_LPAREN",
+      .Rparen => "TOKEN_RPAREN",
+      .Lbrace => "TOKEN_LBRACE",
+      .Rbrace => "TOKEN_RBRACE",
+      .Lbracket => "TOKEN_LBRACKET",
+      .Rbracket => "TOKEN_RBRACKET",
+      .Return => "TOKEN_RETURN",
+      .Number => "TOKEN_NUMBER",
+      .Colon => "TOKEN_COLON",
+      .Semicolon => "TOKEN_SEMICOLON",
+      .Comma => "TOKEN_COMMA",
+      .As => "TOKEN_AS",
+      .Plus => "TOKEN_PLUS",
+      .Minus => "TOKEN_MINUS",
+      .Star => "TOKEN_STAR",
+      .Slash => "TOKEN_SLASH",
+      .Percent => "TOKEN_PERCENT",
+      .Equal => "TOKEN_EQUAL",
+      .EqualEqual => "TOKEN_EQUAL_EQUAL",
+      .FatArrow => "TOKEN_FAT_ARROW",
+      .Question => "TOKEN_QUESTION",
+      .QuestionQuestion => "TOKEN_QUESTION_QUESTION",
+      .QuestionQuestionEqual => "TOKEN_QUESTION_QUESTION_EQUAL",
+      .PlusPlus => "TOKEN_PLUS_PLUS",
+      .MinusMinus => "TOKEN_MINUS_MINUS",
+      .PlusEqual => "TOKEN_PLUS_EQUAL",
+      .MinusEqual => "TOKEN_MINUS_EQUAL",
+      .StarEqual => "TOKEN_STAR_EQUAL",
+      .SlashEqual => "TOKEN_SLASH_EQUAL",
+      .PercentEqual => "TOKEN_PERCENT_EQUAL",
+      .AmpersandEqual => "TOKEN_AMPERSAND_EQUAL",
+      .PipeEqual => "TOKEN_PIPE_EQUAL",
+      .CaretEqual => "TOKEN_CARET_EQUAL",
+      .LessLessEqual => "TOKEN_LESS_LESS_EQUAL",
+      .GreaterGreaterEqual => "TOKEN_GREATER_GREATER_EQUAL",
+      .Bang => "TOKEN_BANG",
+      .BangEqual => "TOKEN_BANG_EQUAL",
+      .Less => "TOKEN_LESS",
+      .LessLess => "TOKEN_LESS_LESS",
+      .LessEqual => "TOKEN_LESS_EQUAL",
+      .Greater => "TOKEN_GREATER",
+      .GreaterGreater => "TOKEN_GREATER_GREATER",
+      .GreaterEqual => "TOKEN_GREATER_EQUAL",
+      .Underscore => "TOKEN_UNDERSCORE",
+      .If => "TOKEN_IF",
+      .Else => "TOKEN_ELSE",
+      .Const => "TOKEN_CONST",
+      .Let => "TOKEN_LET",
+      .While => "TOKEN_WHILE",
+      .For => "TOKEN_FOR",
+      .Break => "TOKEN_BREAK",
+      .Continue => "TOKEN_CONTINUE",
+      .In => "TOKEN_IN",
+      .Dot => "TOKEN_DOT",
+      .DotDot => "TOKEN_DOT_DOT",
+      .DotDotDot => "TOKEN_DOT_DOT_DOT",
+      .Ampersand => "TOKEN_AMPERSAND",
+      .AmpersandAmpersand => "TOKEN_AMPERSAND_AMPERSAND",
+      .Pipe => "TOKEN_PIPE",
+      .PipePipe => "TOKEN_PIPE_PIPE",
+      .Caret => "TOKEN_CARET",
+      .Extern => "TOKEN_EXTERN",
+      .Import => "TOKEN_IMPORT",
+      .Enum => "TOKEN_ENUM",
+      .Match => "TOKEN_MATCH",
+      .Null => "TOKEN_NULL",
+      .Defer => "TOKEN_DEFER",
+      // Types
+      .Void => "TOKEN_VOID",
+      .I8 => "TOKEN_I8",
+      .U8 => "TOKEN_U8",
+      .I16 => "TOKEN_I16",
+      .U16 => "TOKEN_U16",
+      .I32 => "TOKEN_I32",
+      .U32 => "TOKEN_U32",
+      .I64 => "TOKEN_I64",
+      .U64 => "TOKEN_U64",
+      .F32 => "TOKEN_F32",
+      .F64 => "TOKEN_F64",
+      .String => "TOKEN_STRING",
+      .Bool => "TOKEN_BOOL",
+      .True => "TOKEN_TRUE",
+      .False => "TOKEN_FALSE",
+      .Cstr => "TOKEN_CSTR",
+      .Str => "TOKEN_STR",
+      .Struct => "TOKEN_STRUCT",
+      _ => "UNKNOWN TOKEN TYPE",
+    };
+  }
+}
+
+pub struct Token {
+  pub kind: TokenKind,
+  pub line: u32 = 0,
+  pub col: u32 = 0,
+  pub value: ?str = null,
+
+  pub fn init(kind: TokenKind, line: u32 = 0, col: u32 = 0, value: ?str = null): Token {
+    return Token{
+      kind: kind,
+      line: line,
+      col: col,
+      value: value,
+    };
+  }
+
+  pub fn debug(self) {
+    const out = std.io.stdout();
+    out.write(self.kind.toString());
+    match self.kind {
+      .Id,
+      .String => {
+        out.write("('");
+        writeEscaped(out, self.value ?? "");
+        out.write("')");
+        std.io.println(" [{}:{}]", self.line, self.col);
+      },
+      .Number => {
+        out.write("(");
+        writeEscaped(out, self.value ?? "");
+        out.write(")");
+        std.io.println(" [{}:{}]", self.line, self.col);
+      },
+      _ => std.io.println(" [{}:{}]", self.line, self.col),
+    };
+  }
+
+  pub fn toString(self): str {
+    return self.kind.toString();
+  }
+}
+
+fn hexDigit(v: u8): u8 {
+  return v < 10 ? v + '0' : v - 10 + 'A';
+}
+
+fn writeEscaped(file: std.io.File, s: str) {
+  let i: i64 = 0;
+  while i < s.len {
+    const c = s[i];
+    if c == '\n' {
+      file.write("\\n");
+    } else if c >= 32 && c < 127 {
+      file.write(s[i..i + 1]);          // one-byte view, no copy
+    } else {
+      let hex: [4]u8;
+      hex[0] = '\\';
+      hex[1] = 'x';
+      hex[2] = hexDigit(c / 16);
+      hex[3] = hexDigit(c % 16);
+      file.write(hex[0..4] as str);
+    }
+    i++;
+  }
+}

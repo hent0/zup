@@ -31,7 +31,10 @@ vim.api.nvim_create_autocmd("FileType", {
     -- Comments (line and block, block may span multiple lines)
     vim.fn.matchadd("Comment", [[\v\/\/.*$]])
     vim.fn.matchadd("Comment", [[\v\/\*\_.{-}\*\/]])
-    -- Strings (may span multiple lines; \_[^"] matches any char including newline except a closing quote)
-    vim.fn.matchadd("String", [[\v"%(\\.|\_[^"])*"]])
+    -- Char literals: 'x' and escapes like '\n', '\''
+    vim.fn.matchadd("String", [[\v'%(\\.|[^'\\])']])
+    -- Strings (may span multiple lines; \_[^"] matches any char including newline except a closing quote).
+    -- '@1<! keeps the " inside the char literal '"' from opening a string that swallows the rest of the file.
+    vim.fn.matchadd("String", [[\v'@1<!"%(\\.|\_[^"])*"]])
   end,
 })

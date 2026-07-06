@@ -195,7 +195,7 @@ while IFS= read -r test; do
     if $has_args; then
         # Compiler-output mode: check zup's own stdout/stderr/exit.
         # shellcheck disable=SC2086
-        "$ZUP_BIN" $args "$tmp_src" >"$tmp_stdout" 2>"$tmp_stderr"
+        "$ZUP_BIN" "$tmp_src" $args >"$tmp_stdout" 2>"$tmp_stderr"
         status=$?
     else
         # Run mode: compile to a binary and execute it.

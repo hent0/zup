@@ -1,0 +1,42 @@
+const std = import("std");
+const lexer = import("lexer.zup");
+
+pub fn main(args: []str): i32 {
+  if args.len < 2 {
+    std.io.printerrln("error: no input provided");
+    return 1;
+  }
+
+  const arena = std.mem.Arena.init();
+  defer arena.destroy();
+
+  const file = std.io.open(args[1], .Read);
+  defer file.close();
+
+  if !file.isValid() {
+    std.io.printerrln("error: failed to read file");
+    return 1;
+  }
+
+  const size = file.size();
+  let buf: []u8 = arena.alloc(size);
+  let total: i64 = 0;
+
+  let n: i64 = file.read(buf[total..size]);
+  while n > 0 {
+    total = total + n;
+    n = file.read(buf[total..size]);
+  }
+
+  let src: str = buf[0..total] as str;
+
+  // Tokenize
+  const l = lexer.Lexer.init(src, arena);
+  let tok = l.nextToken();
+  while tok.kind != .Eof {
+    tok.debug();
+    tok = l.nextToken();
+  }
+
+  return 0;
+}

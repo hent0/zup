@@ -1,0 +1,20 @@
+default:
+  @just --list
+
+# Build
+build:
+  @mkdir -p build
+  @../build/zup src/main.zup -o build/zup
+
+# Exec
+run *args='examples/001_hello_world.zup': build
+  @./build/zup {{args}}
+
+test: build
+  @../build/zup examples/001_hello_world.zup -tokenize > og.out
+  @./build/zup examples/001_hello_world.zup > new.out
+  @diff --color -u og.out new.out
+
+# Clean
+clean:
+    @rm -rf build
