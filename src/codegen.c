@@ -278,6 +278,231 @@ static size_t type_size(ctx_t *ctx, type_t type) {
   }
 }
 
+static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm);
+
+static size_t c_abi_align(ctx_t *ctx, type_t type) {
+  switch (type.kind) {
+  case TYPE_BOOL:
+  case TYPE_I8:
+  case TYPE_U8:
+    return 1;
+  case TYPE_I16:
+  case TYPE_U16:
+    return 2;
+  case TYPE_I32:
+  case TYPE_U32:
+  case TYPE_F32:
+    return 4;
+  case TYPE_ARRAY:
+    return c_abi_align(ctx, *type.element);
+  case TYPE_OPTIONAL: {
+    size_t a = c_abi_align(ctx, *type.element);
+    return a > 1 ? a : 1;
+  }
+  case TYPE_STRUCT: {
+    const decl_t *s = find_struct(ctx, struct_ref(ctx, type.name));
+    if (s == NULL) {
+      return 8;
+    }
+    size_t align = 1;
+    for (field_t *f = s->strct.fields; f != NULL; f = f->next) {
+      size_t fa = c_abi_align(ctx, f->type);
+      if (fa > align) {
+        align = fa;
+      }
+    }
+    return align;
+  }
+  default:
+    return 8;
+  }
+}
+
+static size_t c_abi_size(ctx_t *ctx, type_t type) {
+  switch (type.kind) {
+  case TYPE_BOOL:
+  case TYPE_I8:
+  case TYPE_U8:
+    return 1;
+  case TYPE_I16:
+  case TYPE_U16:
+    return 2;
+  case TYPE_I32:
+  case TYPE_U32:
+  case TYPE_F32:
+    return 4;
+  case TYPE_STR:
+  case TYPE_SLICE:
+    return 16;
+  case TYPE_ARRAY:
+    return type.array_length * c_abi_size(ctx, *type.element);
+  case TYPE_OPTIONAL: {
+    size_t a = c_abi_align(ctx, type);
+    size_t n = c_abi_align(ctx, *type.element) + c_abi_size(ctx, *type.element);
+    return (n + a - 1) / a * a;
+  }
+  case TYPE_STRUCT: {
+    const decl_t *s = find_struct(ctx, struct_ref(ctx, type.name));
+    if (s == NULL) {
+      return 8;
+    }
+    size_t off = 0;
+    size_t align = 1;
+    for (field_t *f = s->strct.fields; f != NULL; f = f->next) {
+      size_t fa = c_abi_align(ctx, f->type);
+      off = (off + fa - 1) / fa * fa;
+      off += c_abi_size(ctx, f->type);
+      if (fa > align) {
+        align = fa;
+      }
+    }
+    return (off + align - 1) / align * align;
+  }
+  case TYPE_ENUM:
+    if (!is_tagged_enum(ctx, type)) {
+      return 8;
+    }
+    return 8 + 8 * enum_payload_slots(
+                       ctx, find_struct(ctx, struct_ref(ctx, type.name)));
+  default:
+    return 8;
+  }
+}
+
+typedef struct {
+  bool present[2];
+  bool has_int[2];
+  size_t end[2];
+} cabi_scan_t;
+
+static void cabi_mark(cabi_scan_t *s, size_t off, size_t size, bool is_float) {
+  for (int k = 0; k < 2; k++) {
+    size_t lo = (size_t)k * 8;
+    size_t hi = lo + 8;
+    if (off < hi && off + size > lo) {
+      s->present[k] = true;
+      if (!is_float) {
+        s->has_int[k] = true;
+      }
+      size_t end = off + size < hi ? off + size : hi;
+      if (end - lo > s->end[k]) {
+        s->end[k] = end - lo;
+      }
+    }
+  }
+}
+
+static bool cabi_scan_type(ctx_t *ctx, type_t type, size_t off,
+                           cabi_scan_t *s) {
+  switch (type.kind) {
+  case TYPE_F32:
+  case TYPE_F64:
+    cabi_mark(s, off, c_abi_size(ctx, type), true);
+    return true;
+  case TYPE_BOOL:
+  case TYPE_I8:
+  case TYPE_U8:
+  case TYPE_I16:
+  case TYPE_U16:
+  case TYPE_I32:
+  case TYPE_U32:
+  case TYPE_I64:
+  case TYPE_U64:
+  case TYPE_CSTR:
+    cabi_mark(s, off, c_abi_size(ctx, type), false);
+    return true;
+  case TYPE_STR:
+  case TYPE_SLICE:
+    cabi_mark(s, off, 8, false);
+    cabi_mark(s, off + 8, 8, false);
+    return true;
+  case TYPE_ARRAY: {
+    size_t es = c_abi_size(ctx, *type.element);
+    for (size_t i = 0; i < type.array_length; i++) {
+      if (!cabi_scan_type(ctx, *type.element, off + i * es, s)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  case TYPE_OPTIONAL:
+    cabi_mark(s, off, 1, false);
+    return cabi_scan_type(ctx, *type.element,
+                          off + c_abi_align(ctx, *type.element), s);
+  case TYPE_STRUCT: {
+    const decl_t *st = find_struct(ctx, struct_ref(ctx, type.name));
+    if (st == NULL) {
+      return false;
+    }
+    size_t o = 0;
+    for (field_t *f = st->strct.fields; f != NULL; f = f->next) {
+      size_t fa = c_abi_align(ctx, f->type);
+      o = (o + fa - 1) / fa * fa;
+      if (!cabi_scan_type(ctx, f->type, off + o, s)) {
+        return false;
+      }
+      o += c_abi_size(ctx, f->type);
+    }
+    return true;
+  }
+  case TYPE_ENUM:
+    cabi_mark(s, off, c_abi_size(ctx, type), false);
+    return true;
+  default:
+    return false;
+  }
+}
+
+typedef struct {
+  int n;
+  const char *ty[2];
+} cabi_t;
+
+static cabi_t cabi_classify(ctx_t *ctx, type_t type) {
+  cabi_t r = {0};
+  if (type.kind != TYPE_STRUCT) {
+    return r;
+  }
+  size_t size = c_abi_size(ctx, type);
+  if (size == 0 || size > 16) {
+    return r;
+  }
+  cabi_scan_t s = {0};
+  if (!cabi_scan_type(ctx, type, 0, &s)) {
+    return r;
+  }
+  r.n = size > 8 ? 2 : 1;
+  for (int k = 0; k < r.n; k++) {
+    if (s.present[k] && !s.has_int[k]) {
+      r.ty[k] = s.end[k] <= 4 ? "float" : "double";
+    } else {
+      size_t used = s.present[k] ? s.end[k] : 8;
+      r.ty[k] = arena_format(ctx->arena, "i%zu", used * 8);
+    }
+  }
+  return r;
+}
+
+static const char *cabi_ret_type(ctx_t *ctx, cabi_t c) {
+  if (c.n == 2) {
+    return arena_format(ctx->arena, "{ %s, %s }", c.ty[0], c.ty[1]);
+  }
+  return c.ty[0];
+}
+
+static const char *cabi_load_args(ctx_t *ctx, const char *addr, cabi_t c) {
+  unsigned int lo = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load %s, ptr %s, align 1\n", lo, c.ty[0], addr);
+  if (c.n == 1) {
+    return arena_format(ctx->arena, "%s %%%u", c.ty[0], lo);
+  }
+  unsigned int p = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = getelementptr i8, ptr %s, i64 8\n", p, addr);
+  unsigned int hi = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load %s, ptr %%%u, align 1\n", hi, c.ty[1], p);
+  return arena_format(ctx->arena, "%s %%%u, %s %%%u", c.ty[0], lo, c.ty[1], hi);
+}
+
 static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm) {
   size_t max = 0;
   for (enum_member_t *m = enm->enm.members; m != NULL; m = m->next) {
@@ -1411,6 +1636,8 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     name = (fn != NULL && fn->fn.is_extern) ? callee : mangle(ctx, callee);
   }
   bool ret_struct = is_agg(ctx, call->type);
+  bool extern_c = fn != NULL && fn->fn.is_extern;
+  cabi_t retc = extern_c ? cabi_classify(ctx, call->type) : (cabi_t){0};
 
   const param_t *param = NULL;
   size_t param_count = 0;
@@ -1458,6 +1685,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
   type_t *argtype = arena_alloc(ctx->arena, sizeof(type_t) * (cap ? cap : 1));
   bool *argbyval = arena_alloc(ctx->arena, sizeof(bool) * (cap ? cap : 1));
+  const char **argcoerce =
+      arena_alloc(ctx->arena, sizeof(char *) * (cap ? cap : 1));
+  for (size_t z = 0; z < (cap ? cap : 1); z++) {
+    argcoerce[z] = NULL;
+  }
   bool boxed_variadic = fn != NULL && fn->fn.variadic && !fn->fn.is_extern;
   size_t fixed = boxed_variadic ? fn->fn.params_count - 1 : 0;
   expr_t *rest = NULL;
@@ -1517,6 +1749,10 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
         addr = arena_format(ctx->arena, "%%%u", slot);
         emit_aggregate_into(ctx, addr, arg->type, arg);
       }
+      cabi_t pc = extern_c ? cabi_classify(ctx, arg->type) : (cabi_t){0};
+      if (pc.n > 0) {
+        argcoerce[i] = cabi_load_args(ctx, addr, pc);
+      }
       argref[i] = addr;
       argtype[i] = arg->type;
       argbyval[i] = true;
@@ -1540,6 +1776,10 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       fprintf(ctx->out, "  %%%u = alloca %s\n", slot, ir_type(ctx, dt));
       const char *tmp = arena_format(ctx->arena, "%%%u", slot);
       emit_aggregate_into(ctx, tmp, dt, def);
+      cabi_t pc = extern_c ? cabi_classify(ctx, dt) : (cabi_t){0};
+      if (pc.n > 0) {
+        argcoerce[i] = cabi_load_args(ctx, tmp, pc);
+      }
       argref[i] = tmp;
       argtype[i] = dt;
       argbyval[i] = true;
@@ -1640,22 +1880,43 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
 
   value_t result;
+  const char *ret_coerce = retc.n > 0 ? cabi_ret_type(ctx, retc) : NULL;
   const char *callee_type = NULL;
   if (fn != NULL && fn->fn.is_extern && fn->fn.variadic) {
     const char *params = "";
     const char *psep = "";
     for (const param_t *p = fn->fn.params; p != NULL; p = p->next) {
-      const char *pt = is_agg(ctx, p->type) ? "ptr" : ir_type(ctx, p->type);
+      const char *pt;
+      if (is_agg(ctx, p->type)) {
+        cabi_t pc = cabi_classify(ctx, p->type);
+        if (pc.n == 1) {
+          pt = pc.ty[0];
+        } else if (pc.n == 2) {
+          pt = arena_format(ctx->arena, "%s, %s", pc.ty[0], pc.ty[1]);
+        } else {
+          pt = "ptr";
+        }
+      } else {
+        pt = ir_type(ctx, p->type);
+      }
       params = arena_format(ctx->arena, "%s%s%s", params, psep, pt);
       psep = ", ";
     }
-    callee_type = arena_format(
-        ctx->arena, "%s (%s%s...)",
-        call->type.kind == TYPE_VOID ? "void" : ir_type(ctx, call->type),
-        params, fn->fn.params_count > 0 ? ", " : "");
+    callee_type =
+        arena_format(ctx->arena, "%s (%s%s...)",
+                     ret_coerce                     ? ret_coerce
+                     : call->type.kind == TYPE_VOID ? "void"
+                                                    : ir_type(ctx, call->type),
+                     params, fn->fn.params_count > 0 ? ", " : "");
   }
 
-  if (ret_struct || call->type.kind == TYPE_VOID) {
+  unsigned int retreg = 0;
+  if (ret_struct && ret_coerce != NULL) {
+    retreg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = call %s @%s(", retreg,
+            callee_type ? callee_type : ret_coerce, name);
+    result = (value_t){.type = call->type, .ref = dest};
+  } else if (ret_struct || call->type.kind == TYPE_VOID) {
     fprintf(ctx->out, "  call %s @%s(", callee_type ? callee_type : "void",
             name);
     result = (value_t){.type = call->type, .ref = ret_struct ? dest : NULL};
@@ -1668,7 +1929,7 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
 
   const char *sep = "";
-  if (ret_struct) {
+  if (ret_struct && ret_coerce == NULL) {
     fprintf(ctx->out, "ptr sret(%s) %s", ir_type(ctx, call->type), dest);
     sep = ", ";
   }
@@ -1677,7 +1938,9 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     sep = ", ";
   }
   for (i = 0; i < n; i++) {
-    if (argbyval[i]) {
+    if (argcoerce[i] != NULL) {
+      fprintf(ctx->out, "%s%s", sep, argcoerce[i]);
+    } else if (argbyval[i]) {
       fprintf(ctx->out, "%sptr byval(%s) %s", sep, ir_type(ctx, argtype[i]),
               argref[i]);
     } else {
@@ -1686,6 +1949,26 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     sep = ", ";
   }
   fprintf(ctx->out, ")\n");
+
+  if (ret_struct && ret_coerce != NULL) {
+    if (retc.n == 1) {
+      fprintf(ctx->out, "  store %s %%%u, ptr %s, align 1\n", retc.ty[0],
+              retreg, dest);
+    } else {
+      unsigned int e0 = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = extractvalue %s %%%u, 0\n", e0, ret_coerce,
+              retreg);
+      fprintf(ctx->out, "  store %s %%%u, ptr %s, align 1\n", retc.ty[0], e0,
+              dest);
+      unsigned int p = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr i8, ptr %s, i64 8\n", p, dest);
+      unsigned int e1 = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = extractvalue %s %%%u, 1\n", e1, ret_coerce,
+              retreg);
+      fprintf(ctx->out, "  store %s %%%u, ptr %%%u, align 1\n", retc.ty[1], e1,
+              p);
+    }
+  }
   return result;
 }
 
@@ -2595,9 +2878,12 @@ static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
   node->next = ctx->externs;
   ctx->externs = node;
 
-  bool sret = is_agg(ctx, decl->fn.return_type);
-  fprintf(ctx->out, "declare %s @%s(",
-          sret ? "void" : ir_type(ctx, decl->fn.return_type), decl->name);
+  cabi_t retc = cabi_classify(ctx, decl->fn.return_type);
+  bool sret = is_agg(ctx, decl->fn.return_type) && retc.n == 0;
+  const char *ret_ty = retc.n > 0 ? cabi_ret_type(ctx, retc)
+                       : sret     ? "void"
+                                  : ir_type(ctx, decl->fn.return_type);
+  fprintf(ctx->out, "declare %s @%s(", ret_ty, decl->name);
 
   const char *sep = "";
   if (sret) {
@@ -2607,7 +2893,14 @@ static int emit_extern_fn(ctx_t *ctx, decl_t *decl) {
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
     if (is_agg(ctx, param->type)) {
-      fprintf(ctx->out, "%sptr byval(%s)", sep, ir_type(ctx, param->type));
+      cabi_t pc = cabi_classify(ctx, param->type);
+      if (pc.n == 1) {
+        fprintf(ctx->out, "%s%s", sep, pc.ty[0]);
+      } else if (pc.n == 2) {
+        fprintf(ctx->out, "%s%s, %s", sep, pc.ty[0], pc.ty[1]);
+      } else {
+        fprintf(ctx->out, "%sptr byval(%s)", sep, ir_type(ctx, param->type));
+      }
     } else {
       fprintf(ctx->out, "%s%s", sep, ir_type(ctx, param->type));
     }

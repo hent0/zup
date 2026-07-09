@@ -28,16 +28,19 @@ static const struct option long_options[] = {
 };
 
 static void print_usage(FILE *stream) {
-  fprintf(stream,
-          "Usage: zup [OPTION...] <file>\n"
-          "  -o <file>          Output path\n"
-          "  -tokenize          Output only tokens\n"
-          "  -ir                Output only LLVM IR\n"
-          "  -ast               Dump ast\n"
-          "  -static            Compile static\n"
-          "  -keep-ir           Doesn't remove generare LLVM IR after compile\n"
-          "  -help              Give this help list\n"
-          "  -version           Print version\n");
+  fprintf(
+      stream,
+      "Usage: zup [OPTION...] <file>\n"
+      "  -o <file>          Output path\n"
+      "  -tokenize          Output only tokens\n"
+      "  -ir                Output only LLVM IR\n"
+      "  -ast               Dump ast\n"
+      "  -static            Compile static\n"
+      "  -l <lib>           Link against library (passed to clang as -l<lib>)\n"
+      "  -L <path>          Add library search path\n"
+      "  -keep-ir           Doesn't remove generare LLVM IR after compile\n"
+      "  -help              Give this help list\n"
+      "  -version           Print version\n");
 }
 
 static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
@@ -48,11 +51,32 @@ static int parse_args(int argc, char **argv, options_t *opts, int *exit_code) {
   opts->compile_static = false;
 
   int c;
-  while ((c = getopt_long_only(argc, argv, "o:", long_options, NULL)) != -1) {
+  while ((c = getopt_long_only(argc, argv, "o:l:L:", long_options, NULL)) !=
+         -1) {
     switch (c) {
     case 'o':
       opts->output = optarg;
       break;
+    case 'l': {
+      if (opts->link_libs_count >= MAX_LINK_ARGS) {
+        fprintf(stderr, "zup: maximum number of -l flags exceeded (max: %d)\n",
+                MAX_LINK_ARGS);
+        *exit_code = EXIT_FAILURE;
+        return 1;
+      }
+      opts->link_libs[opts->link_libs_count++] = optarg;
+      break;
+    }
+    case 'L': {
+      if (opts->link_paths_count >= MAX_LINK_ARGS) {
+        fprintf(stderr, "zup: maximum number of -L flags exceeded (max: %d)\n",
+                MAX_LINK_ARGS);
+        *exit_code = EXIT_FAILURE;
+        return 1;
+      }
+      opts->link_paths[opts->link_paths_count++] = optarg;
+      break;
+    }
     case OPTION_TOKENIZE:
       opts->mode = MODE_TOKENIZE;
       break;

@@ -119,10 +119,24 @@ int compiler_compile(compiler_t *compiler, const options_t *opts) {
       return 1;
     }
 
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd),
-             "clang -Qunused-arguments -Wno-override-module %s%s -o %s",
-             opts->compile_static ? "-static " : "", ir, output);
+    char cmd[4096];
+    int n = snprintf(cmd, sizeof(cmd),
+                     "clang -Qunused-arguments -Wno-override-module %s%s -o %s",
+                     opts->compile_static ? "-static " : "", ir, output);
+
+    for (size_t i = 0; i < opts->link_paths_count && n < (int)sizeof(cmd);
+         i++) {
+      n += snprintf(cmd + n, sizeof(cmd) - n, " -L%s", opts->link_paths[i]);
+    }
+
+    for (size_t i = 0; i < opts->link_libs_count && n < (int)sizeof(cmd); i++) {
+      n += snprintf(cmd + n, sizeof(cmd) - n, " -l%s", opts->link_libs[i]);
+    }
+
+    if (n >= (int)sizeof(cmd)) {
+      diag_error_nofile("link command too long");
+      return 1;
+    }
 
     if (system(cmd) != 0) {
       diag_error_nofile("failed to link '%s'", output);

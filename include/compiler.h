@@ -4,6 +4,8 @@
 #include "arena.h"
 #include <stddef.h>
 
+#define MAX_LINK_ARGS 32
+
 typedef enum {
   MODE_COMPILE,
   MODE_TOKENIZE,
@@ -17,6 +19,10 @@ typedef struct {
   CompileMode mode;
   bool keep_ir;
   bool compile_static;
+  const char *link_libs[MAX_LINK_ARGS];
+  size_t link_libs_count;
+  const char *link_paths[MAX_LINK_ARGS];
+  size_t link_paths_count;
 } options_t;
 
 typedef struct {
