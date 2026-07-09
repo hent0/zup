@@ -1154,6 +1154,15 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
           .ref = arena_format(ctx->arena, "0x%016llX", bits),
       };
     }
+    // LLVM IR only accepts decimal integer constants (0x... means float)
+    if (expr->number.value[0] == '0' &&
+        (expr->number.value[1] == 'x' || expr->number.value[1] == 'X')) {
+      return (value_t){
+          .type = expr->type,
+          .ref = arena_format(ctx->arena, "%llu",
+                              strtoull(expr->number.value, NULL, 16)),
+      };
+    }
     return (value_t){
         .type = expr->type,
         .ref = expr->number.value,

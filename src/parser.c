@@ -72,7 +72,7 @@ static type_t parse_type(parser_t *parser) {
       break;
     case TOKEN_NUMBER:
       type.kind = TYPE_ARRAY;
-      type.array_length = (size_t)atoi(parser->current.value);
+      type.array_length = (size_t)strtoull(parser->current.value, NULL, 0);
       advance(parser);
       break;
     case TOKEN_UNDERSCORE:
