@@ -14,6 +14,9 @@ run *args='': build
 stage1 *args='': build
   @./build/zup stage1/src/main.zup -o build/stage1
 
+run-stage1 *args='': stage1
+  @./build/stage1 {{args}}
+
 # Test
 test *args='': build
   @./run-tests.sh {{args}}

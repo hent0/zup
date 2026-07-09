@@ -1,0 +1,16 @@
+--TEST--
+passing a payload to a bare variant is a compile error
+--FILE--
+enum V {
+  A,
+  B: i64,
+}
+
+pub fn main(): i32 {
+  let v: V = .A(5);
+  return 0;
+}
+--EXPECTERR--
+zup: error: variant 'A' of 'V' takes no payload [7:17]
+--EXIT--
+1

@@ -1,0 +1,48 @@
+--TEST--
+an enum member may carry a payload type, and a match arm may bind it
+--ARGS--
+--ast
+--FILE--
+enum Value {
+  Nil,
+  Int: i64,
+  Str: str,
+}
+
+pub fn main(): i32 {
+  let v: Value = .Int(42);
+  return match v {
+    .Nil => 0,
+    .Int(n) => n as i32,
+    .Str(s) => s.len as i32,
+  };
+}
+--EXPECT--
+Container (file) (2 members)
+  Enum priv 'Value'
+    member Nil = 0
+    member Int = 1: i64
+    member Str = 2: str
+  FnDecl pub 'main' -> i32
+    Let v: Value
+      EnumLiteral .Int
+        Number literal 42
+    Return
+      Match
+        Id v
+        Arm
+          EnumLiteral .Nil
+          Number literal 0
+        Arm
+          EnumLiteral .Int
+          bind n
+          Cast to i32
+            Id n
+        Arm
+          EnumLiteral .Str
+          bind s
+          Cast to i32
+            Field len
+              Id s
+--EXIT--
+0

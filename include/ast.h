@@ -94,11 +94,13 @@ typedef struct expr expr_t;
 typedef struct stmt stmt_t;
 typedef struct match_arm match_arm_t;
 struct match_arm {
-  expr_t *pattern;     // NULL for the '_' arm
-  expr_t *pattern_end; // non-NULL for an inclusive 'lo...hi' range pattern
-  expr_t *value;       // NULL when the arm is a statement block
-  stmt_t *body;        // NULL when the arm is an expression
-  bool or_next;        // this pattern shares the next arm's body ('a', 'b' =>)
+  expr_t *pattern;
+  expr_t *pattern_end;
+  char *binding;
+  expr_t *value;
+  stmt_t *body;
+  bool is_block; // arm is a '{ ... }' block (body may be NULL when empty)
+  bool or_next;
   unsigned int line;
   unsigned int col;
   match_arm_t *next;
@@ -153,7 +155,7 @@ struct expr {
     } unary;
     struct {
       char *type_name;
-      char *module; // import alias for m.Person { ... }; else NULL
+      char *module;
       field_init_t *inits;
       size_t init_count;
     } struct_literal;
@@ -163,6 +165,7 @@ struct expr {
     } field;
     struct {
       char *name;
+      expr_t *payload;
     } enum_literal;
     struct {
       expr_t *elements;
@@ -287,6 +290,8 @@ typedef struct enum_member enum_member_t;
 struct enum_member {
   char *name;
   long long value;
+  type_t payload;
+  bool has_payload;
   unsigned int line;
   unsigned int col;
   enum_member_t *next;
@@ -344,6 +349,8 @@ struct decl {
       size_t member_count;
       decl_t *methods;
       size_t method_count;
+      bool tagged;
+      size_t payload_size;
     } enm;
   };
 };

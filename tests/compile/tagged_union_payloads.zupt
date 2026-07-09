@@ -1,0 +1,46 @@
+--TEST--
+tagged-union variants carry scalar, string, struct, and slice payloads, matched by binding
+--FILE--
+const std = import("std");
+
+struct Point {
+  pub x: i64,
+  pub y: i64,
+}
+
+enum Node {
+  Leaf,
+  Num: i64,
+  Name: str,
+  Pos: Point,
+  Kids: []Node,
+}
+
+fn describe(n: Node) {
+  match n {
+    .Leaf => std.io.println("leaf"),
+    .Num(v) => std.io.println("num {}", v),
+    .Name(s) => std.io.println("name {}", s),
+    .Pos(p) => std.io.println("pos {} {}", p.x, p.y),
+    .Kids(ks) => std.io.println("kids {}", ks.len),
+  };
+}
+
+pub fn main(): i32 {
+  describe(.Leaf);
+  describe(.Num(7));
+  describe(Node.Name("hi"));
+  describe(.Pos(Point{x: 3, y: 4}));
+
+  let storage: [2]Node = [.Num(1), .Num(2)];
+  describe(.Kids(storage));
+  return 0;
+}
+--EXPECT--
+leaf
+num 7
+name hi
+pos 3 4
+kids 2
+--EXIT--
+0

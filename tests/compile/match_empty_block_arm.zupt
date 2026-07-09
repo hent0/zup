@@ -1,0 +1,19 @@
+--TEST--
+a match arm written as an empty block '{}' is a no-op, not a parse/codegen crash
+--FILE--
+enum E {
+  A,
+  B,
+}
+
+pub fn main(): i32 {
+  let e: E = .A;
+  let n: i32 = 0;
+  match e {
+    .A => { n = 1; },
+    .B => {},
+  };
+  return n;
+}
+--EXIT--
+1

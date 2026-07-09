@@ -1,0 +1,19 @@
+--TEST--
+a match arm on a payload variant must bind the payload
+--FILE--
+enum V {
+  A,
+  B: i64,
+}
+
+pub fn main(): i32 {
+  let v: V = .B(2);
+  return match v {
+    .A => 0,
+    .B => 1,
+  };
+}
+--EXPECTERR--
+zup: error: variant 'B' binds its payload: write .B(name) [10:6]
+--EXIT--
+1

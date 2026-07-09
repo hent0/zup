@@ -4,19 +4,15 @@ extern fn memcpy(dst: cstr, src: cstr, n: i64): cstr;
 extern fn memset(p: cstr, value: i32, n: i64): cstr;
 extern fn abort();
 
-pub struct ArenaOpt {
-  pub initial_capacity: i64 = 4096,
-}
-
 pub struct Arena {
   blocks: [48][]u8,
   count: i64,
   offset: i64,
   initial_capacity: i64,
 
-  pub fn init(opts: ArenaOpt = {}): Arena {
+  pub fn init(initial_capacity: i64 = 4096): Arena {
     let a: Arena;
-    a.initial_capacity = opts.initial_capacity;
+    a.initial_capacity = initial_capacity;
     return a;
   }
 

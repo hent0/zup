@@ -1,0 +1,16 @@
+--TEST--
+a variant payload must match the declared type
+--FILE--
+enum V {
+  A,
+  B: i64,
+}
+
+pub fn main(): i32 {
+  let v: V = .B("x");
+  return 0;
+}
+--EXPECTERR--
+zup: error: cannot pass str as payload of variant 'B' (expected i64) [7:17]
+--EXIT--
+1

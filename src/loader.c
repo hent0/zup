@@ -35,8 +35,6 @@ static char *dirname(const char *path, arena_t *arena) {
   return arena_format(arena, "%.*s", (int)(slash - path), path);
 }
 
-// The std library root: relative to the compiler binary, falling back to the
-// ZUP_STD environment variable when the executable path can't be determined.
 static const char *std_root(arena_t *arena) {
   char exe[PATH_MAX];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);

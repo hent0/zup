@@ -214,7 +214,7 @@ static token_t string_literal(lexer_t *lexer) {
 static token_t char_literal(lexer_t *lexer) {
   unsigned int start_line = lexer->line;
   unsigned int start_col = lexer->col;
-  advance(lexer); // opening '
+  advance(lexer);
 
   int byte = 0;
   if (at_eof(lexer) || *lexer->current == '\'' || *lexer->current == '\n') {
@@ -256,7 +256,7 @@ static token_t char_literal(lexer_t *lexer) {
   }
 
   if (*lexer->current == '\'') {
-    advance(lexer); // closing '
+    advance(lexer);
   } else {
     diag_error(NULL, start_line, start_col,
                "char literal must contain a single byte");
@@ -380,57 +380,57 @@ token_t lexer_next_token(lexer_t *lexer) {
   case '+':
     if (peek(lexer) == '+') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_PLUS_PLUS,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_PLUS_PLUS, .line = lexer->line,
+                                         lexer->col)));
     }
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_PLUS_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_PLUS_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_PLUS, .line = lexer->line, .col = lexer->col));
   case '-':
     if (peek(lexer) == '-') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_MINUS_MINUS,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_MINUS_MINUS, .line = lexer->line,
+                                         lexer->col)));
     }
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_MINUS_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_MINUS_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_MINUS, .line = lexer->line, .col = lexer->col));
   case '*':
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_STAR_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_STAR_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_STAR, .line = lexer->line, .col = lexer->col));
   case '/':
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_SLASH_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_SLASH_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_SLASH, .line = lexer->line, .col = lexer->col));
   case '%':
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_PERCENT_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_PERCENT_EQUAL,
+                                         .line = lexer->line, lexer->col)));
     }
     return advance_with(lexer, token_init(TOKEN_PERCENT, .line = lexer->line,
                                           .col = lexer->col));
@@ -455,9 +455,9 @@ token_t lexer_next_token(lexer_t *lexer) {
                                         .line = lexer->line, lexer->col))));
       }
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_QUESTION_QUESTION,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_QUESTION_QUESTION,
+                                         .line = lexer->line, lexer->col)));
     }
     return advance_with(lexer, token_init(TOKEN_QUESTION, .line = lexer->line,
                                           .col = lexer->col));
@@ -487,10 +487,10 @@ token_t lexer_next_token(lexer_t *lexer) {
       if (npeek(lexer, 2) == '=') {
         return advance_with(
             lexer,
-            advance_with(
-                lexer, advance_with(lexer, token_init(TOKEN_LESS_LESS_EQUAL,
-                                                      .line = lexer->line,
-                                                      lexer->col))));
+            advance_with(lexer,
+                         advance_with(lexer, token_init(TOKEN_LESS_LESS_EQUAL,
+                                                        .line = lexer->line,
+                                                        lexer->col))));
       }
       return advance_with(
           lexer,
@@ -510,12 +510,11 @@ token_t lexer_next_token(lexer_t *lexer) {
     case '>':
       if (npeek(lexer, 2) == '=') {
         return advance_with(
-            lexer,
-            advance_with(
-                lexer,
-                advance_with(lexer, token_init(TOKEN_GREATER_GREATER_EQUAL,
-                                               .line = lexer->line,
-                                               lexer->col))));
+            lexer, advance_with(
+                       lexer, advance_with(
+                                  lexer, token_init(TOKEN_GREATER_GREATER_EQUAL,
+                                                    .line = lexer->line,
+                                                    lexer->col))));
       }
       return advance_with(
           lexer,
@@ -534,9 +533,9 @@ token_t lexer_next_token(lexer_t *lexer) {
     }
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_AMPERSAND_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_AMPERSAND_EQUAL,
+                                         .line = lexer->line, lexer->col)));
     }
     return advance_with(lexer, token_init(TOKEN_AMPERSAND, .line = lexer->line,
                                           .col = lexer->col));
@@ -549,18 +548,18 @@ token_t lexer_next_token(lexer_t *lexer) {
     }
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_PIPE_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_PIPE_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_PIPE, .line = lexer->line, .col = lexer->col));
   case '^':
     if (peek(lexer) == '=') {
       return advance_with(
-          lexer, advance_with(lexer, token_init(TOKEN_CARET_EQUAL,
-                                                .line = lexer->line,
-                                                lexer->col)));
+          lexer,
+          advance_with(lexer, token_init(TOKEN_CARET_EQUAL, .line = lexer->line,
+                                         lexer->col)));
     }
     return advance_with(
         lexer, token_init(TOKEN_CARET, .line = lexer->line, .col = lexer->col));

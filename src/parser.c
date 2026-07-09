@@ -271,7 +271,16 @@ static expr_t *parse_match(parser_t *parser) {
       advance(parser);
     } else {
       arm->pattern = parse_expr(parser);
-      if (match(parser, TOKEN_DOT_DOT_DOT)) {
+      if (arm->pattern != NULL && arm->pattern->kind == EXPR_ENUM_LITERAL &&
+          arm->pattern->enum_literal.payload != NULL) {
+        expr_t *payload = arm->pattern->enum_literal.payload;
+        if (payload->kind != EXPR_ID) {
+          parse_error(parser, "variant binding must be an identifier");
+          return NULL;
+        }
+        arm->binding = payload->id.name;
+        arm->pattern->enum_literal.payload = NULL;
+      } else if (match(parser, TOKEN_DOT_DOT_DOT)) {
         arm->pattern_end = parse_expr(parser);
       }
     }
@@ -293,6 +302,7 @@ static expr_t *parse_match(parser_t *parser) {
     }
     expect(parser, TOKEN_FAT_ARROW, "expected '=>' after match pattern");
     if (check(parser, TOKEN_LBRACE)) {
+      arm->is_block = true;
       arm->body = parse_block(parser);
     } else {
       arm->value = parse_expr(parser);
@@ -351,7 +361,12 @@ static expr_t *parse_primary(parser_t *parser) {
     advance(parser);
     token_t name =
         expect(parser, TOKEN_ID, "expected enum member name after '.'");
-    return ast_enum_literal_init(name, parser->arena);
+    expr_t *lit = ast_enum_literal_init(name, parser->arena);
+    if (match(parser, TOKEN_LPAREN)) {
+      lit->enum_literal.payload = parse_expr(parser);
+      expect(parser, TOKEN_RPAREN, "expected ')' after variant payload");
+    }
+    return lit;
   }
   case TOKEN_MATCH:
     return parse_match(parser);
@@ -1283,6 +1298,12 @@ static decl_t *parse_enum(parser_t *parser, Visibility visibility) {
     member->name = member_name.value;
     member->line = member_name.line;
     member->col = member_name.col;
+
+    if (match(parser, TOKEN_COLON)) {
+      member->payload = parse_type(parser);
+      member->has_payload = true;
+      decl->enm.tagged = true;
+    }
 
     if (match(parser, TOKEN_EQUAL)) {
       bool negative = match(parser, TOKEN_MINUS);

@@ -1,0 +1,17 @@
+--TEST--
+tagged unions cannot be compared with '==' — matching is required
+--FILE--
+enum V {
+  A: i64,
+  B: i64,
+}
+
+pub fn main(): i32 {
+  let x: V = .A(1);
+  let y: V = .B(2);
+  return x == y ? 1 : 0;
+}
+--EXPECTERR--
+zup: error: cannot compare tagged union 'V' with '==' or '!='; use match [9:10]
+--EXIT--
+1

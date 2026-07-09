@@ -12,8 +12,6 @@ typedef struct {
   arena_t *arena;
   token_t current;
   bool had_error;
-  // While true, a '{' after an identifier does not begin a struct literal.
-  // Set while parsing if/while/for headers so `if flag {` stays unambiguous.
   bool no_struct_literal;
 } parser_t;
 

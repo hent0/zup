@@ -422,6 +422,7 @@ expr_t *ast_enum_literal_init(token_t name, arena_t *arena) {
   expr->type = (type_t){.kind = TYPE_UNKNOWN};
   expr->next = NULL;
   expr->enum_literal.name = name.value;
+  expr->enum_literal.payload = NULL;
   return expr;
 }
 
@@ -480,8 +481,10 @@ match_arm_t *ast_match_arm_init(arena_t *arena) {
   match_arm_t *arm = arena_alloc(arena, sizeof(match_arm_t));
   arm->pattern = NULL;
   arm->pattern_end = NULL;
+  arm->binding = NULL;
   arm->value = NULL;
   arm->body = NULL;
+  arm->is_block = false;
   arm->or_next = false;
   arm->line = 0;
   arm->col = 0;
@@ -637,6 +640,8 @@ enum_member_t *ast_enum_member_init(arena_t *arena) {
   member->line = 0;
   member->col = 0;
   member->value = 0;
+  member->payload = (type_t){.kind = TYPE_UNKNOWN};
+  member->has_payload = false;
   member->next = NULL;
   return member;
 }
@@ -698,6 +703,8 @@ decl_t *ast_enum_init(char *name, arena_t *arena) {
   decl->enm.member_count = 0;
   decl->enm.methods = NULL;
   decl->enm.method_count = 0;
+  decl->enm.tagged = false;
+  decl->enm.payload_size = 0;
   return decl;
 }
 
@@ -817,6 +824,9 @@ static void dump_expr(const expr_t *expr, int depth) {
     break;
   case EXPR_ENUM_LITERAL:
     printf("EnumLiteral .%s\n", expr->enum_literal.name);
+    if (expr->enum_literal.payload != NULL) {
+      dump_expr(expr->enum_literal.payload, depth + 1);
+    }
     break;
   case EXPR_ARRAY:
     printf("Array (%zu elements)\n", expr->array.element_count);
@@ -845,6 +855,10 @@ static void dump_expr(const expr_t *expr, int depth) {
       printf("Arm%s\n", arm->pattern == NULL ? " _" : "");
       if (arm->pattern != NULL) {
         dump_expr(arm->pattern, depth + 2);
+      }
+      if (arm->binding != NULL) {
+        print_indent(depth + 2);
+        printf("bind %s\n", arm->binding);
       }
       if (arm->pattern_end != NULL) {
         dump_expr(arm->pattern_end, depth + 2);
@@ -1026,7 +1040,12 @@ static void dump_decl(const decl_t *decl, int depth) {
     for (const enum_member_t *member = decl->enm.members; member != NULL;
          member = member->next) {
       print_indent(depth + 1);
-      printf("member %s = %lld\n", member->name, member->value);
+      if (member->has_payload) {
+        printf("member %s = %lld: %s\n", member->name, member->value,
+               type_to_str(member->payload));
+      } else {
+        printf("member %s = %lld\n", member->name, member->value);
+      }
     }
     for (const decl_t *method = decl->enm.methods; method != NULL;
          method = method->next) {

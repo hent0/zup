@@ -1,0 +1,15 @@
+--TEST--
+a variant that stores its own enum by value is infinitely sized and rejected
+--FILE--
+enum List {
+  Nil,
+  Cons: List,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: variant 'Cons' stores 'List' by value, making it infinitely sized; use a slice or pointer [3:3]
+--EXIT--
+1

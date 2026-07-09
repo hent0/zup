@@ -1,0 +1,22 @@
+--TEST--
+a tagged union is constructed with a payload and matched to extract it
+--FILE--
+enum Value {
+  Nil,
+  Int: i64,
+  Str: str,
+}
+
+fn unwrap(v: Value): i32 {
+  return match v {
+    .Nil => 0,
+    .Int(n) => n as i32,
+    .Str(s) => s.len as i32,
+  };
+}
+
+pub fn main(): i32 {
+  return unwrap(.Int(42)) + unwrap(.Str("abc")) + unwrap(.Nil);
+}
+--EXIT--
+45

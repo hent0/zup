@@ -1,0 +1,16 @@
+--TEST--
+constructing a payload variant without its payload is a compile error
+--FILE--
+enum V {
+  A,
+  B: i64,
+}
+
+pub fn main(): i32 {
+  let v: V = .B;
+  return 0;
+}
+--EXPECTERR--
+zup: error: variant 'B' of 'V' requires a payload of type i64 [7:15]
+--EXIT--
+1

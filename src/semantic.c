@@ -133,8 +133,7 @@ static modnode_t *collect_pub_modules(modnode_t *head, module_t *mod,
   node->mod = mod;
   node->next = head;
   head = node;
-  for (decl_t *m = mod->unit->root->container.members; m != NULL;
-       m = m->next) {
+  for (decl_t *m = mod->unit->root->container.members; m != NULL; m = m->next) {
     if (m->kind == DECL_IMPORT && m->visibility == VISIBILITY_PUBLIC) {
       head = collect_pub_modules(head, m->import.resolved, arena);
     }
@@ -165,9 +164,6 @@ typedef struct {
   bool ok;
 } exprty_t;
 
-// Enum names may appear module-qualified ("io.Mode") or bare ("Mode")
-// depending on where the type was resolved; when exactly one side is
-// qualified, fall back to comparing the bare names.
 static bool enum_name_eq(const char *a, const char *b) {
   if (a == NULL || b == NULL) {
     return false;
@@ -274,6 +270,17 @@ static decl_t *imports_pub_enum(const sema_t *sema, const char *name) {
     }
   }
   return NULL;
+}
+
+static bool sema_enum_is_tagged(const sema_t *sema, const char *name) {
+  if (name == NULL) {
+    return false;
+  }
+  decl_t *enm = typetab_lookup(sema->types, name);
+  if (enm == NULL) {
+    enm = imports_pub_enum(sema, name);
+  }
+  return enm != NULL && enm->kind == DECL_ENUM && enm->enm.tagged;
 }
 
 static module_t *resolve_module_alias_path(const sema_t *sema,
@@ -447,8 +454,7 @@ static type_t qualify_param_type(sema_t *sema, type_t t, const char *stem) {
 static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
                               const char *name, const char *stem) {
   bool boxed_variadic = fn->fn.variadic && !fn->fn.is_extern;
-  size_t fixed =
-      boxed_variadic ? fn->fn.params_count - 1 : fn->fn.params_count;
+  size_t fixed = boxed_variadic ? fn->fn.params_count - 1 : fn->fn.params_count;
   if (fn->fn.variadic) {
     if (call->call.arg_count < fixed) {
       diag_error(sema->src, call->line, call->col,
@@ -493,9 +499,8 @@ static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
       }
       continue;
     }
-    type_t ptype = param != NULL
-                       ? qualify_param_type(sema, param->type, stem)
-                       : type_from_kind(TYPE_UNKNOWN);
+    type_t ptype = param != NULL ? qualify_param_type(sema, param->type, stem)
+                                 : type_from_kind(TYPE_UNKNOWN);
     exprty_t at = check_expr(sema, arg, ptype);
     if (param != NULL) {
       if (at.ok && !assignable(ptype, at)) {
@@ -641,6 +646,24 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
       }
     }
   }
+  if (ts_owner != NULL && ts_owner->kind == DECL_ENUM && ts_owner->enm.tagged &&
+      enum_member(ts_owner, field->field.name) != NULL) {
+    if (call->call.arg_count > 1) {
+      diag_error(sema->src, call->line, call->col,
+                 "variant '%s' takes a single payload", field->field.name);
+      sema->had_error = true;
+      return (exprty_t){.kind = TYPE_VOID, .ok = false};
+    }
+    char *ename = ts_stem != NULL ? arena_format(sema->arena, "%s.%s", ts_stem,
+                                                 ts_owner->name)
+                                  : ts_owner->name;
+    expr_t *payload = call->call.args;
+    call->kind = EXPR_ENUM_LITERAL;
+    call->enum_literal.name = field->field.name;
+    call->enum_literal.payload = payload;
+    return check_expr(sema, call, (type_t){.kind = TYPE_ENUM, .name = ename});
+  }
+
   if (ts_owner != NULL &&
       (ts_owner->kind == DECL_STRUCT || ts_owner->kind == DECL_ENUM)) {
     const char *kind_str = ts_owner->kind == DECL_ENUM ? "enum" : "struct";
@@ -816,11 +839,20 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
     }
   }
 
-  return (exprty_t){.kind = method->fn.return_type.kind,
-                    .name = method->fn.return_type.name,
-                    .element = method->fn.return_type.element,
-                    .array_length = method->fn.return_type.array_length,
-                    .ok = true};
+  exprty_t r = (exprty_t){.kind = method->fn.return_type.kind,
+                          .name = method->fn.return_type.name,
+                          .element = method->fn.return_type.element,
+                          .array_length = method->fn.return_type.array_length,
+                          .ok = true};
+  if ((r.kind == TYPE_STRUCT || r.kind == TYPE_ENUM) && r.name != NULL &&
+      strchr(r.name, '.') == NULL && recv.name != NULL) {
+    const char *dot = strrchr(recv.name, '.');
+    if (dot != NULL) {
+      r.name = arena_format(sema->arena, "%.*s.%s", (int)(dot - recv.name),
+                            recv.name, r.name);
+    }
+  }
+  return r;
 }
 
 static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
@@ -932,8 +964,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     resolve_qualified_type(sema, &expr->cast.target);
     resolve_enum_type(sema, &expr->cast.target);
     TypeKind target = expr->cast.target.kind;
-    bool bytes_to_str = operand.kind == TYPE_SLICE &&
-                        operand.element != NULL &&
+    bool bytes_to_str = operand.kind == TYPE_SLICE && operand.element != NULL &&
                         operand.element->kind == TYPE_U8 && target == TYPE_STR;
     bool str_to_bytes = operand.kind == TYPE_STR && target == TYPE_SLICE &&
                         expr->cast.target.element != NULL &&
@@ -1038,7 +1069,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     } else if (lhs.kind == TYPE_ENUM && rhs.kind == TYPE_ENUM &&
                enum_name_eq(lhs.name, rhs.name) &&
                (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
-      result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+      if (sema_enum_is_tagged(sema, lhs.name)) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "cannot compare tagged union '%s' with '==' or '!='; "
+                   "use match",
+                   bare_type_name(lhs.name));
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      } else {
+        result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
+      }
     } else if ((expr->binary.lhs->kind == EXPR_NULL ||
                 expr->binary.rhs->kind == EXPR_NULL) &&
                lhs.kind == rhs.kind &&
@@ -1051,9 +1091,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                (type_is_numeric((lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind) ||
                 (lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind == TYPE_ENUM ||
                 (lhs.kind == TYPE_OPTIONAL ? rhs : lhs).kind == TYPE_BOOL) &&
-               types_equal(*(lhs.kind == TYPE_OPTIONAL ? lhs : rhs).element,
-                           exprty_type(lhs.kind == TYPE_OPTIONAL ? rhs
-                                                                 : lhs))) {
+               types_equal(
+                   *(lhs.kind == TYPE_OPTIONAL ? lhs : rhs).element,
+                   exprty_type(lhs.kind == TYPE_OPTIONAL ? rhs : lhs))) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
                (type_is_float(lhs.kind) &&
@@ -1122,10 +1162,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         result = (exprty_t){.kind = TYPE_VOID, .ok = false};
         break;
       }
-      expr->struct_literal.type_name =
-          arena_format(sema->arena, "%s.%s",
-                       module_stem(mod->path, sema->arena),
-                       expr->struct_literal.type_name);
+      expr->struct_literal.type_name = arena_format(
+          sema->arena, "%s.%s", module_stem(mod->path, sema->arena),
+          expr->struct_literal.type_name);
       expr->struct_literal.module = NULL;
     }
     decl_t *strct = typetab_lookup(sema->types, expr->struct_literal.type_name);
@@ -1148,8 +1187,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     for (field_init_t *init = expr->struct_literal.inits; init != NULL;
          init = init->next) {
       field_t *field = struct_field(strct, init->name);
-      exprty_t value = check_expr(
-          sema, init->value, field ? field->type : type_from_kind(TYPE_UNKNOWN));
+      exprty_t value =
+          check_expr(sema, init->value,
+                     field ? field->type : type_from_kind(TYPE_UNKNOWN));
       if (field == NULL) {
         diag_error(sema->src, init->line, init->col,
                    "struct '%s' has no field '%s'", strct->name, init->name);
@@ -1216,9 +1256,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
           result = (exprty_t){.kind = TYPE_VOID, .ok = false};
           break;
         }
+        if (enm->enm.tagged) {
+          expr->kind = EXPR_ENUM_LITERAL;
+          expr->enum_literal.name = member->name;
+          expr->enum_literal.payload = NULL;
+          result = check_expr(sema, expr,
+                              (type_t){.kind = TYPE_ENUM, .name = enm->name});
+          break;
+        }
         expr->kind = EXPR_NUMBER;
-        expr->number.value =
-            arena_format(sema->arena, "%lld", member->value);
+        expr->number.value = arena_format(sema->arena, "%lld", member->value);
         result = (exprty_t){.kind = TYPE_ENUM, .name = enm->name, .ok = true};
         break;
       }
@@ -1327,14 +1374,43 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    expr->kind = EXPR_NUMBER;
-    expr->number.value = arena_format(sema->arena, "%lld", member->value);
+    if (member->has_payload) {
+      if (expr->enum_literal.payload == NULL) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "variant '%s' of '%s' requires a payload of type %s",
+                   member->name, bare_type_name(want.name),
+                   type_to_str(member->payload));
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+      exprty_t pl =
+          check_expr(sema, expr->enum_literal.payload, member->payload);
+      if (pl.ok && !assignable(member->payload, pl)) {
+        diag_error(sema->src, expr->enum_literal.payload->line,
+                   expr->enum_literal.payload->col,
+                   "cannot pass %s as payload of variant '%s' (expected %s)",
+                   type_to_str(exprty_type(pl)), member->name,
+                   type_to_str(member->payload));
+        sema->had_error = true;
+      }
+    } else if (expr->enum_literal.payload != NULL) {
+      diag_error(sema->src, expr->enum_literal.payload->line,
+                 expr->enum_literal.payload->col,
+                 "variant '%s' of '%s' takes no payload", member->name,
+                 bare_type_name(want.name));
+      sema->had_error = true;
+    }
+    if (!enm->enm.tagged) {
+      expr->kind = EXPR_NUMBER;
+      expr->number.value = arena_format(sema->arena, "%lld", member->value);
+    }
     result = (exprty_t){.kind = TYPE_ENUM, .name = want.name, .ok = true};
     break;
   }
   case EXPR_SLICE_RANGE: {
-    exprty_t base = check_expr(sema, expr->slice_range.base,
-                               type_from_kind(TYPE_UNKNOWN));
+    exprty_t base =
+        check_expr(sema, expr->slice_range.base, type_from_kind(TYPE_UNKNOWN));
     exprty_t start =
         check_expr(sema, expr->slice_range.start, type_from_kind(TYPE_I64));
     exprty_t end =
@@ -1359,10 +1435,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       sema->had_error = true;
     }
     if (end.ok && !type_is_integer(end.kind)) {
-      diag_error(sema->src, expr->slice_range.end->line,
-                 expr->slice_range.end->col,
-                 "slice bound must be an integer, got %s",
-                 type_kind_to_str(end.kind));
+      diag_error(
+          sema->src, expr->slice_range.end->line, expr->slice_range.end->col,
+          "slice bound must be an integer, got %s", type_kind_to_str(end.kind));
       sema->had_error = true;
     }
     if (base.kind == TYPE_STR) {
@@ -1373,8 +1448,9 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){
           .kind = TYPE_SLICE, .element = elem, .ok = start.ok && end.ok};
     } else {
-      result = (exprty_t){
-          .kind = TYPE_SLICE, .element = base.element, .ok = start.ok && end.ok};
+      result = (exprty_t){.kind = TYPE_SLICE,
+                          .element = base.element,
+                          .ok = start.ok && end.ok};
     }
     break;
   }
@@ -1418,6 +1494,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       break;
     }
     bool int_scrut = type_is_integer(inner.kind);
+    bool tagged = enm != NULL && enm->enm.tagged;
     if (expr->match_expr.arms == NULL) {
       diag_error(sema->src, expr->line, expr->col,
                  "match must have at least one arm");
@@ -1429,8 +1506,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     size_t member_count = enm != NULL ? enm->enm.member_count : 2;
     bool *covered = arena_alloc(
         sema->arena, sizeof(bool) * (member_count ? member_count : 1));
-    long long *seen = arena_alloc(
-        sema->arena, sizeof(long long) * expr->match_expr.arm_count);
+    long long *seen = arena_alloc(sema->arena, sizeof(long long) *
+                                                   expr->match_expr.arm_count);
     size_t seen_count = 0;
     bool seen_null = false;
     bool has_wildcard = false;
@@ -1442,6 +1519,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
 
     for (match_arm_t *arm = expr->match_expr.arms; arm != NULL;
          arm = arm->next) {
+      char *bind_name = NULL;
+      type_t bind_type = {.kind = TYPE_UNKNOWN};
       if (arm->pattern == NULL) {
         has_wildcard = true;
         if (arm->next != NULL) {
@@ -1449,6 +1528,64 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                      "'_' must be the last match arm");
           sema->had_error = true;
           ok = false;
+        }
+      } else if (tagged) {
+        if (arm->pattern->kind != EXPR_ENUM_LITERAL) {
+          diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                     "match pattern must be a variant of enum '%s'",
+                     bare_type_name(inner.name));
+          sema->had_error = true;
+          ok = false;
+        } else {
+          const char *vname = arm->pattern->enum_literal.name;
+          enum_member_t *member = NULL;
+          size_t index = 0;
+          size_t i = 0;
+          for (enum_member_t *m = enm->enm.members; m != NULL;
+               m = m->next, i++) {
+            if (strcmp(m->name, vname) == 0) {
+              member = m;
+              index = i;
+              break;
+            }
+          }
+          if (member == NULL) {
+            diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                       "enum '%s' has no member '%s'",
+                       bare_type_name(inner.name), vname);
+            sema->had_error = true;
+            ok = false;
+          } else {
+            if (covered[index]) {
+              diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                         "duplicate match arm for '%s'", vname);
+              sema->had_error = true;
+              ok = false;
+            }
+            covered[index] = true;
+            if (arm->or_next && arm->binding != NULL) {
+              diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                         "grouped variant patterns cannot bind a payload");
+              sema->had_error = true;
+              ok = false;
+            } else if (member->has_payload) {
+              if (arm->binding == NULL) {
+                diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                           "variant '%s' binds its payload: write .%s(name)",
+                           vname, vname);
+                sema->had_error = true;
+                ok = false;
+              } else {
+                bind_name = arm->binding;
+                bind_type = member->payload;
+              }
+            } else if (arm->binding != NULL) {
+              diag_error(sema->src, arm->pattern->line, arm->pattern->col,
+                         "variant '%s' has no payload to bind", vname);
+              sema->had_error = true;
+              ok = false;
+            }
+          }
         }
       } else if (arm->pattern->kind == EXPR_NULL) {
         if (!opt_scrut) {
@@ -1564,7 +1701,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         continue;
       }
 
-      if (arm->body != NULL) {
+      size_t bind_saved = sema->scope != NULL ? sema->scope->count : 0;
+      if (bind_name != NULL && sema->scope != NULL) {
+        sema->scope->items[sema->scope->count++] = (local_t){
+            .name = bind_name,
+            .type = bind_type,
+            .mutable = false,
+        };
+      }
+
+      if (arm->is_block) {
         has_block = true;
         if (sema->current_fn == NULL) {
           diag_error(sema->src, arm->line, arm->col,
@@ -1576,11 +1722,17 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
             check_stmt(sema, s, sema->current_fn);
           }
         }
+        if (sema->scope != NULL) {
+          sema->scope->count = bind_saved;
+        }
         continue;
       }
 
       type_t hint = have_rtype ? exprty_type(rtype) : expected;
       exprty_t value = check_expr(sema, arm->value, hint);
+      if (sema->scope != NULL) {
+        sema->scope->count = bind_saved;
+      }
       if (!value.ok) {
         ok = false;
       } else if (!have_rtype) {
@@ -1793,16 +1945,14 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_BINDING: {
     resolve_qualified_type(sema, &stmt->binding.type);
     resolve_enum_type(sema, &stmt->binding.type);
-    if (stmt->binding.init == NULL &&
-        stmt->binding.type.kind == TYPE_UNKNOWN) {
+    if (stmt->binding.init == NULL && stmt->binding.type.kind == TYPE_UNKNOWN) {
       diag_error(sema->src, stmt->line, stmt->col,
                  "binding '%s' without an initializer needs a type",
                  stmt->binding.name);
       sema->had_error = true;
     }
     if (stmt->binding.init != NULL) {
-      exprty_t init =
-          check_expr(sema, stmt->binding.init, stmt->binding.type);
+      exprty_t init = check_expr(sema, stmt->binding.init, stmt->binding.type);
       if (stmt->binding.type.kind == TYPE_UNKNOWN) {
         stmt->binding.type.kind = init.kind;
         stmt->binding.type.name = init.name;
@@ -1879,12 +2029,10 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
         check_expr(sema, stmt->assign.value, type_from_kind(TYPE_UNKNOWN));
         break;
       }
-      type_t elem =
-          lhs.ok ? *lhs.element : type_from_kind(TYPE_UNKNOWN);
+      type_t elem = lhs.ok ? *lhs.element : type_from_kind(TYPE_UNKNOWN);
       exprty_t fallback = check_expr(sema, stmt->assign.value, elem);
       if (lhs.ok && fallback.ok && !assignable(elem, fallback)) {
-        diag_error(sema->src, stmt->assign.value->line,
-                   stmt->assign.value->col,
+        diag_error(sema->src, stmt->assign.value->line, stmt->assign.value->col,
                    "'\?\?=' fallback has type %s, expected %s",
                    type_to_str(exprty_type(fallback)), type_to_str(elem));
         sema->had_error = true;
@@ -1894,14 +2042,13 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
     exprty_t value = check_expr(sema, stmt->assign.value, exprty_type(lhs));
     if (stmt->assign.compound) {
       bool bitwise = !binop_is_arithmetic(stmt->assign.op);
-      bool valid = lhs.kind == value.kind &&
-                   (bitwise ? type_is_integer(lhs.kind)
-                            : type_is_numeric(lhs.kind));
+      bool valid =
+          lhs.kind == value.kind &&
+          (bitwise ? type_is_integer(lhs.kind) : type_is_numeric(lhs.kind));
       if (lhs.ok && value.ok && !valid) {
         diag_error(sema->src, stmt->line, stmt->col,
                    "cannot apply '%s=' to %s and %s",
-                   binop_to_str(stmt->assign.op),
-                   type_to_str(exprty_type(lhs)),
+                   binop_to_str(stmt->assign.op), type_to_str(exprty_type(lhs)),
                    type_to_str(exprty_type(value)));
         sema->had_error = true;
       }
@@ -1945,8 +2092,8 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
   case STMT_FOR: {
     type_t var_type;
     if (stmt->for_loop.iterable != NULL) {
-      exprty_t iter =
-          check_expr(sema, stmt->for_loop.iterable, type_from_kind(TYPE_UNKNOWN));
+      exprty_t iter = check_expr(sema, stmt->for_loop.iterable,
+                                 type_from_kind(TYPE_UNKNOWN));
       if (iter.ok && iter.kind != TYPE_SLICE && iter.kind != TYPE_ARRAY) {
         diag_error(sema->src, stmt->for_loop.iterable->line,
                    stmt->for_loop.iterable->col,
@@ -2058,18 +2205,115 @@ static bool block_returns(stmt_t *body) {
   return stmt_returns(last);
 }
 
+static size_t count_bindings(stmt_t *body);
+
+static size_t count_expr_bindings(const expr_t *e) {
+  if (e == NULL) {
+    return 0;
+  }
+  size_t n = 0;
+  switch (e->kind) {
+  case EXPR_MATCH:
+    n += count_expr_bindings(e->match_expr.scrutinee);
+    for (const match_arm_t *arm = e->match_expr.arms; arm != NULL;
+         arm = arm->next) {
+      if (arm->binding != NULL) {
+        n++;
+      }
+      n += count_bindings(arm->body);
+      n += count_expr_bindings(arm->value);
+    }
+    break;
+  case EXPR_CALL:
+    n += count_expr_bindings(e->call.callee);
+    for (const expr_t *a = e->call.args; a != NULL; a = a->next) {
+      n += count_expr_bindings(a);
+    }
+    break;
+  case EXPR_CAST:
+    n += count_expr_bindings(e->cast.operand);
+    break;
+  case EXPR_BINARY:
+    n += count_expr_bindings(e->binary.lhs);
+    n += count_expr_bindings(e->binary.rhs);
+    break;
+  case EXPR_UNARY:
+    n += count_expr_bindings(e->unary.operand);
+    break;
+  case EXPR_FIELD:
+    n += count_expr_bindings(e->field.base);
+    break;
+  case EXPR_ENUM_LITERAL:
+    n += count_expr_bindings(e->enum_literal.payload);
+    break;
+  case EXPR_INDEX:
+    n += count_expr_bindings(e->index.base);
+    n += count_expr_bindings(e->index.index);
+    break;
+  case EXPR_SLICE_RANGE:
+    n += count_expr_bindings(e->slice_range.base);
+    n += count_expr_bindings(e->slice_range.start);
+    n += count_expr_bindings(e->slice_range.end);
+    break;
+  case EXPR_COALESCE:
+    n += count_expr_bindings(e->coalesce.lhs);
+    n += count_expr_bindings(e->coalesce.rhs);
+    break;
+  case EXPR_TERNARY:
+    n += count_expr_bindings(e->ternary.cond);
+    n += count_expr_bindings(e->ternary.then);
+    n += count_expr_bindings(e->ternary.els);
+    break;
+  case EXPR_ARRAY:
+    for (const expr_t *el = e->array.elements; el != NULL; el = el->next) {
+      n += count_expr_bindings(el);
+    }
+    break;
+  case EXPR_STRUCT_LITERAL:
+    for (const field_init_t *fi = e->struct_literal.inits; fi != NULL;
+         fi = fi->next) {
+      n += count_expr_bindings(fi->value);
+    }
+    break;
+  default:
+    break;
+  }
+  return n;
+}
+
 static size_t count_bindings(stmt_t *body) {
   size_t n = 0;
   for (stmt_t *s = body; s != NULL; s = s->next) {
-    if (s->kind == STMT_BINDING) {
-      n++;
-    } else if (s->kind == STMT_IF) {
+    switch (s->kind) {
+    case STMT_BINDING:
+      n += 1 + count_expr_bindings(s->binding.init);
+      break;
+    case STMT_IF:
+      n += count_expr_bindings(s->if_stmt.cond);
       n += count_bindings(s->if_stmt.then_body);
       n += count_bindings(s->if_stmt.else_body);
-    } else if (s->kind == STMT_WHILE) {
+      break;
+    case STMT_WHILE:
+      n += count_expr_bindings(s->while_loop.cond);
       n += count_bindings(s->while_loop.body);
-    } else if (s->kind == STMT_FOR) {
+      break;
+    case STMT_FOR:
       n += 1 + count_bindings(s->for_loop.body);
+      break;
+    case STMT_RETURN:
+      n += count_expr_bindings(s->ret.value);
+      break;
+    case STMT_EXPR:
+      n += count_expr_bindings(s->expr_stmt.expr);
+      break;
+    case STMT_ASSIGN:
+      n += count_expr_bindings(s->assign.value);
+      break;
+    case STMT_DEFER:
+      n += count_expr_bindings(s->defer_stmt.expr);
+      break;
+    default:
+      break;
     }
   }
   return n;
@@ -2214,7 +2458,35 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
   }
 }
 
+static bool payload_stores_enum(const char *ename, const type_t *t) {
+  if (t == NULL) {
+    return false;
+  }
+  if (t->kind == TYPE_ENUM) {
+    return enum_name_eq(ename, t->name);
+  }
+  if (t->kind == TYPE_ARRAY || t->kind == TYPE_OPTIONAL) {
+    return payload_stores_enum(ename, t->element);
+  }
+  return false;
+}
+
 static void check_enum(sema_t *sema, const decl_t *enm) {
+  for (enum_member_t *member = enm->enm.members; member != NULL;
+       member = member->next) {
+    if (member->has_payload) {
+      resolve_qualified_type(sema, &member->payload);
+      resolve_enum_type(sema, &member->payload);
+      check_type(sema, &member->payload);
+      if (payload_stores_enum(enm->name, &member->payload)) {
+        diag_error(sema->src, member->line, member->col,
+                   "variant '%s' stores '%s' by value, making it infinitely "
+                   "sized; use a slice or pointer",
+                   member->name, enm->name);
+        sema->had_error = true;
+      }
+    }
+  }
   for (enum_member_t *member = enm->enm.members; member != NULL;
        member = member->next) {
     for (enum_member_t *prev = enm->enm.members; prev != member;
@@ -2226,9 +2498,10 @@ static void check_enum(sema_t *sema, const decl_t *enm) {
         break;
       }
       if (prev->value == member->value) {
-        diag_error(sema->src, member->line, member->col,
-                   "duplicate enum value %lld for member '%s' (already used by '%s')",
-                   member->value, member->name, prev->name);
+        diag_error(
+            sema->src, member->line, member->col,
+            "duplicate enum value %lld for member '%s' (already used by '%s')",
+            member->value, member->name, prev->name);
         sema->had_error = true;
         break;
       }
@@ -2273,9 +2546,9 @@ static void check_fn(sema_t *sema, decl_t *fn) {
             param->default_value->struct_literal.type_name != NULL &&
             strchr(param->default_value->struct_literal.type_name, '.') ==
                 NULL) {
-          char *qualified = arena_format(
-              sema->arena, "%s.%s", sema->module_stem,
-              param->default_value->struct_literal.type_name);
+          char *qualified =
+              arena_format(sema->arena, "%s.%s", sema->module_stem,
+                           param->default_value->struct_literal.type_name);
           param->default_value->struct_literal.type_name = qualified;
           param->default_value->type.name = qualified;
         }
@@ -2465,8 +2738,7 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       .src = unit->src,
       .globals = &globals,
       .scope = NULL,
-      .module_stem =
-          require_main ? NULL : module_stem(unit->src->path, arena),
+      .module_stem = require_main ? NULL : module_stem(unit->src->path, arena),
       .arena = arena,
       .had_error = false,
   };
