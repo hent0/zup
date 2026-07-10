@@ -122,7 +122,7 @@ pub struct Lexer {
         },
         _ => self.advanceWith(token.Token.init(.Dot, self.line, self.col)),
       },
-      _ => token.Token.init(.Eof, self.line, self.col),
+      _ => self.advanceWith(token.Token.initWithValue(.Invalid, self.line, self.col, .Byte(self.current))),
     };
   }
 
@@ -216,48 +216,48 @@ pub struct Lexer {
       self.advance();
     }
 
-    const value = self.arena.copyStr(self.src[start..self.cursor]);
+    const text = self.src[start..self.cursor];
 
     return match true {
-      value == "pub" => token.Token.init(.Pub, line, col, value),
-      value == "fn" => token.Token.init(.Fn, line, col, value),
-      value == "return" => token.Token.init(.Return, line, col, value),
-      value == "as" => token.Token.init(.As, line, col, value),
-      value == "_" => token.Token.init(.Underscore, line, col, value),
-      value == "if" => token.Token.init(.If, line, col, value),
-      value == "else" => token.Token.init(.Else, line, col, value),
-      value == "const" => token.Token.init(.Const, line, col, value),
-      value == "let" => token.Token.init(.Let, line, col, value),
-      value == "while" => token.Token.init(.While, line, col, value),
-      value == "for" => token.Token.init(.For, line, col, value),
-      value == "break" => token.Token.init(.Break, line, col, value),
-      value == "continue" => token.Token.init(.Continue, line, col, value),
-      value == "in" => token.Token.init(.In, line, col, value),
-      value == "extern" => token.Token.init(.Extern, line, col, value),
-      value == "import" => token.Token.init(.Import, line, col, value),
-      value == "enum" => token.Token.init(.Enum, line, col, value),
-      value == "match" => token.Token.init(.Match, line, col, value),
-      value == "null" => token.Token.init(.Null, line, col, value),
-      value == "defer" => token.Token.init(.Defer, line, col, value),
+      text == "pub" => token.Token.init(.Pub, line, col),
+      text == "fn" => token.Token.init(.Fn, line, col),
+      text == "return" => token.Token.init(.Return, line, col),
+      text == "as" => token.Token.init(.As, line, col),
+      text == "_" => token.Token.init(.Underscore, line, col),
+      text == "if" => token.Token.init(.If, line, col),
+      text == "else" => token.Token.init(.Else, line, col),
+      text == "const" => token.Token.init(.Const, line, col),
+      text == "let" => token.Token.init(.Let, line, col),
+      text == "while" => token.Token.init(.While, line, col),
+      text == "for" => token.Token.init(.For, line, col),
+      text == "break" => token.Token.init(.Break, line, col),
+      text == "continue" => token.Token.init(.Continue, line, col),
+      text == "in" => token.Token.init(.In, line, col),
+      text == "extern" => token.Token.init(.Extern, line, col),
+      text == "import" => token.Token.init(.Import, line, col),
+      text == "enum" => token.Token.init(.Enum, line, col),
+      text == "match" => token.Token.init(.Match, line, col),
+      text == "null" => token.Token.init(.Null, line, col),
+      text == "defer" => token.Token.init(.Defer, line, col),
       // Types
-      value == "i8" => token.Token.init(.I8, line, col, value),
-      value == "u8" => token.Token.init(.U8, line, col, value),
-      value == "i16" => token.Token.init(.I16, line, col, value),
-      value == "u16" => token.Token.init(.U16, line, col, value),
-      value == "i32" => token.Token.init(.I32, line, col, value),
-      value == "u32" => token.Token.init(.U32, line, col, value),
-      value == "i64" => token.Token.init(.I64, line, col, value),
-      value == "u64" => token.Token.init(.U64, line, col, value),
-      value == "f32" => token.Token.init(.F32, line, col, value),
-      value == "f64" => token.Token.init(.F64, line, col, value),
-      value == "void" => token.Token.init(.Void, line, col, value),
-      value == "bool" => token.Token.init(.Bool, line, col, value),
-      value == "true" => token.Token.init(.True, line, col, value),
-      value == "false" => token.Token.init(.False, line, col, value),
-      value == "cstr" => token.Token.init(.Cstr, line, col, value),
-      value == "str" => token.Token.init(.Str, line, col, value),
-      value == "struct" => token.Token.init(.Struct, line, col, value),
-      _ => token.Token.init(.Id, line, col, value),
+      text == "i8" => token.Token.init(.I8, line, col),
+      text == "u8" => token.Token.init(.U8, line, col),
+      text == "i16" => token.Token.init(.I16, line, col),
+      text == "u16" => token.Token.init(.U16, line, col),
+      text == "i32" => token.Token.init(.I32, line, col),
+      text == "u32" => token.Token.init(.U32, line, col),
+      text == "i64" => token.Token.init(.I64, line, col),
+      text == "u64" => token.Token.init(.U64, line, col),
+      text == "f32" => token.Token.init(.F32, line, col),
+      text == "f64" => token.Token.init(.F64, line, col),
+      text == "void" => token.Token.init(.Void, line, col),
+      text == "bool" => token.Token.init(.Bool, line, col),
+      text == "true" => token.Token.init(.True, line, col),
+      text == "false" => token.Token.init(.False, line, col),
+      text == "cstr" => token.Token.init(.Cstr, line, col),
+      text == "str" => token.Token.init(.Str, line, col),
+      text == "struct" => token.Token.init(.Struct, line, col),
+      _ => token.Token.initWithValue(.Id, line, col, .Text(self.arena.copyStr(text))),
     };
   }
 
@@ -272,7 +272,7 @@ pub struct Lexer {
         self.advance();
       }
 
-      return token.Token.init(.Number, line, col, self.arena.copyStr(self.src[start..self.cursor]));
+      return token.Token.initWithValue(.Number, line, col, .Text(self.arena.copyStr(self.src[start..self.cursor])));
     }
 
     while std.ascii.isDigit(self.current) {
@@ -290,7 +290,7 @@ pub struct Lexer {
       self.exponent();
     }
 
-    return token.Token.init(.Number, line, col, self.arena.copyStr(self.src[start..self.cursor]));
+    return token.Token.initWithValue(.Number, line, col, .Text(self.arena.copyStr(self.src[start..self.cursor])));
   }
 
   fn exponent(self) {
@@ -325,14 +325,14 @@ pub struct Lexer {
     }
 
     if self.atEof() {
-      return token.Token.init(.Invalid, line, col);
+      return token.Token.initWithValue(.Invalid, line, col, .Text("unterminated string"));
     }
 
     const raw = self.src[start..self.cursor];
     self.advance();
 
     if !escaped {
-      return token.Token.init(.String, line, col, raw);
+      return token.Token.initWithValue(.String, line, col, .Text(raw));
     }
 
     let buf: []u8 = self.arena.alloc(raw.len);
@@ -354,7 +354,7 @@ pub struct Lexer {
       i++;
     }
 
-    return token.Token.init(.String, line, col, buf[0..n] as str);
+    return token.Token.initWithValue(.String, line, col, .Text(buf[0..n] as str));
   }
 
   fn charLiteral(self): token.Token {
@@ -363,7 +363,7 @@ pub struct Lexer {
     self.advance();
 
     if self.atEof() || self.current == '\'' {
-      return token.Token.init(.Invalid, line, col);
+      return token.Token.initWithValue(.Invalid, line, col, .Text("empty char literal"));
     }
 
     let byte: u8 = self.current;
@@ -379,27 +379,11 @@ pub struct Lexer {
     self.advance();
 
     if self.current != '\'' {
-      return token.Token.init(.Invalid, line, col);
+      return token.Token.initWithValue(.Invalid, line, col, .Text("unterminated char literal"));
     }
     self.advance();
 
-    return token.Token.init(.Number, line, col, self.byteToStr(byte));
-  }
-
-  fn byteToStr(self, b: u8): str {
-    let buf: []u8 = self.arena.alloc(3);
-    if b == 0 {
-      buf[0] = '0';
-      return buf[0..1] as str;
-    }
-    let v: u8 = b;
-    let i: i64 = 3;
-    while v > 0 {
-      i--;
-      buf[i] = (v % 10) + '0';
-      v = v / 10;
-    }
-    return buf[i..3] as str;
+    return token.Token.initWithValue(.Number, line, col, .Byte(byte));
   }
 
   fn debug(self) {

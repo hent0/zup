@@ -191,13 +191,28 @@ pub enum TokenKind {
   }
 }
 
+pub enum TokenValue {
+  None,
+  Text: str,
+  Byte: u8,
+}
+
 pub struct Token {
   pub kind: TokenKind,
   pub line: u32 = 0,
   pub col: u32 = 0,
-  pub value: ?str = null,
+  pub value: TokenValue,
 
-  pub fn init(kind: TokenKind, line: u32 = 0, col: u32 = 0, value: ?str = null): Token {
+  pub fn init(kind: TokenKind, line: u32 = 0, col: u32 = 0): Token {
+    return Token{
+      kind: kind,
+      line: line,
+      col: col,
+      value: .None,
+    };
+  }
+
+  pub fn initWithValue(kind: TokenKind, line: u32, col: u32, value: TokenValue): Token {
     return Token{
       kind: kind,
       line: line,
@@ -213,17 +228,24 @@ pub struct Token {
       .Id,
       .String => {
         out.write("('");
-        writeEscaped(out, self.value ?? "");
+        self.writeValue(out);
         out.write("')");
-        std.io.println(" [{}:{}]", self.line, self.col);
       },
       .Number => {
         out.write("(");
-        writeEscaped(out, self.value ?? "");
+        self.writeValue(out);
         out.write(")");
-        std.io.println(" [{}:{}]", self.line, self.col);
       },
-      _ => std.io.println(" [{}:{}]", self.line, self.col),
+      _ => {},
+    };
+    std.io.println(" [{}:{}]", self.line, self.col);
+  }
+
+  fn writeValue(self, out: std.io.File) {
+    match self.value {
+      .None => {},
+      .Text(s) => writeEscaped(out, s),
+      .Byte(b) => writeByte(out, b),
     };
   }
 
@@ -234,6 +256,22 @@ pub struct Token {
 
 fn hexDigit(v: u8): u8 {
   return v < 10 ? v + '0' : v - 10 + 'A';
+}
+
+fn writeByte(file: std.io.File, b: u8) {
+  if b == 0 {
+    file.write("0");
+    return;
+  }
+  let buf: [3]u8;
+  let v: u8 = b;
+  let i: i64 = 3;
+  while v > 0 {
+    i--;
+    buf[i] = (v % 10) + '0';
+    v = v / 10;
+  }
+  file.write(buf[i..3] as str);
 }
 
 fn writeEscaped(file: std.io.File, s: str) {
