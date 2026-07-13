@@ -36,27 +36,32 @@ pub struct FlagSet {
     return fs;
   }
 
-  pub fn addBool(self, name: str, default: bool, usage: str) {
+  pub fn addBool(self, name: str, default: bool, usage: str): FlagSet {
     self.add(name, usage, .Bool(default));
+    return self;
   }
 
-  pub fn addInt(self, name: str, default: i64, usage: str) {
+  pub fn addInt(self, name: str, default: i64, usage: str): FlagSet {
     self.add(name, usage, .Int(default));
+    return self;
   }
 
-  pub fn addFloat(self, name: str, default: f64, usage: str) {
+  pub fn addFloat(self, name: str, default: f64, usage: str): FlagSet {
     self.add(name, usage, .Float(default));
+    return self;
   }
 
-  pub fn addStr(self, name: str, default: str, usage: str) {
+  pub fn addStr(self, name: str, default: str, usage: str): FlagSet {
     self.add(name, usage, .Str(default));
+    return self;
   }
 
-  pub fn addStrList(self, name: str, usage: str) {
+  pub fn addStrList(self, name: str, usage: str): FlagSet {
     self.add(name, usage, .StrList);
+    return self;
   }
 
-  pub fn parse(self, argv: []str) {
+  pub fn parse(self, argv: []str): FlagSet {
     if self.name.len == 0 && argv.len > 0 {
       self.name = argv[0];
     }
@@ -175,6 +180,8 @@ pub struct FlagSet {
 
       self.flags[idx].set = true;
     }
+
+    return self;
   }
 
   fn addPositional(self, value: str) {

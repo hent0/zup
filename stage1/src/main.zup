@@ -5,16 +5,16 @@ const version = "0.0.1";
 
 fn parseArgs(args: []str): compiler.CompilerOpts {
   let fs = std.flag.FlagSet.init()
-    .addStr("o", "", "output path");
-  fs.addBool("tokenize", false, "output only tokens");
-  fs.addBool("ir", false, "output only LLVM IR");
-  fs.addBool("ast", false, "dump ast");
-  fs.addBool("keep-ir", false, "keep generated LLVM IR after compile");
-  fs.addBool("static", false, "compile static");
-  fs.addStrList("l", "link against library (passed to clang as -l<lib>)");
-  fs.addStrList("L", "add library search path");
-  fs.addBool("version", false, "print version");
-  fs.parse(args);
+    .addStr("o", "", "output path")
+    .addBool("tokenize", false, "output only tokens")
+    .addBool("ir", false, "output only LLVM IR")
+    .addBool("ast", false, "dump ast")
+    .addBool("keep-ir", false, "keep generated LLVM IR after compile")
+    .addBool("static", false, "compile static")
+    .addStrList("l", "link against library (passed to clang as -l<lib>)")
+    .addStrList("L", "add library search path")
+    .addBool("version", false, "print version")
+    .parse(args);
 
   if fs.getBool("version") {
     std.io.println("zup {}", version);
@@ -28,16 +28,12 @@ fn parseArgs(args: []str): compiler.CompilerOpts {
     std.exit(1);
   }
 
-  let mode: compiler.Mode = .Compile;
-  if fs.getBool("tokenize") {
-    mode = .Tokenize;
-  }
-  if fs.getBool("ir") {
-    mode = .Ir;
-  }
-  if fs.getBool("ast") {
-    mode = .Ast;
-  }
+  const mode: compiler.Mode = match true {
+    fs.getBool("ir") => .Ir,
+    fs.getBool("ast") => .Ast,
+    fs.getBool("tokenize") => .Tokenize,
+    _ => .Compile,
+  };
 
   let output: ?str = null;
   if fs.getStr("o").len > 0 {
