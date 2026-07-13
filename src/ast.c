@@ -992,7 +992,9 @@ static void dump_stmt(const stmt_t *stmt, int depth) {
   case STMT_BINDING:
     printf("%s %s: %s\n", stmt->binding.mutable ? "Let" : "Const",
            stmt->binding.name, type_to_str(stmt->binding.type));
-    dump_expr(stmt->binding.init, depth + 1);
+    if (stmt->binding.init != NULL) {
+      dump_expr(stmt->binding.init, depth + 1);
+    }
     break;
   case STMT_ASSIGN:
     if (stmt->assign.target->kind == EXPR_ID) {
@@ -1121,7 +1123,10 @@ static void dump_decl(const decl_t *decl, int depth) {
     printf("GlobalDecl %s %s '%s': %s\n", visibility_to_str(decl->visibility),
            decl->global.mutable ? "let" : "const", decl->name,
            type_to_str(decl->global.type));
-    dump_expr(decl->global.init, depth + 1);
+
+    if (decl->global.init != NULL) {
+      dump_expr(decl->global.init, depth + 1);
+    }
     break;
   case DECL_IMPORT:
     printf("Import '%s' \"%s\"\n", decl->import.alias, decl->import.path);
