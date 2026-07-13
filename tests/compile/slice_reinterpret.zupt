@@ -1,0 +1,25 @@
+--TEST--
+a []u8 slice reinterprets as []T: the pointer is kept, the length is recomputed to the element count, and typed access works
+--FILE--
+const std = import("std");
+
+struct Node { a: i64, b: i64 }
+
+pub fn main(): i32 {
+  const arena = std.mem.Arena.init();
+  const bytes: []u8 = arena.alloc(4 * sizeof(Node));
+  let nodes: []Node = bytes as []Node;
+
+  std.io.println("bytes={} nodes={}", bytes.len, nodes.len);
+
+  nodes[0].a = 7;
+  nodes[0].b = 35;
+  nodes[3].a = 9;
+  std.io.println("{} {} {}", nodes[0].a, nodes[0].b, nodes[3].a);
+  return (nodes[0].a + nodes[0].b + nodes[3].a) as i32;
+}
+--EXPECT--
+bytes=64 nodes=4
+7 35 9
+--EXIT--
+51

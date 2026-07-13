@@ -1,0 +1,24 @@
+--TEST--
+pointer types: &lvalue yields *T, and reads/writes through a pointer hit the pointee (shared mutable state)
+--FILE--
+const std = import("std");
+
+struct Counter { n: i64 }
+
+fn bump(c: *Counter) {
+  c.n += 1;
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter{n: 10};
+  const p: *Counter = &c;
+  bump(p);
+  bump(&c);
+  p.n += 1;
+  std.io.println("c.n={} p.n={}", c.n, p.n);
+  return c.n as i32;
+}
+--EXPECT--
+c.n=13 p.n=13
+--EXIT--
+13

@@ -27,6 +27,7 @@ char *type_kind_to_ir(TypeKind kind) {
   case TYPE_F64:
     return "double";
   case TYPE_CSTR:
+  case TYPE_POINTER:
     return "ptr";
   case TYPE_STR:
   case TYPE_SLICE:
@@ -74,6 +75,8 @@ char *type_kind_to_str(TypeKind kind) {
     return "enum";
   case TYPE_OPTIONAL:
     return "optional";
+  case TYPE_POINTER:
+    return "pointer";
   default:
     return "?";
   }
@@ -86,7 +89,8 @@ char *type_to_str(type_t type) {
     return type.name;
   case TYPE_ARRAY:
   case TYPE_SLICE:
-  case TYPE_OPTIONAL: {
+  case TYPE_OPTIONAL:
+  case TYPE_POINTER: {
     if (type.element == NULL) {
       return type_kind_to_str(type.kind);
     }
@@ -97,6 +101,8 @@ char *type_to_str(type_t type) {
       snprintf(buf, sizeof(bufs[0]), "[]%s", type_to_str(*type.element));
     } else if (type.kind == TYPE_OPTIONAL) {
       snprintf(buf, sizeof(bufs[0]), "?%s", type_to_str(*type.element));
+    } else if (type.kind == TYPE_POINTER) {
+      snprintf(buf, sizeof(bufs[0]), "*%s", type_to_str(*type.element));
     } else {
       snprintf(buf, sizeof(bufs[0]), "[%zu]%s", type.array_length,
                type_to_str(*type.element));
@@ -565,6 +571,17 @@ expr_t *ast_ternary_init(expr_t *cond, expr_t *then, expr_t *els,
   return expr;
 }
 
+expr_t *ast_sizeof_init(token_t token, type_t type, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_SIZEOF;
+  expr->line = token.line;
+  expr->col = token.col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->sizeof_expr.type = type;
+  return expr;
+}
+
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
   expr->kind = EXPR_IMPORT;
@@ -839,6 +856,9 @@ static void dump_expr(const expr_t *expr, int depth) {
   case EXPR_CAST:
     printf("Cast to %s\n", type_kind_to_str(expr->cast.target.kind));
     dump_expr(expr->cast.operand, depth + 1);
+    break;
+  case EXPR_SIZEOF:
+    printf("Sizeof %s\n", type_kind_to_str(expr->sizeof_expr.type.kind));
     break;
   case EXPR_BINARY:
     dump_binary(expr, depth);

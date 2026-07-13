@@ -6,7 +6,7 @@
 #include "token.h"
 #include <stddef.h>
 
-typedef struct module module_t; // defined in loader.h
+typedef struct module module_t;
 
 typedef enum {
   TYPE_UNKNOWN,
@@ -29,6 +29,7 @@ typedef enum {
   TYPE_SLICE,
   TYPE_ENUM,
   TYPE_OPTIONAL,
+  TYPE_POINTER,
 } TypeKind;
 
 typedef struct type type_t;
@@ -66,6 +67,7 @@ typedef enum {
 typedef enum {
   UNOP_NOT,
   UNOP_NEG,
+  UNOP_ADDR,
 } UnaryOp;
 
 typedef enum {
@@ -75,6 +77,7 @@ typedef enum {
   EXPR_ID,
   EXPR_CALL,
   EXPR_CAST,
+  EXPR_SIZEOF,
   EXPR_BINARY,
   EXPR_UNARY,
   EXPR_STRUCT_LITERAL,
@@ -101,7 +104,7 @@ struct match_arm {
   char *binding;
   expr_t *value;
   stmt_t *body;
-  bool is_block; // arm is a '{ ... }' block (body may be NULL when empty)
+  bool is_block;
   bool or_next;
   unsigned int line;
   unsigned int col;
@@ -146,6 +149,9 @@ struct expr {
       expr_t *operand;
       type_t target;
     } cast;
+    struct {
+      type_t type;
+    } sizeof_expr;
     struct {
       BinaryOp op;
       expr_t *lhs;
@@ -394,6 +400,7 @@ expr_t *ast_string_init(token_t token, arena_t *arena);
 expr_t *ast_id_init(token_t token, arena_t *arena);
 expr_t *ast_call_init(expr_t *callee, arena_t *arena);
 expr_t *ast_cast_init(expr_t *operand, type_t target, arena_t *arena);
+expr_t *ast_sizeof_init(token_t token, type_t type, arena_t *arena);
 expr_t *ast_struct_literal_init(token_t token, arena_t *arena);
 expr_t *ast_field_access_init(expr_t *base, token_t name, arena_t *arena);
 expr_t *ast_enum_literal_init(token_t name, arena_t *arena);

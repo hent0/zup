@@ -23,6 +23,7 @@ const keyword_t keywords[] = {
     {"in", TOKEN_IN},
     {"extern", TOKEN_EXTERN},
     {"import", TOKEN_IMPORT},
+    {"sizeof", TOKEN_SIZEOF},
     {"enum", TOKEN_ENUM},
     {"match", TOKEN_MATCH},
     {"null", TOKEN_NULL},

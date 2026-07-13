@@ -289,6 +289,7 @@ static size_t type_size(ctx_t *ctx, type_t type) {
   case TYPE_U64:
   case TYPE_F64:
   case TYPE_CSTR:
+  case TYPE_POINTER:
     return 8;
   case TYPE_STR:
   case TYPE_SLICE:
@@ -678,6 +679,8 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return 0;
   case EXPR_CAST:
     return collect_expr(ctx, expr->cast.operand);
+  case EXPR_SIZEOF:
+    return 0;
   case EXPR_BINARY:
     if (expr->binary.lhs->type.kind == TYPE_STR &&
         (expr->binary.op == BINOP_EQ || expr->binary.op == BINOP_NE)) {
@@ -987,11 +990,17 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
     return arena_format(ctx->arena, "%%%s", expr->id.name);
   }
   case EXPR_FIELD: {
-    const char *base = emit_addr(ctx, expr->field.base);
-    if (base == NULL && is_aggregate(expr->field.base->type.kind)) {
-      base = emit_value(ctx, expr->field.base).ref;
-    }
     type_t base_type = expr->field.base->type;
+    const char *base;
+    if (base_type.kind == TYPE_POINTER) {
+      base = emit_value(ctx, expr->field.base).ref;
+      base_type = *base_type.element;
+    } else {
+      base = emit_addr(ctx, expr->field.base);
+      if (base == NULL && is_aggregate(expr->field.base->type.kind)) {
+        base = emit_value(ctx, expr->field.base).ref;
+      }
+    }
     if (base_type.kind == TYPE_STR || base_type.kind == TYPE_SLICE) {
       int index = strcmp(expr->field.name, "ptr") == 0 ? 0 : 1;
       unsigned int reg = ctx->reg++;
@@ -1098,8 +1107,53 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
 
 static value_t emit_value(ctx_t *ctx, expr_t *expr);
 
-// TODO: Probably needs refatoring
 static value_t emit_cast(ctx_t *ctx, expr_t *expr) {
+  if (expr->cast.operand->type.kind == TYPE_SLICE &&
+      expr->cast.target.kind == TYPE_SLICE) {
+    const char *addr = emit_addr(ctx, expr->cast.operand);
+    if (addr == NULL) {
+      addr = emit_value(ctx, expr->cast.operand).ref;
+    }
+    size_t old_sz = type_size(ctx, *expr->cast.operand->type.element);
+    size_t new_sz = type_size(ctx, *expr->cast.target.element);
+
+    unsigned int pp = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n", pp,
+            addr);
+    unsigned int ptrv = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load ptr, ptr %%%u\n", ptrv, pp);
+    unsigned int lp = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n", lp,
+            addr);
+    unsigned int lenv = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", lenv, lp);
+
+    const char *newlen = arena_format(ctx->arena, "%%%u", lenv);
+    if (old_sz != new_sz) {
+      unsigned int m = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = mul i64 %s, %zu\n", m, newlen, old_sz);
+      unsigned int d = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = udiv i64 %%%u, %zu\n", d, m, new_sz);
+      newlen = arena_format(ctx->arena, "%%%u", d);
+    }
+
+    unsigned int slot = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = alloca { ptr, i64 }\n", slot);
+    unsigned int sp = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 0\n", sp,
+            slot);
+    fprintf(ctx->out, "  store ptr %%%u, ptr %%%u\n", ptrv, sp);
+    unsigned int sl = ctx->reg++;
+    fprintf(ctx->out,
+            "  %%%u = getelementptr { ptr, i64 }, ptr %%%u, i32 0, i32 1\n", sl,
+            slot);
+    fprintf(ctx->out, "  store i64 %s, ptr %%%u\n", newlen, sl);
+    return (value_t){.type = expr->cast.target,
+                     .ref = arena_format(ctx->arena, "%%%u", slot)};
+  }
   if (is_aggregate(expr->cast.operand->type.kind) &&
       is_aggregate(expr->cast.target.kind)) {
     const char *addr = emit_addr(ctx, expr->cast.operand);
@@ -1326,6 +1380,11 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     return emit_call(ctx, expr, NULL);
   case EXPR_CAST:
     return emit_cast(ctx, expr);
+  case EXPR_SIZEOF: {
+    size_t sz = type_size(ctx, expr->sizeof_expr.type);
+    return (value_t){.type = (type_t){.kind = TYPE_I64},
+                     .ref = arena_format(ctx->arena, "%zu", sz)};
+  }
   case EXPR_NULL: {
     if (expr->type.kind == TYPE_CSTR) {
       return (value_t){.type = expr->type, .ref = "null"};
@@ -1479,6 +1538,13 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
     };
   }
   case EXPR_UNARY: {
+    if (expr->unary.op == UNOP_ADDR) {
+      const char *addr = emit_addr(ctx, expr->unary.operand);
+      if (addr == NULL) {
+        addr = emit_value(ctx, expr->unary.operand).ref;
+      }
+      return (value_t){.type = expr->type, .ref = addr};
+    }
     value_t operand = emit_value(ctx, expr->unary.operand);
     unsigned int reg = ctx->reg++;
     if (expr->unary.op == UNOP_NOT) {
@@ -1741,35 +1807,41 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       }
       is_method = false;
     } else {
-      if (recv->type.kind == TYPE_ENUM && recv->type.name != NULL) {
+      bool recv_is_ptr = recv->type.kind == TYPE_POINTER;
+      type_t recv_type = recv_is_ptr ? *recv->type.element : recv->type;
+      if (recv_type.kind == TYPE_ENUM && recv_type.name != NULL) {
         name = NULL;
         for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
           if (s->decl->kind == DECL_ENUM &&
-              strcmp(s->decl->name, recv->type.name) == 0) {
+              strcmp(s->decl->name, recv_type.name) == 0) {
             name = arena_format(ctx->arena, "%s.%s", s->name, member);
             break;
           }
         }
         if (name == NULL) {
           name = mangle(
-              ctx, arena_format(ctx->arena, "%s.%s", recv->type.name, member));
+              ctx, arena_format(ctx->arena, "%s.%s", recv_type.name, member));
         }
       } else {
         name = arena_format(ctx->arena, "%s.%s",
-                            struct_ref(ctx, recv->type.name), member);
+                            struct_ref(ctx, recv_type.name), member);
       }
-      self = emit_addr(ctx, recv);
-      if (self == NULL) {
-        value_t rv = emit_value(ctx, recv);
-        if (is_agg(ctx, rv.type)) {
-          self = rv.ref;
-        } else {
-          unsigned int slot = ctx->reg++;
-          fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
-                  ir_type(ctx, rv.type));
-          fprintf(ctx->out, "  store %s %s, ptr %%%u\n", ir_type(ctx, rv.type),
-                  rv.ref, slot);
-          self = arena_format(ctx->arena, "%%%u", slot);
+      if (recv_is_ptr) {
+        self = emit_value(ctx, recv).ref;
+      } else {
+        self = emit_addr(ctx, recv);
+        if (self == NULL) {
+          value_t rv = emit_value(ctx, recv);
+          if (is_agg(ctx, rv.type)) {
+            self = rv.ref;
+          } else {
+            unsigned int slot = ctx->reg++;
+            fprintf(ctx->out, "  %%%u = alloca %s\n", slot,
+                    ir_type(ctx, rv.type));
+            fprintf(ctx->out, "  store %s %s, ptr %%%u\n",
+                    ir_type(ctx, rv.type), rv.ref, slot);
+            self = arena_format(ctx->arena, "%%%u", slot);
+          }
         }
       }
     }
@@ -1786,17 +1858,19 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   size_t param_count = 0;
   if (is_method) {
     expr_t *recv = call->call.callee->field.base;
+    type_t rtype =
+        recv->type.kind == TYPE_POINTER ? *recv->type.element : recv->type;
     const decl_t *owner = NULL;
-    if (recv->type.kind == TYPE_ENUM && recv->type.name != NULL) {
+    if (rtype.kind == TYPE_ENUM && rtype.name != NULL) {
       for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
         if (s->decl->kind == DECL_ENUM &&
-            strcmp(s->decl->name, recv->type.name) == 0) {
+            strcmp(s->decl->name, rtype.name) == 0) {
           owner = s->decl;
           break;
         }
       }
     } else {
-      owner = find_struct(ctx, struct_ref(ctx, recv->type.name));
+      owner = find_struct(ctx, struct_ref(ctx, rtype.name));
     }
     if (owner != NULL) {
       decl_t *methods = owner->kind == DECL_STRUCT ? owner->strct.members

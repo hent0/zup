@@ -1,0 +1,24 @@
+--TEST--
+a single arena shared across components via *std.mem.Arena: allocations from either component are distinct and non-overlapping (no value-copy corruption)
+--FILE--
+const std = import("std");
+
+struct Lexer { arena: *std.mem.Arena }
+struct Ast   { arena: *std.mem.Arena }
+
+pub fn main(): i32 {
+  const arena = std.mem.Arena.init();
+  let lx: Lexer = Lexer{arena: &arena};
+  let ab: Ast = Ast{arena: &arena};
+
+  let a: []u8 = lx.arena.alloc(4);
+  let b: []u8 = ab.arena.alloc(4);
+  a[0] = 11;
+  b[0] = 22;
+  std.io.println("a={} b={}", a[0], b[0]);
+  return a[0] as i32;
+}
+--EXPECT--
+a=11 b=22
+--EXIT--
+11

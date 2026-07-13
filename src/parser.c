@@ -65,6 +65,14 @@ static type_t parse_type(parser_t *parser) {
     return type;
   }
 
+  if (match(parser, TOKEN_STAR)) {
+    type_t *element = arena_alloc(parser->arena, sizeof(type_t));
+    *element = parse_type(parser);
+    type.kind = TYPE_POINTER;
+    type.element = element;
+    return type;
+  }
+
   if (match(parser, TOKEN_LBRACKET)) {
     switch (parser->current.kind) {
     case TOKEN_RBRACKET:
@@ -346,6 +354,13 @@ static expr_t *parse_primary(parser_t *parser) {
         expect(parser, TOKEN_STRING, "expected a module path string");
     expect(parser, TOKEN_RPAREN, "expected ')' after import path");
     return ast_import_init(token, path.value, parser->arena);
+  case TOKEN_SIZEOF: {
+    advance(parser);
+    expect(parser, TOKEN_LPAREN, "expected '(' after 'sizeof'");
+    type_t sztype = parse_type(parser);
+    expect(parser, TOKEN_RPAREN, "expected ')' after sizeof type");
+    return ast_sizeof_init(token, sztype, parser->arena);
+  }
   case TOKEN_ID: {
     advance(parser);
     if (check(parser, TOKEN_LPAREN)) {
@@ -481,6 +496,9 @@ static expr_t *parse_unary(parser_t *parser) {
   case TOKEN_MINUS:
     advance(parser);
     return ast_unary_init(UNOP_NEG, parse_unary(parser), parser->arena);
+  case TOKEN_AMPERSAND:
+    advance(parser);
+    return ast_unary_init(UNOP_ADDR, parse_unary(parser), parser->arena);
   default:
     return parse_postfix(parser);
   }

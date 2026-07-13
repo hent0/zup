@@ -193,7 +193,8 @@ static bool types_equal(type_t a, type_t b) {
     return a.array_length == b.array_length &&
            types_equal(*a.element, *b.element);
   }
-  if (a.kind == TYPE_SLICE || a.kind == TYPE_OPTIONAL) {
+  if (a.kind == TYPE_SLICE || a.kind == TYPE_OPTIONAL ||
+      a.kind == TYPE_POINTER) {
     return types_equal(*a.element, *b.element);
   }
   return true;
@@ -225,6 +226,9 @@ static bool assignable(type_t to, exprty_t from) {
   if (to.kind == TYPE_ARRAY) {
     return from.element != NULL && to.array_length == from.array_length &&
            types_equal(*to.element, *from.element);
+  }
+  if (to.kind == TYPE_POINTER) {
+    return from.element != NULL && types_equal(*to.element, *from.element);
   }
   return true;
 }
@@ -370,6 +374,18 @@ static const char *lvalue_root(const expr_t *target) {
   return target->kind == EXPR_ID ? target->id.name : NULL;
 }
 
+static bool lvalue_through_pointer(const expr_t *target) {
+  while (target->kind == EXPR_FIELD || target->kind == EXPR_INDEX) {
+    const expr_t *base =
+        target->kind == EXPR_FIELD ? target->field.base : target->index.base;
+    if (base->type.kind == TYPE_POINTER) {
+      return true;
+    }
+    target = base;
+  }
+  return false;
+}
+
 static bool is_const_init(const expr_t *expr) {
   if (expr == NULL) {
     return false;
@@ -383,6 +399,7 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected);
 static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn);
 static void resolve_qualified_type(sema_t *sema, type_t *t);
 static void resolve_enum_type(sema_t *sema, type_t *t);
+static bool check_type(sema_t *sema, type_t *type);
 
 static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
   for (decl_t *member = root->container.members; member != NULL;
@@ -745,6 +762,13 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
   if (!recv.ok) {
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
+  if (recv.kind == TYPE_POINTER && recv.element != NULL) {
+    recv = (exprty_t){.kind = recv.element->kind,
+                      .name = recv.element->name,
+                      .element = recv.element->element,
+                      .array_length = recv.element->array_length,
+                      .ok = true};
+  }
   decl_t *method = NULL;
   bool imported = is_imported_type(recv.name);
   if (recv.kind == TYPE_STRUCT) {
@@ -1020,6 +1044,13 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                  ? check_method_call(sema, expr)
                  : check_call(sema, expr);
     break;
+  case EXPR_SIZEOF: {
+    resolve_qualified_type(sema, &expr->sizeof_expr.type);
+    resolve_enum_type(sema, &expr->sizeof_expr.type);
+    check_type(sema, &expr->sizeof_expr.type);
+    result = (exprty_t){.kind = TYPE_I64, .ok = true};
+    break;
+  }
   case EXPR_CAST: {
     exprty_t operand =
         check_expr(sema, expr->cast.operand, type_from_kind(TYPE_UNKNOWN));
@@ -1031,10 +1062,11 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     bool str_to_bytes = operand.kind == TYPE_STR && target == TYPE_SLICE &&
                         expr->cast.target.element != NULL &&
                         expr->cast.target.element->kind == TYPE_U8;
+    bool slice_reinterpret = operand.kind == TYPE_SLICE && target == TYPE_SLICE;
     bool valid = (type_is_numeric(operand.kind) && type_is_numeric(target)) ||
                  (operand.kind == TYPE_ENUM && type_is_integer(target)) ||
                  (type_is_integer(operand.kind) && target == TYPE_ENUM) ||
-                 bytes_to_str || str_to_bytes;
+                 bytes_to_str || str_to_bytes || slice_reinterpret;
     if (operand.ok && !valid) {
       diag_error(sema->src, expr->line, expr->col, "cannot cast %s to %s",
                  type_to_str(exprty_type(operand)),
@@ -1175,6 +1207,30 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     break;
   }
   case EXPR_UNARY: {
+    if (expr->unary.op == UNOP_ADDR) {
+      type_t inner_expected = type_from_kind(TYPE_UNKNOWN);
+      if (expected.kind == TYPE_POINTER && expected.element != NULL) {
+        inner_expected = *expected.element;
+      }
+      exprty_t operand = check_expr(sema, expr->unary.operand, inner_expected);
+      if (!operand.ok) {
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+      ExprKind ok = expr->unary.operand->kind;
+      if (ok != EXPR_ID && ok != EXPR_FIELD && ok != EXPR_INDEX) {
+        diag_error(sema->src, expr->line, expr->col,
+                   "cannot take the address of a temporary; '&' requires a "
+                   "variable, field, or element");
+        sema->had_error = true;
+        result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+        break;
+      }
+      type_t *element = arena_alloc(sema->arena, sizeof(type_t));
+      *element = exprty_type(operand);
+      result = (exprty_t){.kind = TYPE_POINTER, .element = element, .ok = true};
+      break;
+    }
     bool is_not = expr->unary.op == UNOP_NOT;
     type_t operand_expected = is_not ? type_from_kind(TYPE_BOOL) : expected;
     exprty_t operand = check_expr(sema, expr->unary.operand, operand_expected);
@@ -1342,6 +1398,13 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     if (!base.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
+    }
+    if (base.kind == TYPE_POINTER && base.element != NULL) {
+      base = (exprty_t){.kind = base.element->kind,
+                        .name = base.element->name,
+                        .element = base.element->element,
+                        .array_length = base.element->array_length,
+                        .ok = true};
     }
     if (base.kind == TYPE_STR) {
       if (strcmp(expr->field.name, "ptr") == 0) {
@@ -2103,7 +2166,7 @@ static void check_stmt(sema_t *sema, stmt_t *stmt, const decl_t *fn) {
       local = scope_lookup(sema->globals, root);
     }
 
-    if (local != NULL && !local->mutable) {
+    if (local != NULL && !local->mutable && !lvalue_through_pointer(target)) {
       diag_error(sema->src, stmt->line, stmt->col,
                  local->is_loop_var ? "cannot assign to loop variable '%s'"
                                     : "cannot assign to const '%s'",
@@ -2414,7 +2477,7 @@ static size_t count_bindings(stmt_t *body) {
 
 static void resolve_qualified_type(sema_t *sema, type_t *t) {
   if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE ||
-      t->kind == TYPE_OPTIONAL) {
+      t->kind == TYPE_OPTIONAL || t->kind == TYPE_POINTER) {
     resolve_qualified_type(sema, t->element);
     return;
   }
@@ -2451,7 +2514,7 @@ static void resolve_qualified_type(sema_t *sema, type_t *t) {
 
 static void resolve_enum_type(sema_t *sema, type_t *t) {
   if (t->kind == TYPE_ARRAY || t->kind == TYPE_SLICE ||
-      t->kind == TYPE_OPTIONAL) {
+      t->kind == TYPE_OPTIONAL || t->kind == TYPE_POINTER) {
     resolve_enum_type(sema, t->element);
     return;
   }

@@ -1,0 +1,16 @@
+--TEST--
+sizeof(T) yields the byte size of scalars, aggregates, and slices as a compile-time i64
+--FILE--
+const std = import("std");
+
+struct Pair { a: i64, b: i64 }
+
+pub fn main(): i32 {
+  std.io.println("{} {} {} {} {} {}",
+    sizeof(u8), sizeof(i64), sizeof(bool), sizeof(str), sizeof([]u8), sizeof(Pair));
+  return (sizeof(Pair) + sizeof(u8)) as i32;
+}
+--EXPECT--
+1 8 1 16 16 16
+--EXIT--
+17

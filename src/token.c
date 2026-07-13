@@ -150,6 +150,8 @@ char *token_kind_to_str(TokenKind kind) {
     return "TOKEN_EXTERN";
   case TOKEN_IMPORT:
     return "TOKEN_IMPORT";
+  case TOKEN_SIZEOF:
+    return "TOKEN_SIZEOF";
   case TOKEN_ENUM:
     return "TOKEN_ENUM";
   case TOKEN_MATCH:

@@ -1,0 +1,31 @@
+--TEST--
+a method call auto-derefs a *T receiver: it dispatches on T and mutates the pointee
+--FILE--
+const std = import("std");
+
+struct Counter {
+  n: i64,
+
+  fn bump(self): i64 {
+    self.n += 1;
+    return self.n;
+  }
+}
+
+fn bumpTwice(c: *Counter) {
+  c.bump();
+  c.bump();
+}
+
+pub fn main(): i32 {
+  let c: Counter = Counter{n: 0};
+  const p: *Counter = &c;
+  bumpTwice(p);
+  const r = p.bump();
+  std.io.println("c.n={} r={}", c.n, r);
+  return c.n as i32;
+}
+--EXPECT--
+c.n=3 r=3
+--EXIT--
+3
