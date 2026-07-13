@@ -2510,11 +2510,71 @@ static void resolve_fn_signature(sema_t *sema, decl_t *fn) {
 
 static void check_fn(sema_t *sema, decl_t *fn);
 
+static bool type_reaches_by_value(sema_t *sema, const char *start,
+                                  const type_t *t, const char **visited,
+                                  size_t *nvisited) {
+  if (t == NULL) {
+    return false;
+  }
+  if (t->kind == TYPE_ARRAY || t->kind == TYPE_OPTIONAL) {
+    return type_reaches_by_value(sema, start, t->element, visited, nvisited);
+  }
+  if (t->kind != TYPE_STRUCT && t->kind != TYPE_ENUM) {
+    return false;
+  }
+  if (t->name != NULL && enum_name_eq(t->name, start)) {
+    return true;
+  }
+  for (size_t i = 0; i < *nvisited; i++) {
+    if (enum_name_eq(visited[i], t->name)) {
+      return false;
+    }
+  }
+  if (*nvisited >= 512) {
+    return false;
+  }
+  decl_t *d = typetab_lookup(sema->types, t->name);
+  if (d == NULL) {
+    return false;
+  }
+  visited[(*nvisited)++] = t->name;
+  if (d->kind == DECL_STRUCT) {
+    for (field_t *f = d->strct.fields; f != NULL; f = f->next) {
+      if (type_reaches_by_value(sema, start, &f->type, visited, nvisited)) {
+        return true;
+      }
+    }
+  } else if (d->kind == DECL_ENUM) {
+    for (enum_member_t *m = d->enm.members; m != NULL; m = m->next) {
+      if (m->has_payload &&
+          type_reaches_by_value(sema, start, &m->payload, visited, nvisited)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static bool contains_self_by_value(sema_t *sema, const char *name,
+                                   const type_t *t) {
+  const char *visited[512];
+  size_t nvisited = 0;
+  return type_reaches_by_value(sema, name, t, visited, &nvisited);
+}
+
 static void check_struct(sema_t *sema, const decl_t *strct) {
   for (field_t *field = strct->strct.fields; field != NULL;
        field = field->next) {
     resolve_qualified_type(sema, &field->type);
     check_type(sema, &field->type);
+
+    if (contains_self_by_value(sema, strct->name, &field->type)) {
+      diag_error(sema->src, field->line, field->col,
+                 "field '%s' makes struct '%s' recursive by value and "
+                 "infinitely sized; break the cycle with a slice",
+                 field->name, strct->name);
+      sema->had_error = true;
+    }
 
     for (field_t *prev = strct->strct.fields; prev != field;
          prev = prev->next) {
@@ -2551,19 +2611,6 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
   }
 }
 
-static bool payload_stores_enum(const char *ename, const type_t *t) {
-  if (t == NULL) {
-    return false;
-  }
-  if (t->kind == TYPE_ENUM) {
-    return enum_name_eq(ename, t->name);
-  }
-  if (t->kind == TYPE_ARRAY || t->kind == TYPE_OPTIONAL) {
-    return payload_stores_enum(ename, t->element);
-  }
-  return false;
-}
-
 static void check_enum(sema_t *sema, const decl_t *enm) {
   for (enum_member_t *member = enm->enm.members; member != NULL;
        member = member->next) {
@@ -2571,10 +2618,10 @@ static void check_enum(sema_t *sema, const decl_t *enm) {
       resolve_qualified_type(sema, &member->payload);
       resolve_enum_type(sema, &member->payload);
       check_type(sema, &member->payload);
-      if (payload_stores_enum(enm->name, &member->payload)) {
+      if (contains_self_by_value(sema, enm->name, &member->payload)) {
         diag_error(sema->src, member->line, member->col,
-                   "variant '%s' stores '%s' by value, making it infinitely "
-                   "sized; use a slice or pointer",
+                   "variant '%s' makes enum '%s' recursive by value and "
+                   "infinitely sized; break the cycle with a slice",
                    member->name, enm->name);
         sema->had_error = true;
       }

@@ -10,6 +10,6 @@ pub fn main(): i32 {
   return 0;
 }
 --EXPECTERR--
-zup: error: variant 'Cons' stores 'List' by value, making it infinitely sized; use a slice or pointer [3:3]
+zup: error: variant 'Cons' makes enum 'List' recursive by value and infinitely sized; break the cycle with a slice [3:3]
 --EXIT--
 1

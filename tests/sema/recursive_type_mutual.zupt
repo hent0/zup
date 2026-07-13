@@ -1,0 +1,22 @@
+--TEST--
+a value cycle spanning an enum and a struct (enum -> struct -> enum) is detected, not just direct self-recursion
+--FILE--
+enum Expr {
+  Num: i64,
+  Add: Bin,
+}
+
+struct Bin {
+  lhs: Expr,
+  rhs: Expr,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: variant 'Add' makes enum 'Expr' recursive by value and infinitely sized; break the cycle with a slice [3:3]
+zup: error: field 'lhs' makes struct 'Bin' recursive by value and infinitely sized; break the cycle with a slice [7:3]
+zup: error: field 'rhs' makes struct 'Bin' recursive by value and infinitely sized; break the cycle with a slice [8:3]
+--EXIT--
+1

@@ -1,0 +1,28 @@
+--TEST--
+a recursive type whose cycle is broken by a slice ([]Self) is allowed and usable: build a tree, match it, and iterate children
+--FILE--
+enum Expr {
+  Num: i64,
+  Add: []Expr,
+}
+
+pub fn main(): i32 {
+  const leaves: [2]Expr = [.Num(2), .Num(3)];
+  const add: Expr = .Add(leaves);
+
+  let sum: i64 = 0;
+  match add {
+    .Add(kids) => {
+      for k in kids {
+        sum += match k {
+          .Num(n) => n,
+          _ => 0,
+        };
+      }
+    },
+    .Num(n) => { sum = n; },
+  };
+  return sum as i32;
+}
+--EXIT--
+5

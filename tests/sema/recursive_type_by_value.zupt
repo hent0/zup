@@ -1,0 +1,15 @@
+--TEST--
+a struct that contains itself by value is rejected (infinitely sized) instead of crashing the compiler
+--FILE--
+struct Node {
+  value: i64,
+  next: Node,
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: field 'next' makes struct 'Node' recursive by value and infinitely sized; break the cycle with a slice [3:3]
+--EXIT--
+1
