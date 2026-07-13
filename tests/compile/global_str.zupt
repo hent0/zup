@@ -1,0 +1,30 @@
+--TEST--
+module-level str globals: const, pub const, mutable with reassignment, empty string, and cstr
+--FILE--
+const std = import("std");
+
+extern fn strlen(s: cstr): i64;
+
+const version = "0.0.1";
+pub const banner = "zup compiler";
+let greeting = "hello";
+const empty = "";
+const raw: cstr = "abc";
+
+pub fn main(): i32 {
+  std.io.println("version={} banner={} empty.len={}", version, banner, empty.len);
+  std.io.println("version.len={} first={}", version.len, version[0] - '0');
+  std.io.println("greeting={}", greeting);
+  greeting = "bye";
+  std.io.println("mutated={}", greeting);
+  std.io.println("raw.len={}", strlen(raw));
+  return 0;
+}
+--EXPECT--
+version=0.0.1 banner=zup compiler empty.len=0
+version.len=5 first=0
+greeting=hello
+mutated=bye
+raw.len=3
+--EXIT--
+0

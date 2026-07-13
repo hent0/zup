@@ -1,0 +1,20 @@
+--TEST--
+flag: -h prints usage to stderr and exits 0 when no help flag is defined
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addInt("n", 3, "count");
+  fs.addStr("s", "", "text");
+  const argv: []str = ["prog", "-h"];
+  fs.parse(argv);
+  std.io.println("unreachable");
+  return 0;
+}
+--EXPECTERR--
+Usage of prog:
+  -n int    	count (default 3)
+  -s string    	text
+--EXIT--
+0

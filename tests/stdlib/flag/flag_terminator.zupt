@@ -1,0 +1,26 @@
+--TEST--
+flag: "--" ends parsing and is consumed; a bare "-" and the first non-flag stop parsing as positionals
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let a = std.flag.FlagSet.init("prog");
+  a.addStr("s", "def", "text");
+  const argv1: []str = ["prog", "-s=x", "--", "-s=y", "z"];
+  a.parse(argv1);
+  const ra = a.args();
+  std.io.println("s={} rest.len={} rest0={} rest1={}", a.getStr("s"), ra.len, ra[0], ra[1]);
+
+  let b = std.flag.FlagSet.init("prog");
+  b.addStr("s", "def", "text");
+  const argv2: []str = ["prog", "-", "-s=y"];
+  b.parse(argv2);
+  const rb = b.args();
+  std.io.println("s={} rest.len={} rest0={}", b.getStr("s"), rb.len, rb[0]);
+  return 0;
+}
+--EXPECT--
+s=x rest.len=2 rest0=-s=y rest1=z
+s=def rest.len=2 rest0=-
+--EXIT--
+0

@@ -1,0 +1,33 @@
+--TEST--
+flag: all four flag types parse from =value and space forms; defaults apply when unset
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addBool("v", false, "verbose");
+  fs.addInt("n", 7, "count");
+  fs.addFloat("r", 0.5, "ratio");
+  fs.addStr("s", "def", "text");
+  fs.addInt("unset", 42, "left alone");
+
+  const argv: []str = ["prog", "-v", "-n", "12", "-r=2.5", "-s=hello"];
+  fs.parse(argv);
+
+  std.io.println("v={}", fs.getBool("v"));
+  std.io.println("n={}", fs.getInt("n"));
+  std.io.println("r={}", fs.getFloat("r"));
+  std.io.println("s={}", fs.getStr("s"));
+  std.io.println("unset={}", fs.getInt("unset"));
+  std.io.println("wasSet n={} unset={}", fs.wasSet("n"), fs.wasSet("unset"));
+  return 0;
+}
+--EXPECT--
+v=true
+n=12
+r=2.5
+s=hello
+unset=42
+wasSet n=true unset=false
+--EXIT--
+0

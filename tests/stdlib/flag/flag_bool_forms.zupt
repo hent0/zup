@@ -1,0 +1,25 @@
+--TEST--
+flag: -v=false sets a bool explicitly; a bool flag never consumes the next argument
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let a = std.flag.FlagSet.init("prog");
+  a.addBool("v", true, "verbose");
+  const argv1: []str = ["prog", "-v=false"];
+  a.parse(argv1);
+  std.io.println("explicit={}", a.getBool("v"));
+
+  let b = std.flag.FlagSet.init("prog");
+  b.addBool("v", false, "verbose");
+  const argv2: []str = ["prog", "-v", "false", "tail"];
+  b.parse(argv2);
+  const rest = b.args();
+  std.io.println("bare={} rest.len={} rest0={}", b.getBool("v"), rest.len, rest[0]);
+  return 0;
+}
+--EXPECT--
+explicit=false
+bare=true rest.len=2 rest0=false
+--EXIT--
+0

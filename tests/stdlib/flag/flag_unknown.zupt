@@ -1,0 +1,19 @@
+--TEST--
+flag: an unknown flag prints an error plus usage to stderr and exits 2
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addBool("v", false, "verbose");
+  const argv: []str = ["prog", "-bogus"];
+  fs.parse(argv);
+  std.io.println("unreachable");
+  return 0;
+}
+--EXPECTERR--
+flag provided but not defined: -bogus
+Usage of prog:
+  -v    	verbose
+--EXIT--
+2

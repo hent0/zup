@@ -1,0 +1,36 @@
+--TEST--
+a match expression with typed arms and a 'null' arm widens to an optional, in return position, in an inferred binding, and with null in a leading arm
+--FILE--
+const std = import("std");
+
+fn hexToI64(c: u8): ?i64 {
+  return match c {
+    '0'...'9' => (c - '0') as i64,
+    'a'...'f' => (c - 'a') as i64 + 10,
+    'A'...'F' => (c - 'A') as i64 + 10,
+    _ => null,
+  };
+}
+
+fn nullFirstArm(b: bool): ?i64 {
+  return match b {
+    true => null,
+    false => 5,
+  };
+}
+
+pub fn main(): i32 {
+  const inferred = match 'a' as u8 {
+    'a' => 1 as i64,
+    _ => null,
+  };
+
+  std.io.println("f={} 7={} z-null={}", hexToI64('f') ?? -1, hexToI64('7') ?? -1, hexToI64('z') == null);
+  std.io.println("inferred={} null-first={} null-first-other={}", inferred ?? -1, nullFirstArm(true) == null, nullFirstArm(false) ?? -1);
+  return 0;
+}
+--EXPECT--
+f=15 7=7 z-null=true
+inferred=1 null-first=true null-first-other=5
+--EXIT--
+0

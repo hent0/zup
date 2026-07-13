@@ -1,0 +1,18 @@
+--TEST--
+flag: int flags accept 0x hex values, including negative ones
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addInt("a", 0, "first");
+  fs.addInt("b", 0, "second");
+  const argv: []str = ["prog", "-a=0x1f", "-b", "-0x10"];
+  fs.parse(argv);
+  std.io.println("a={} b={}", fs.getInt("a"), fs.getInt("b"));
+  return 0;
+}
+--EXPECT--
+a=31 b=-16
+--EXIT--
+0

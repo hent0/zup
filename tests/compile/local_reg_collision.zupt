@@ -1,0 +1,36 @@
+--TEST--
+locals whose names collide with codegen-internal registers (argv, argc, sret) or with a sibling-scope local get unique IR names, and each use resolves to its own slot
+--FILE--
+const std = import("std");
+
+fn pick(n: i64): i64 {
+  match n {
+    1 => {
+      const v = n * 10;
+      return v;
+    },
+    _ => {},
+  };
+  const v = n * 100;
+  return v;
+}
+
+pub fn main(args: []str): i32 {
+  const argv = args;
+  const argc = argv.len;
+  let sret: i64 = 40;
+
+  for i in 0..2 {
+    sret += 1;
+  }
+  for i in 0..3 {
+    sret += 1;
+  }
+
+  std.io.println("argc={} sret={} pick1={} pick2={}", argc, sret, pick(1), pick(2));
+  return 0;
+}
+--EXPECT--
+argc=1 sret=45 pick1=10 pick2=200
+--EXIT--
+0

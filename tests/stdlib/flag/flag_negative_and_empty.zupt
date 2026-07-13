@@ -1,0 +1,18 @@
+--TEST--
+flag: "-n -5" takes the next argument verbatim; "-s=" sets an empty string
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addInt("n", 0, "count");
+  fs.addStr("s", "def", "text");
+  const argv: []str = ["prog", "-n", "-5", "-s="];
+  fs.parse(argv);
+  std.io.println("n={} s=[{}] s.len={}", fs.getInt("n"), fs.getStr("s"), fs.getStr("s").len);
+  return 0;
+}
+--EXPECT--
+n=-5 s=[] s.len=0
+--EXIT--
+0

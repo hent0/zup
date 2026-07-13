@@ -1,0 +1,28 @@
+--TEST--
+flag: a StrList flag collects every occurrence in order, from both = and space forms; unset lists are empty
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addStrList("l", "link library");
+  fs.addStrList("L", "library path");
+  const argv: []str = ["prog", "-l", "m", "-l=pthread", "-l", "c"];
+  fs.parse(argv);
+
+  const libs = fs.getStrList("l");
+  std.io.println("libs.len={}", libs.len);
+  for lib in libs {
+    std.io.println("lib={}", lib);
+  }
+  std.io.println("paths.len={} wasSet={}", fs.getStrList("L").len, fs.wasSet("L"));
+  return 0;
+}
+--EXPECT--
+libs.len=3
+lib=m
+lib=pthread
+lib=c
+paths.len=0 wasSet=false
+--EXIT--
+0

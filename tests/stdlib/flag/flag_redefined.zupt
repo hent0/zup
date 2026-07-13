@@ -1,0 +1,16 @@
+--TEST--
+flag: defining the same flag name twice is a fatal error at registration
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addBool("v", false, "verbose");
+  fs.addInt("v", 0, "clashes");
+  std.io.println("unreachable");
+  return 0;
+}
+--EXPECTERR--
+flag redefined: -v
+--EXIT--
+2

@@ -1,0 +1,15 @@
+--TEST--
+flag: parseInt accepts decimal, signed, and hex input and returns null on garbage
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  std.io.println("hex={} plus={} neg={}", std.flag.parseInt("0x1f") ?? -1, std.flag.parseInt("+9") ?? -1, std.flag.parseInt("-5") ?? -1);
+  std.io.println("bad-null={} empty-null={} solo-sign-null={}", std.flag.parseInt("12a") == null, std.flag.parseInt("") == null, std.flag.parseInt("-") == null);
+  return 0;
+}
+--EXPECT--
+hex=31 plus=9 neg=-5
+bad-null=true empty-null=true solo-sign-null=true
+--EXIT--
+0

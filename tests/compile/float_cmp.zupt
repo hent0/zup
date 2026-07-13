@@ -1,0 +1,43 @@
+--TEST--
+all six comparison operators work on f64 and f32, with IEEE semantics for NaN
+--FILE--
+const std = import("std");
+
+fn check(label: str, v: bool) {
+  std.io.println("{} {}", label, v);
+}
+
+pub fn main(): i32 {
+  let a: f64 = 1.5;
+  let b: f64 = 2.5;
+  check("eq", a == a);
+  check("ne", a != b);
+  check("lt", a < b);
+  check("le", b <= b);
+  check("gt", b > a);
+  check("ge", a >= b);
+
+  let zero: f64 = 0.0;
+  let nan: f64 = zero / zero;
+  check("nan==nan", nan == nan);
+  check("nan!=nan", nan != nan);
+  check("nan<1", nan < 1.0);
+
+  let x: f32 = 3.0;
+  let y: f32 = 4.0;
+  check("f32", x < y && x != y);
+  return 0;
+}
+--EXPECT--
+eq true
+ne true
+lt true
+le true
+gt true
+ge false
+nan==nan false
+nan!=nan true
+nan<1 false
+f32 true
+--EXIT--
+0
