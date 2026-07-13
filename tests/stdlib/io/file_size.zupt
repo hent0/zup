@@ -6,16 +6,22 @@ printf 'exactly twenty bytes' > /tmp/zup_size.txt
 const std = import("std");
 
 pub fn main(): i32 {
-  const opened = std.io.open("/tmp/zup_size.txt", .Read);
-  if opened == null {
-    return -1;
-  }
-  const f = opened!;
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_size.txt", .Read) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return -1; },
+  };
   defer f.close();
 
-  const size = f.size();
+  const size = match f.size() {
+    .Ok(n) => n,
+    .Err(e) => 0,
+  };
   let buf: [32]u8;
-  let n: i64 = f.read(buf);
+  let n: i64 = match f.read(buf) {
+    .Ok(c) => c,
+    .Err(e) => 0,
+  };
   std.io.println("{}", buf[0..n]  as str);
   return (size + n) as i32;
 }

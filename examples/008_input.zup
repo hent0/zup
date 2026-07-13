@@ -4,7 +4,11 @@ pub fn main(): i32 {
   let input: [64]u8;
 
   std.io.print("Wait a minute, who are you?\n> ");
-  let name: str = std.io.stdin().readln(input);
+  let name: str = match std.io.stdin().readln(input) {
+    .Ok(line) => line,
+    .Eof => "",
+    .Err(e) => "",
+  };
 
   std.io.print("Hello, {}", name);
 

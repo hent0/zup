@@ -975,8 +975,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     break;
   }
   case EXPR_PROPAGATE: {
-    exprty_t operand = check_expr(sema, expr->propagate.operand,
-                                  type_from_kind(TYPE_UNKNOWN));
+    exprty_t operand =
+        check_expr(sema, expr->propagate.operand, type_from_kind(TYPE_UNKNOWN));
     if (!operand.ok) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
@@ -1638,6 +1638,16 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
               } else {
                 bind_name = arm->binding;
                 bind_type = member->payload;
+
+                if (inner.name != NULL) {
+                  const char *dot = strrchr(inner.name, '.');
+                  if (dot != NULL) {
+                    const char *stem =
+                        arena_format(sema->arena, "%.*s",
+                                     (int)(dot - inner.name), inner.name);
+                    bind_type = qualify_param_type(sema, bind_type, stem);
+                  }
+                }
               }
             } else if (arm->binding != NULL) {
               diag_error(sema->src, arm->pattern->line, arm->pattern->col,

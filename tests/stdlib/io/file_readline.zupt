@@ -6,13 +6,17 @@ printf 'first line\nsecond\n' > /tmp/zup_readline.txt
 const std = import("std");
 
 pub fn main(): i32 {
-  const opened = std.io.open("/tmp/zup_readline.txt", .Read);
-  if opened == null {
-    return -1;
-  }
-  let f: std.io.File = opened!;
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_readline.txt", .Read) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return -1; },
+  };
   let buf: [32]u8;
-  let line: str = f.readln(buf) ?? "";
+  let line: str = match f.readln(buf) {
+    .Ok(l) => l,
+    .Eof => "",
+    .Err(e) => "",
+  };
   f.close();
   std.io.println(line);
   return line.len as i32;

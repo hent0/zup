@@ -1,0 +1,33 @@
+--TEST--
+std.io.open returns an OpenResult: Ok(File) on success, Err(IoError) carrying the path for a missing file
+--PREPARE--
+printf 'data' > /tmp/zup_ioerr_ok.txt
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  match std.io.open("/tmp/zup_ioerr_ok.txt", .Read) {
+    .Ok(f) => {
+      std.io.println("ok fd_valid={}", f.fd > 0);
+      f.close();
+    },
+    .Err(e) => std.io.println("unexpected err"),
+  };
+
+  match std.io.open("/no/such/path.txt", .Read) {
+    .Ok(f) => std.io.println("unexpected ok"),
+    .Err(e) => match e {
+      .NotFound(p) => std.io.println("NotFound {}", p),
+      .Permission(p) => std.io.println("Permission {}", p),
+      .Errno(c) => std.io.println("Errno {}", c),
+    },
+  };
+  return 0;
+}
+--CLEANUP--
+rm -f /tmp/zup_ioerr_ok.txt
+--EXPECT--
+ok fd_valid=true
+NotFound /no/such/path.txt
+--EXIT--
+0

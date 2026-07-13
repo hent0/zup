@@ -14,16 +14,16 @@ pub fn main(): i32 {
     return 1;
   }
 
-  const f = std.io.open("/nonexistent/zup_enum_shadow_test", .Read);
-  if f != null {
-    return 2;
-  }
+  match std.io.open("/nonexistent/zup_enum_shadow_test", .Read) {
+    .Ok(f) => { return 2; },
+    .Err(e) => {},
+  };
 
   let m: std.io.Mode = .Read;
-  const g = std.io.open("/nonexistent/zup_enum_shadow_test", m);
-  if g != null {
-    return 3;
-  }
+  match std.io.open("/nonexistent/zup_enum_shadow_test", m) {
+    .Ok(g) => { return 3; },
+    .Err(e) => {},
+  };
 
   std.io.println("ok");
   return 0;

@@ -4,25 +4,30 @@ the open/defer close idiom: the file handle is released at scope exit and the wr
 const std = import("std");
 
 fn writeIt() {
-  const opened = std.io.open("/tmp/zup_defer.txt", .Write);
-  if opened == null {
-    return;
-  }
-  const file = opened!;
+  let file: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_defer.txt", .Write) {
+    .Ok(f) => { file = f; },
+    .Err(e) => { return; },
+  };
   defer file.close();
   file.writeln("deferred");
 }
 
 pub fn main(): i32 {
   writeIt();
-  const opened = std.io.open("/tmp/zup_defer.txt", .Read);
-  if opened == null {
-    return 1;
-  }
-  let f: std.io.File = opened!;
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_defer.txt", .Read) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return 1; },
+  };
   defer f.close();
   let buf: [16]u8;
-  std.io.println(f.readln(buf) ?? "");
+  const line = match f.readln(buf) {
+    .Ok(l) => l,
+    .Eof => "",
+    .Err(e) => "",
+  };
+  std.io.println(line);
   return 0;
 }
 --CLEANUP--

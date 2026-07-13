@@ -6,25 +6,28 @@ const std = import("std");
 pub fn main(): i32 {
   std.io.stdout().writeln("chained");
 
-  const wf = std.io.open("/tmp/zup_file_test.txt", .Write);
-  if wf == null {
-    return 1;
-  }
-  let f: std.io.File = wf!;
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_file_test.txt", .Write) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return 1; },
+  };
   f.writeln("roundtrip");
   f.close();
   if f.isValid() {
     return 2;
   }
 
-  const rf = std.io.open("/tmp/zup_file_test.txt", .Read);
-  if rf == null {
-    return 4;
-  }
-  let back: std.io.File = rf!;
+  let back: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_file_test.txt", .Read) {
+    .Ok(x) => { back = x; },
+    .Err(e) => { return 4; },
+  };
   let storage: [4]u8 = [0, 0, 0, 0];
   let buf: []u8 = storage;
-  let n: i64 = back.read(buf);
+  let n: i64 = match back.read(buf) {
+    .Ok(c) => c,
+    .Err(e) => 0,
+  };
   back.close();
   if n == 4 {
     return storage[0] as i32;

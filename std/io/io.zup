@@ -1,6 +1,29 @@
 const sys = import("sys.zup");
 
 extern fn snprintf(buf: cstr, size: i64, fmt: cstr, ...): i32;
+extern fn __errno_location(): cstr;
+
+pub enum IoError {
+  NotFound: str,
+  Permission: str,
+  Errno: i32,
+}
+
+pub enum OpenResult {
+  Ok: File,
+  Err: IoError,
+}
+
+pub enum IoResult {
+  Ok: i64,
+  Err: IoError,
+}
+
+pub enum LineResult {
+  Ok: str,
+  Eof,
+  Err: IoError,
+}
 
 // Don't reorder!
 enum ArgKind {
@@ -31,18 +54,26 @@ pub enum Mode {
 pub struct File {
   pub fd: i32,
 
-  pub fn write(self, s: str): i64 {
+  fn writeRaw(self, s: str): i64 {
     return sys.write(self.fd, s.ptr, s.len);
   }
 
+  pub fn write(self, s: str): IoResult {
+    const n = self.writeRaw(s);
+    if n < 0 {
+      return .Err(.Errno(errno()));
+    }
+    return .Ok(n);
+  }
+
   pub fn writeln(self, s: str) {
-    self.write(s);
-    self.write("\n");
+    self.writeRaw(s);
+    self.writeRaw("\n");
   }
 
   pub fn writeInt(self, v: i64) {
     if v == 0 {
-      self.write("0");
+      self.writeRaw("0");
       return;
     }
 
@@ -64,55 +95,69 @@ pub struct File {
       i--;
       buf[i] = '-';
     }
-    self.write(buf[i..20] as str);
+    self.writeRaw(buf[i..20] as str);
   }
 
   pub fn writeFloat(self, v: f64) {
     let buf: [32]u8;
     let view: []u8 = buf;
     let n: i32 = snprintf(view.ptr, 32, "%g", v);
-    self.write(buf[0..n] as str);
+    self.writeRaw(buf[0..n] as str);
   }
 
-  pub fn read(self, buf: []u8): i64 {
-    return sys.read(self.fd, buf.ptr, buf.len);
+  pub fn read(self, buf: []u8): IoResult {
+    const n = sys.read(self.fd, buf.ptr, buf.len);
+    if n < 0 {
+      return .Err(.Errno(errno()));
+    }
+    return .Ok(n);
   }
 
-  pub fn size(self): i64 {
+  pub fn size(self): IoResult {
     const end = sys.lseek(self.fd, 0, 2);
+    if end < 0 {
+      return .Err(.Errno(errno()));
+    }
     sys.lseek(self.fd, 0, 0);
-    return end;
+    return .Ok(end);
   }
 
-  pub fn readln(self, buf: []u8): ?str {
-    let n: i64 = sys.read(self.fd, buf.ptr, buf.len);
-    if n <= 0 {
-      return null;
+  pub fn readln(self, buf: []u8): LineResult {
+    const n: i64 = sys.read(self.fd, buf.ptr, buf.len);
+    if n < 0 {
+      return .Err(.Errno(errno()));
+    }
+    if n == 0 {
+      return .Eof;
     }
 
     let i: i64 = 0;
     while i < n {
       if buf[i] == '\n' {
-        return buf[0..i] as str;
+        return .Ok(buf[0..i] as str);
       }
 
       i++;
     }
 
-    return buf[0..n] as str;
+    return .Ok(buf[0..n] as str);
   }
 
   pub fn isValid(self): bool {
     return self.fd >= 0;
   }
 
-  pub fn close(self) {
-    sys.close(self.fd);
+  pub fn close(self): IoResult {
+    const r = sys.close(self.fd);
     self.fd = -1;
+    if r < 0 {
+      return .Err(.Errno(errno()));
+    }
+    return .Ok(0);
   }
 }
 
-pub fn open(path: str, mode: Mode): ?File {
+pub fn open(path: str, mode: Mode): OpenResult {
   let flags: i32 = match mode {
     .Read => 0,
     .Write => 577,
@@ -120,11 +165,11 @@ pub fn open(path: str, mode: Mode): ?File {
   };
 
   const fd = sys.open(path.ptr, flags, 438);
-  if fd <= 0 {
-    return null;
+  if fd < 0 {
+    return .Err(classifyOpen(path, errno()));
   }
 
-  return File{fd: fd};
+  return .Ok(File{fd: fd});
 }
 
 pub fn stdin(): File {
@@ -141,7 +186,7 @@ pub fn stderr(): File {
 
 pub fn println(fmt: str, args: ...) {
   printv(stdout(), fmt, args);
-  stdout().write("\n");
+  stdout().writeRaw("\n");
 }
 
 pub fn print(fmt: str, args: ...) {
@@ -150,7 +195,7 @@ pub fn print(fmt: str, args: ...) {
 
 pub fn printerrln(fmt: str, args: ...) {
   printv(stderr(), fmt, args);
-  stderr().write("\n");
+  stderr().writeRaw("\n");
 }
 
 pub fn printerr(fmt: str, args: ...) {
@@ -161,8 +206,24 @@ fn boolStr(v: i64): str {
   return v == 1 ? "true" : "false";
 }
 
+fn errno(): i32 {
+  const b = __errno_location()[0..4];
+  return (b[0] as i32) | ((b[1] as i32) << 8) | ((b[2] as i32) << 16) |
+         ((b[3] as i32) << 24);
+}
+
+fn classifyOpen(path: str, code: i32): IoError {
+  if code == 2 {
+    return .NotFound(path);
+  }
+  if code == 1 || code == 13 {
+    return .Permission(path);
+  }
+  return .Errno(code);
+}
+
 fn put(file: File, s: str) {
-  file.write(s);
+  file.writeRaw(s);
 }
 
 fn writeArg(f: File, a: Arg) {
@@ -183,7 +244,7 @@ fn printv(file: File, fmt: str, args: []Arg) {
   while i + 1 < fmt.len {
     if fmt[i] == '{' {
       if fmt[i + 1] == '}' {
-        file.write(fmt[start..i]);
+        file.writeRaw(fmt[start..i]);
         if n < args.len {
           writeArg(file, args[n]);
         }
@@ -198,5 +259,5 @@ fn printv(file: File, fmt: str, args: []Arg) {
     i++;
   }
 
-  file.write(fmt[start..fmt.len]);
+  file.writeRaw(fmt[start..fmt.len]);
 }

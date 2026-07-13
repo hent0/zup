@@ -8,17 +8,31 @@ pub struct Source {
     // TODO: Add reading from stdin
     std.assert(path != "-", "reading from stdin not implemented");
 
-    const file = std.io.open(path, .Read)?;
+    let file: std.io.File = std.io.File{fd: -1};
+    match std.io.open(path, .Read) {
+      .Ok(f) => { file = f; },
+      .Err(e) => { return null; },
+    };
     defer file.close();
 
-    const size = file.size();
+    const size = match file.size() {
+      .Ok(n) => n,
+      .Err(e) => 0,
+    };
+
     let buf: []u8 = arena.alloc(size);
     let total: i64 = 0;
 
-    let n: i64 = file.read(buf[total..size]);
+    let n: i64 = match file.read(buf[total..size]) {
+      .Ok(c) => c,
+      .Err(e) => 0,
+    };
     while n > 0 {
       total += n;
-      n = file.read(buf[total..size]);
+      n = match file.read(buf[total..size]) {
+        .Ok(c) => c,
+        .Err(e) => 0,
+      };
     }
 
     return {
