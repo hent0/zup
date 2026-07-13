@@ -1,5 +1,99 @@
+const std = import("std");
 const lexer = import("lexer.zup");
+const token = import("token.zup");
+const source = import("source.zup");
+const diag = import("diag.zup");
 
 pub struct Parser {
-  lexer: lexer.Lexer,
+  lex: lexer.Lexer,
+  current: token.Token,
+
+  pub fn init(src: source.Source, arena: std.mem.Arena): Parser {
+    const lex = lexer.Lexer.init(src, arena);
+
+    return {
+      lex: lex,
+      current: lex.nextToken(),
+    };
+  }
+
+  fn advance(self): token.Token {
+    const prev = self.current;
+    self.current = self.lex.nextToken();
+    return prev;
+  }
+
+  fn check(self, kind: token.TokenKind): bool {
+    return self.current.kind == kind;
+  }
+
+  fn span(self): diag.Span {
+    return diag.Span{
+      line: self.current.line,
+      col: self.current.col,
+    };
+  }
+
+  fn expect(self, kind: token.TokenKind, what: str): bool {
+    if self.check(kind) {
+      self.advance();
+      return true;
+    }
+
+    diag.error(self.span(), .Expected(what));
+    return false;
+  }
+
+  fn startsDecl(self): bool {
+    return match self.current.kind {
+      .Pub, .Fn, .Const, .Let, .Struct, .Enum, .Extern, .Import => true,
+      _ => false,
+    };
+  }
+
+  pub fn parse(self) {
+    while !self.check(.Eof) {
+      if self.check(.Invalid) {
+        self.advance();
+      } else if self.startsDecl() {
+        self.declaration();
+      } else {
+        diag.error(self.span(), .Message("expected a top-level declaration"));
+        self.advance();
+      }
+    }
+  }
+
+  fn declaration(self) {
+    if self.check(.Pub) {
+      self.advance();
+    }
+
+    if self.check(.Fn) {
+      self.advance();
+      self.expect(.Id, "a function name");
+    } else {
+      self.advance();
+    }
+
+    self.skipToEnd();
+  }
+
+  fn skipToEnd(self) {
+    let depth: i64 = 0;
+    while !self.check(.Eof) {
+      const kind = self.current.kind;
+      self.advance();
+      if kind == .Lbrace {
+        depth += 1;
+      } else if kind == .Rbrace {
+        depth -= 1;
+        if depth <= 0 {
+          return;
+        }
+      } else if kind == .Semicolon && depth == 0 {
+        return;
+      }
+    }
+  }
 }

@@ -1,6 +1,7 @@
 pub const std = import("std");
 pub const token = import("token.zup");
 const source = import("source.zup");
+const diag = import("diag.zup");
 
 pub struct Lexer {
   src: str,
@@ -123,8 +124,15 @@ pub struct Lexer {
         },
         _ => self.advanceWith(token.Token.init(.Dot, self.line, self.col)),
       },
-      _ => self.advanceWith(token.Token.initWithValue(.Invalid, self.line, self.col, .Byte(self.current))),
+      _ => self.invalidChar(),
     };
+  }
+
+  fn invalidChar(self): token.Token {
+    const line = self.line;
+    const col = self.col;
+    diag.error(diag.Span{line: line, col: col}, .Message("unexpected character"));
+    return self.advanceWith(token.Token.initWithValue(.Invalid, line, col, .Byte(self.current)));
   }
 
   fn atEof(self): bool {
@@ -326,6 +334,7 @@ pub struct Lexer {
     }
 
     if self.atEof() {
+      diag.error(diag.Span{line: line, col: col}, .Message("unterminated string literal"));
       return token.Token.initWithValue(.Invalid, line, col, .Text("unterminated string"));
     }
 
@@ -364,6 +373,7 @@ pub struct Lexer {
     self.advance();
 
     if self.atEof() || self.current == '\'' {
+      diag.error(diag.Span{line: line, col: col}, .Message("empty char literal"));
       return token.Token.initWithValue(.Invalid, line, col, .Text("empty char literal"));
     }
 
@@ -380,6 +390,7 @@ pub struct Lexer {
     self.advance();
 
     if self.current != '\'' {
+      diag.error(diag.Span{line: line, col: col}, .Message("unterminated char literal"));
       return token.Token.initWithValue(.Invalid, line, col, .Text("unterminated char literal"));
     }
     self.advance();

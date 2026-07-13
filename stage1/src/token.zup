@@ -278,17 +278,17 @@ fn writeEscaped(file: std.io.File, s: str) {
   let i: i64 = 0;
   while i < s.len {
     const c = s[i];
-    if c == '\n' {
-      file.write("\\n");
-    } else if c >= 32 && c < 127 {
-      file.write(s[i..i + 1]);          // one-byte view, no copy
-    } else {
-      let hex: [4]u8;
-      hex[0] = '\\';
-      hex[1] = 'x';
-      hex[2] = hexDigit(c / 16);
-      hex[3] = hexDigit(c % 16);
-      file.write(hex[0..4] as str);
+    match s[i] {
+      '\n' => file.write("\\n"),
+      32...127 => file.write(s[i..i + 1]),
+      _ => {
+        let hex: [4]u8;
+        hex[0] = '\\';
+        hex[1] = 'x';
+        hex[2] = hexDigit(c / 16);
+        hex[3] = hexDigit(c % 16);
+        file.write(hex[0..4] as str);
+      },
     }
     i++;
   }

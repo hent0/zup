@@ -4,8 +4,8 @@ const compiler = import("compiler.zup");
 const version = "0.0.1";
 
 fn parseArgs(args: []str): compiler.CompilerOpts {
-  let fs = std.flag.FlagSet.init();
-  fs.addStr("o", "", "output path");
+  let fs = std.flag.FlagSet.init()
+    .addStr("o", "", "output path");
   fs.addBool("tokenize", false, "output only tokens");
   fs.addBool("ir", false, "output only LLVM IR");
   fs.addBool("ast", false, "dump ast");

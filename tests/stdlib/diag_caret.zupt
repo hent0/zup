@@ -1,0 +1,35 @@
+--TEST--
+stage1 diag: accumulates structured diagnostics and renders each with a source line and a caret under the column
+--PREPARE--
+cp stage1/src/diag.zup "${TMPDIR:-/tmp}/zup_diag.zup"
+--FILE--
+const std = import("std");
+const diag = import("zup_diag.zup");
+
+pub fn main(): i32 {
+  const src = "let x = ;\nfoo()\n";
+
+  diag.error(diag.Span{line: 1, col: 9}, .Message("expected an expression"));
+  diag.warn(diag.Span{line: 1, col: 5}, .Message("unused binding 'x'"));
+  diag.error(diag.Span{line: 2, col: 1}, .Undefined("foo"));
+
+  diag.report("t.zup", src);
+  std.io.println("errors={} hadErrors={}", diag.errorCount(), diag.hadErrors());
+  return 0;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_diag.zup"
+--EXPECT--
+errors=2 hadErrors=true
+--EXPECTERR--
+t.zup:1:9: error: expected an expression
+    let x = ;
+            ^
+t.zup:1:5: warning: unused binding 'x'
+    let x = ;
+        ^
+t.zup:2:1: error: undefined 'foo'
+    foo()
+    ^
+--EXIT--
+0

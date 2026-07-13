@@ -1,0 +1,16 @@
+--TEST--
+a function parameter shadows a module global of the same name (reads use the parameter, not the global)
+--FILE--
+const std = import("std");
+
+let x: i64 = 100;
+
+fn dbl(x: i64): i64 {
+  return x + x;
+}
+
+pub fn main(): i32 {
+  return dbl(3) as i32;
+}
+--EXIT--
+6

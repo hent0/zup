@@ -1,17 +1,22 @@
 const std = import("std");
 
+pub enum SourceResult {
+  Ok: Source,
+  Err: std.io.IoError,
+}
+
 pub struct Source {
   pub path: str,
   pub src: str,
 
-  pub fn init(path: str, arena: std.mem.Arena): ?Source {
+  pub fn init(path: str, arena: std.mem.Arena): SourceResult {
     // TODO: Add reading from stdin
     std.assert(path != "-", "reading from stdin not implemented");
 
     let file: std.io.File = std.io.File{fd: -1};
     match std.io.open(path, .Read) {
       .Ok(f) => { file = f; },
-      .Err(e) => { return null; },
+      .Err(e) => { return .Err(e); },
     };
     defer file.close();
 
@@ -35,9 +40,9 @@ pub struct Source {
       };
     }
 
-    return {
+    return .Ok(Source{
       path: path,
       src: buf[0..total] as str,
-    };
+    });
   }
 }

@@ -399,7 +399,14 @@ static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
       continue;
     }
 
-    if (!is_const_init(member->global.init)) {
+    if (member->global.init == NULL) {
+      if (member->global.type.kind == TYPE_UNKNOWN) {
+        diag_error(sema->src, member->line, member->col,
+                   "global '%s' without an initializer needs a type annotation",
+                   member->name);
+        sema->had_error = true;
+      }
+    } else if (!is_const_init(member->global.init)) {
       const expr_t *expr = member->global.init;
       diag_error(sema->src, expr ? expr->line : member->line,
                  expr ? expr->col : member->col,

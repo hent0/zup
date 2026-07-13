@@ -1,6 +1,8 @@
 const std = import("std");
 const lexer = import("lexer.zup");
+const parser = import("parser.zup");
 const source = import("source.zup");
+const diag = import("diag.zup");
 
 pub struct Source {
   path: str,
@@ -53,26 +55,42 @@ pub struct Compiler {
   }
 
   pub fn compile(self, opts: CompilerOpts) {
-    match opts.mode {
-      .Tokenize => self.tokenize(source.Source.init(opts.input, self.arena)),
-      _ => {
-        std.io.printerrln("Not implemented!");
-        std.exit(2);
+    match source.Source.init(opts.input, self.arena) {
+      .Ok(src) => {
+        match opts.mode {
+          .Tokenize => self.tokenize(src),
+          .Ast => self.parse(src),
+          _ => {
+            std.io.printerrln("Not implemented!");
+            std.exit(2);
+          },
+        };
+
+        diag.report(src.path, src.src);
+        diag.expectNoErrors();
+      },
+      .Err(e) => {
+        match e {
+          .NotFound(p) => std.io.printerrln("error: cannot open '{}': no such file", p),
+          .Permission(p) => std.io.printerrln("error: cannot open '{}': permission denied", p),
+          .Errno(c) => std.io.printerrln("error: cannot open '{}': errno {}", opts.input, c),
+        };
+        std.exit(1);
       },
     };
   }
 
-  fn tokenize(self, src: ?Source) {
-    if src == null {
-      std.io.printerrln("failed to read file");
-      std.exit(2);
-    }
-
-    const l = lexer.Lexer.init(src!, self.arena);
+  fn tokenize(self, src: source.Source) {
+    const l = lexer.Lexer.init(src, self.arena);
     let tok = l.nextToken();
     while tok.kind != .Eof {
       tok.debug();
       tok = l.nextToken();
     }
+  }
+
+  fn parse(self, src: source.Source) {
+    let p = parser.Parser.init(src, self.arena);
+    p.parse();
   }
 }

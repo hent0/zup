@@ -1,0 +1,21 @@
+--TEST--
+module-level array and struct globals without an initializer are zero-initialized and mutable
+--FILE--
+const std = import("std");
+
+struct Counter {
+  hits: i64,
+  name: str,
+}
+
+let table: [4]i64;
+let c: Counter;
+
+pub fn main(): i32 {
+  table[0] = 10;
+  table[3] = 5;
+  c.hits = table[0] + table[3];
+  return c.hits as i32;
+}
+--EXIT--
+15

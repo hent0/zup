@@ -80,6 +80,7 @@ typedef struct {
   ctx_local_t *locals;
   ctx_local_t *locals_tail;
   ctx_reg_name_t *fn_regs;
+  ctx_reg_name_t *fn_params;
   ctx_struct_t *structs;
   ctx_fn_t *fns;
   ctx_extern_t *externs;
@@ -180,6 +181,22 @@ static void record_fn_reg(ctx_t *ctx, const char *ref) {
 static bool fn_reg_taken(ctx_t *ctx, const char *ref) {
   for (ctx_reg_name_t *node = ctx->fn_regs; node != NULL; node = node->next) {
     if (strcmp(node->ref, ref) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void record_fn_param(ctx_t *ctx, const char *name) {
+  ctx_reg_name_t *node = arena_alloc(ctx->arena, sizeof(ctx_reg_name_t));
+  node->ref = name;
+  node->next = ctx->fn_params;
+  ctx->fn_params = node;
+}
+
+static bool is_fn_param(ctx_t *ctx, const char *name) {
+  for (ctx_reg_name_t *node = ctx->fn_params; node != NULL; node = node->next) {
+    if (strcmp(node->ref, name) == 0) {
       return true;
     }
   }
@@ -960,6 +977,9 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
     if (local != NULL) {
       return local->ptr;
     }
+    if (is_fn_param(ctx, expr->id.name)) {
+      return arena_format(ctx->arena, "%%%s", expr->id.name);
+    }
     ctx_global_t *global = find_global(ctx, expr->id.name);
     if (global != NULL) {
       return arena_format(ctx->arena, "@%s", global->name);
@@ -1276,6 +1296,13 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
       return (value_t){
           .type = local->type,
           .ref = arena_format(ctx->arena, "%%%u", reg),
+      };
+    }
+
+    if (is_fn_param(ctx, expr->id.name)) {
+      return (value_t){
+          .type = expr->type,
+          .ref = arena_format(ctx->arena, "%%%s", expr->id.name),
       };
     }
 
@@ -3055,6 +3082,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
   ctx->fn_regs = NULL;
+  ctx->fn_params = NULL;
   ctx->defers = NULL;
   ctx->defer_count = 0;
   ctx->loop_defer_base = 0;
@@ -3068,6 +3096,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
     record_fn_reg(ctx, arena_format(ctx->arena, "%%%s", param->name));
+    record_fn_param(ctx, param->name);
   }
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
@@ -3137,6 +3166,7 @@ static int emit_entry_point(ctx_t *ctx, decl_t *decl) {
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
   ctx->fn_regs = NULL;
+  ctx->fn_params = NULL;
   ctx->defers = NULL;
   ctx->defer_count = 0;
   ctx->loop_defer_base = 0;
@@ -3255,6 +3285,13 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
     return 0;
   }
   case DECL_GLOBAL: {
+    if (decl->global.init == NULL) {
+      fprintf(ctx->out, "@%s = %s%s %s zeroinitializer\n", decl->name,
+              decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
+              decl->global.mutable ? "global" : "constant",
+              ir_type(ctx, decl->global.type));
+      return 0;
+    }
     if (decl->global.init->kind == EXPR_NULL) {
       fprintf(ctx->out, "@%s = %s%s %s zeroinitializer\n", decl->name,
               decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",

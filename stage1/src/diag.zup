@@ -1,0 +1,151 @@
+const std = import("std");
+
+const MAX: i64 = 256;
+
+pub enum Severity {
+  Error,
+  Warning,
+  Note,
+
+  pub fn toString(self): str {
+    return match self {
+      .Error => "error",
+      .Warning => "warning",
+      .Note => "note",
+    };
+  }
+}
+
+pub struct Span {
+  pub line: u32,
+  pub col: u32,
+}
+
+pub enum DiagKind {
+  Message: str,
+  UnexpectedToken: str,
+  Undefined: str,
+  Expected: str,
+}
+
+pub struct Diagnostic {
+  pub severity: Severity,
+  pub span: Span,
+  pub kind: DiagKind,
+}
+
+let entries: [256]Diagnostic;
+let count: i64 = 0;
+let errors: i64 = 0;
+let dropped: i64 = 0;
+
+pub fn error(span: Span, kind: DiagKind) {
+  add(.Error, span, kind);
+}
+
+pub fn warn(span: Span, kind: DiagKind) {
+  add(.Warning, span, kind);
+}
+
+pub fn note(span: Span, kind: DiagKind) {
+  add(.Note, span, kind);
+}
+
+pub fn hadErrors(): bool {
+  return errors > 0;
+}
+
+pub fn errorCount(): i64 {
+  return errors;
+}
+
+pub fn reset() {
+  count = 0;
+  errors = 0;
+  dropped = 0;
+}
+
+pub fn expectNoErrors(exit_code: i32 = 1) {
+  if hadErrors() {
+    std.exit(exit_code);
+  }
+}
+
+pub fn report(path: str, src: str) {
+  let i: i64 = 0;
+  while i < count {
+    render(path, src, entries[i]);
+    i += 1;
+  }
+
+  if dropped > 0 {
+    std.io.printerrln("... and {} more diagnostic(s) suppressed", dropped);
+  }
+}
+
+fn add(severity: Severity, span: Span, kind: DiagKind) {
+  if severity == .Error {
+    errors += 1;
+  }
+
+  if count >= MAX {
+    dropped += 1;
+    return;
+  }
+
+  let d = Diagnostic{
+    severity: severity,
+    span: span,
+    kind: kind,
+  };
+
+  entries[count] = d;
+  count += 1;
+}
+
+fn render(path: str, src: str, d: Diagnostic) {
+  std.io.printerr("{}:{}:{}: {}: ", path, d.span.line, d.span.col, d.severity.toString());
+  match d.kind {
+    .Message(m) => std.io.printerrln("{}", m),
+    .UnexpectedToken(t) => std.io.printerrln("unexpected token {}", t),
+    .Undefined(n) => std.io.printerrln("undefined '{}'", n),
+    .Expected(w) => std.io.printerrln("expected {}", w),
+  };
+  caret(src, d.span);
+}
+
+fn caret(src: str, span: Span) {
+  let line: u32 = 1;
+  let start: i64 = 0;
+  let i: i64 = 0;
+  while i < src.len && line < span.line {
+    if src[i] == '\n' {
+      line += 1;
+      start = i + 1;
+    }
+    i += 1;
+  }
+
+  let end: i64 = start;
+  while end < src.len && src[end] != '\n' {
+    end += 1;
+  }
+
+  std.io.printerrln("    {}", src[start..end]);
+
+  let buf: [256]u8;
+  let n: i64 = 0;
+  while n < 4 {
+    buf[n] = ' ';
+    n += 1;
+  }
+  let c: u32 = 1;
+  while c < span.col && n < 255 {
+    buf[n] = ' ';
+    n += 1;
+    c += 1;
+  }
+  buf[n] = '^';
+  n += 1;
+  std.io.printerrln("{}", buf[0..n] as str);
+}
