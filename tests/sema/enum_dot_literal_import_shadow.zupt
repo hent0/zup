@@ -15,13 +15,13 @@ pub fn main(): i32 {
   }
 
   const f = std.io.open("/nonexistent/zup_enum_shadow_test", .Read);
-  if f.isValid() {
+  if f != null {
     return 2;
   }
 
   let m: std.io.Mode = .Read;
   const g = std.io.open("/nonexistent/zup_enum_shadow_test", m);
-  if g.isValid() {
+  if g != null {
     return 3;
   }
 

@@ -6,7 +6,11 @@ printf 'first line\nsecond\n' > /tmp/zup_readline.txt
 const std = import("std");
 
 pub fn main(): i32 {
-  let f: std.io.File = std.io.open("/tmp/zup_readline.txt", .Read);
+  const opened = std.io.open("/tmp/zup_readline.txt", .Read);
+  if opened == null {
+    return -1;
+  }
+  let f: std.io.File = opened!;
   let buf: [32]u8;
   let line: str = f.readln(buf) ?? "";
   f.close();

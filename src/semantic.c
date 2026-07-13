@@ -187,7 +187,7 @@ static bool types_equal(type_t a, type_t b) {
     return enum_name_eq(a.name, b.name);
   }
   if (a.kind == TYPE_STRUCT) {
-    return a.name != NULL && b.name != NULL && strcmp(a.name, b.name) == 0;
+    return enum_name_eq(a.name, b.name);
   }
   if (a.kind == TYPE_ARRAY) {
     return a.array_length == b.array_length &&
@@ -220,8 +220,7 @@ static bool assignable(type_t to, exprty_t from) {
     return enum_name_eq(to.name, from.name);
   }
   if (to.kind == TYPE_STRUCT) {
-    return from.name != NULL && to.name != NULL &&
-           strcmp(to.name, from.name) == 0;
+    return enum_name_eq(to.name, from.name);
   }
   if (to.kind == TYPE_ARRAY) {
     return from.element != NULL && to.array_length == from.array_length &&
@@ -451,6 +450,17 @@ static type_t qualify_param_type(sema_t *sema, type_t t, const char *stem) {
   return t;
 }
 
+static exprty_t qualify_result(sema_t *sema, exprty_t result,
+                               const char *stem) {
+  if (stem == NULL || !result.ok) {
+    return result;
+  }
+  type_t t = qualify_param_type(sema, exprty_type(result), stem);
+  result.name = t.name;
+  result.element = t.element;
+  return result;
+}
+
 static exprty_t check_fn_call(sema_t *sema, expr_t *call, decl_t *fn,
                               const char *name, const char *stem) {
   bool boxed_variadic = fn->fn.variadic && !fn->fn.is_extern;
@@ -553,14 +563,9 @@ static exprty_t check_module_call(sema_t *sema, expr_t *call, module_t *mod,
     return (exprty_t){.kind = TYPE_VOID, .ok = false};
   }
 
-  exprty_t result = check_fn_call(sema, call, fn, fn_name,
-                                  module_stem(mod->path, sema->arena));
-  if (result.kind == TYPE_STRUCT && result.name != NULL &&
-      strchr(result.name, '.') == NULL) {
-    result.name = arena_format(
-        sema->arena, "%s.%s", module_stem(mod->path, sema->arena), result.name);
-  }
-  return result;
+  const char *stem = module_stem(mod->path, sema->arena);
+  exprty_t result = check_fn_call(sema, call, fn, fn_name, stem);
+  return qualify_result(sema, result, stem);
 }
 
 static unsigned long long type_int_max(TypeKind k) {
@@ -712,11 +717,7 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
                  .name = (char *)qualified};
     call->call.type_scoped = true;
     exprty_t r = check_fn_call(sema, call, fn, field->field.name, ts_stem);
-    if (ts_stem != NULL && r.kind == TYPE_STRUCT && r.name != NULL &&
-        strchr(r.name, '.') == NULL) {
-      r.name = arena_format(sema->arena, "%s.%s", ts_stem, r.name);
-    }
-    return r;
+    return qualify_result(sema, r, ts_stem);
   }
 
   if (field->field.base->kind == EXPR_FIELD &&
@@ -831,8 +832,8 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
       if (at.ok && !assignable(param->type, at)) {
         diag_error(sema->src, call->line, call->col,
                    "cannot pass %s as argument '%s' of '%s' (expected %s)",
-                   type_to_str((type_t){.kind = at.kind, .name = at.name}),
-                   param->name, field->field.name, type_to_str(param->type));
+                   type_to_str(exprty_type(at)), param->name, field->field.name,
+                   type_to_str(param->type));
         sema->had_error = true;
       }
       param = param->next;
@@ -844,12 +845,12 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
                           .element = method->fn.return_type.element,
                           .array_length = method->fn.return_type.array_length,
                           .ok = true};
-  if ((r.kind == TYPE_STRUCT || r.kind == TYPE_ENUM) && r.name != NULL &&
-      strchr(r.name, '.') == NULL && recv.name != NULL) {
+  if (recv.name != NULL) {
     const char *dot = strrchr(recv.name, '.');
     if (dot != NULL) {
-      r.name = arena_format(sema->arena, "%.*s.%s", (int)(dot - recv.name),
-                            recv.name, r.name);
+      const char *stem =
+          arena_format(sema->arena, "%.*s", (int)(dot - recv.name), recv.name);
+      r = qualify_result(sema, r, stem);
     }
   }
   return r;
@@ -948,6 +949,60 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
                         .element = lhs.element->element,
                         .array_length = lhs.element->array_length,
                         .ok = ok};
+    break;
+  }
+  case EXPR_UNWRAP: {
+    exprty_t operand =
+        check_expr(sema, expr->unwrap.operand, type_from_kind(TYPE_UNKNOWN));
+    if (!operand.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (operand.kind != TYPE_OPTIONAL || operand.element == NULL) {
+      diag_error(sema->src, expr->unwrap.operand->line,
+                 expr->unwrap.operand->col,
+                 "operand of '!' must be an optional, got %s",
+                 type_to_str(exprty_type(operand)));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    result = (exprty_t){.kind = operand.element->kind,
+                        .name = operand.element->name,
+                        .element = operand.element->element,
+                        .array_length = operand.element->array_length,
+                        .ok = true};
+    break;
+  }
+  case EXPR_PROPAGATE: {
+    exprty_t operand = check_expr(sema, expr->propagate.operand,
+                                  type_from_kind(TYPE_UNKNOWN));
+    if (!operand.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (operand.kind != TYPE_OPTIONAL || operand.element == NULL) {
+      diag_error(sema->src, expr->propagate.operand->line,
+                 expr->propagate.operand->col,
+                 "operand of '?' must be an optional, got %s",
+                 type_to_str(exprty_type(operand)));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (sema->current_fn == NULL ||
+        sema->current_fn->fn.return_type.kind != TYPE_OPTIONAL) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "'?' can only be used in a function returning an optional");
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    result = (exprty_t){.kind = operand.element->kind,
+                        .name = operand.element->name,
+                        .element = operand.element->element,
+                        .array_length = operand.element->array_length,
+                        .ok = true};
     break;
   }
   case EXPR_STRING:
@@ -1097,7 +1152,8 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_BOOL, .ok = true};
     } else if (!type_is_numeric(lhs.kind) || lhs.kind != rhs.kind ||
                (type_is_float(lhs.kind) &&
-                !binop_is_arithmetic(expr->binary.op))) {
+                !binop_is_arithmetic(expr->binary.op) &&
+                !binop_is_comparison(expr->binary.op))) {
       diag_error(sema->src, expr->line, expr->col,
                  "cannot apply '%s' to %s and %s",
                  binop_to_str(expr->binary.op), type_kind_to_str(lhs.kind),
@@ -1134,8 +1190,12 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
   }
   case EXPR_STRUCT_LITERAL: {
     if (expr->struct_literal.type_name == NULL) {
-      if (expected.kind == TYPE_STRUCT && expected.name != NULL) {
-        expr->struct_literal.type_name = expected.name;
+      type_t want = expected;
+      if (want.kind == TYPE_OPTIONAL && want.element != NULL) {
+        want = *want.element;
+      }
+      if (want.kind == TYPE_STRUCT && want.name != NULL) {
+        expr->struct_literal.type_name = want.name;
       } else {
         diag_error(sema->src, expr->line, expr->col,
                    "cannot infer struct type for literal");
@@ -1728,7 +1788,17 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         continue;
       }
 
-      type_t hint = have_rtype ? exprty_type(rtype) : expected;
+      type_t hint = expected;
+      if (expected.kind == TYPE_UNKNOWN && have_rtype) {
+        hint = exprty_type(rtype);
+      }
+      if (arm->value->kind == EXPR_NULL && hint.kind != TYPE_OPTIONAL &&
+          hint.kind != TYPE_CSTR && have_rtype && rtype.kind != TYPE_OPTIONAL &&
+          rtype.kind != TYPE_VOID) {
+        type_t *element = arena_alloc(sema->arena, sizeof(type_t));
+        *element = exprty_type(rtype);
+        hint = (type_t){.kind = TYPE_OPTIONAL, .element = element};
+      }
       exprty_t value = check_expr(sema, arm->value, hint);
       if (sema->scope != NULL) {
         sema->scope->count = bind_saved;
@@ -1739,12 +1809,18 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
         rtype = value;
         have_rtype = true;
       } else if (!assignable(exprty_type(rtype), value)) {
-        diag_error(sema->src, arm->value->line, arm->value->col,
-                   "match arm has type %s, expected %s",
-                   type_to_str(exprty_type(value)),
-                   type_to_str(exprty_type(rtype)));
-        sema->had_error = true;
-        ok = false;
+        if (value.kind == TYPE_OPTIONAL && rtype.kind != TYPE_OPTIONAL &&
+            value.element != NULL &&
+            types_equal(*value.element, exprty_type(rtype))) {
+          rtype = value;
+        } else {
+          diag_error(sema->src, arm->value->line, arm->value->col,
+                     "match arm has type %s, expected %s",
+                     type_to_str(exprty_type(value)),
+                     type_to_str(exprty_type(rtype)));
+          sema->had_error = true;
+          ok = false;
+        }
       }
     }
 

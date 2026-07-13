@@ -6,7 +6,11 @@ printf 'exactly twenty bytes' > /tmp/zup_size.txt
 const std = import("std");
 
 pub fn main(): i32 {
-  const f = std.io.open("/tmp/zup_size.txt", .Read);
+  const opened = std.io.open("/tmp/zup_size.txt", .Read);
+  if opened == null {
+    return -1;
+  }
+  const f = opened!;
   defer f.close();
 
   const size = f.size();

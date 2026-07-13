@@ -63,6 +63,12 @@ struct ctx_defer {
   ctx_defer_t *next;
 };
 
+typedef struct ctx_reg_name ctx_reg_name_t;
+struct ctx_reg_name {
+  const char *ref;
+  ctx_reg_name_t *next;
+};
+
 typedef struct {
   FILE *out;
   arena_t *arena;
@@ -73,6 +79,7 @@ typedef struct {
   int strings_count;
   ctx_local_t *locals;
   ctx_local_t *locals_tail;
+  ctx_reg_name_t *fn_regs;
   ctx_struct_t *structs;
   ctx_fn_t *fns;
   ctx_extern_t *externs;
@@ -84,6 +91,9 @@ typedef struct {
   unsigned int label;
   unsigned int loop_label;
   bool uses_str_eq;
+  bool uses_memcpy;
+  bool uses_memset;
+  bool uses_abort;
   type_t fn_ret;
   const char *fn_name;
 
@@ -153,13 +163,37 @@ static void add_local(ctx_t *ctx, const char *name, type_t type,
   local->name = name;
   local->type = type;
   local->ptr = ptr;
-  local->next = NULL;
+  local->next = ctx->locals;
+  ctx->locals = local;
   if (ctx->locals_tail == NULL) {
-    ctx->locals = local;
-  } else {
-    ctx->locals_tail->next = local;
+    ctx->locals_tail = local;
   }
-  ctx->locals_tail = local;
+}
+
+static void record_fn_reg(ctx_t *ctx, const char *ref) {
+  ctx_reg_name_t *node = arena_alloc(ctx->arena, sizeof(ctx_reg_name_t));
+  node->ref = ref;
+  node->next = ctx->fn_regs;
+  ctx->fn_regs = node;
+}
+
+static bool fn_reg_taken(ctx_t *ctx, const char *ref) {
+  for (ctx_reg_name_t *node = ctx->fn_regs; node != NULL; node = node->next) {
+    if (strcmp(node->ref, ref) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static const char *claim_fn_reg(ctx_t *ctx, const char *name) {
+  const char *ref = arena_format(ctx->arena, "%%%s", name);
+  unsigned int n = 1;
+  while (fn_reg_taken(ctx, ref)) {
+    ref = arena_format(ctx->arena, "%%%s.%u", name, n++);
+  }
+  record_fn_reg(ctx, ref);
+  return ref;
 }
 
 static bool is_aggregate(TypeKind kind) {
@@ -698,6 +732,10 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
       return 1;
     }
     return collect_expr(ctx, expr->coalesce.rhs);
+  case EXPR_UNWRAP:
+    return collect_expr(ctx, expr->unwrap.operand);
+  case EXPR_PROPAGATE:
+    return collect_expr(ctx, expr->propagate.operand);
   case EXPR_TERNARY:
     if (collect_expr(ctx, expr->ternary.cond) != 0 ||
         collect_expr(ctx, expr->ternary.then) != 0) {
@@ -799,7 +837,7 @@ static int collect_decl(ctx_t *ctx, decl_t *decl) {
   }
   case DECL_GLOBAL:
     add_global(ctx, decl->name, decl->global.type);
-    return 0;
+    return collect_expr(ctx, decl->global.init);
   case DECL_STRUCT: {
     ctx_struct_t *s = arena_alloc(ctx->arena, sizeof(ctx_struct_t));
     s->name = mangle(ctx, decl->name);
@@ -902,6 +940,7 @@ static value_t emit_logical(ctx_t *ctx, expr_t *expr);
 static const char *ir_type(ctx_t *ctx, type_t type);
 static value_t emit_value(ctx_t *ctx, expr_t *expr);
 static value_t emit_match(ctx_t *ctx, expr_t *expr, const char *dest);
+static void emit_defers(ctx_t *ctx, size_t base);
 
 static const char *widen_index(ctx_t *ctx, value_t v) {
   if (type_bits(v.type.kind) >= 64) {
@@ -974,6 +1013,63 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
             ir_type(ctx, expr->index.base->type), base,
             type_kind_to_ir(idx.type.kind), idx.ref);
     return arena_format(ctx->arena, "%%%u", reg);
+  }
+  case EXPR_UNWRAP: {
+    expr_t *inner = expr->unwrap.operand;
+    const char *addr = emit_addr(ctx, inner);
+    if (addr == NULL) {
+      addr = emit_value(ctx, inner).ref;
+    }
+    const char *opt_ir = ir_type(ctx, inner->type);
+    unsigned int id = ctx->label++;
+    unsigned int f = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", f,
+            opt_ir, addr);
+    unsigned int flag = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, f);
+    fprintf(ctx->out,
+            "  br i1 %%%u, label %%unwrap.some.%u, label %%unwrap.none.%u\n",
+            flag, id, id);
+    fprintf(ctx->out, "unwrap.none.%u:\n", id);
+    ctx->uses_abort = true;
+    fprintf(ctx->out, "  call void @abort()\n");
+    fprintf(ctx->out, "  unreachable\n");
+    fprintf(ctx->out, "unwrap.some.%u:\n", id);
+    unsigned int pp = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n", pp,
+            opt_ir, addr);
+    return arena_format(ctx->arena, "%%%u", pp);
+  }
+  case EXPR_PROPAGATE: {
+    expr_t *inner = expr->propagate.operand;
+    const char *addr = emit_addr(ctx, inner);
+    if (addr == NULL) {
+      addr = emit_value(ctx, inner).ref;
+    }
+    const char *opt_ir = ir_type(ctx, inner->type);
+    unsigned int id = ctx->label++;
+    unsigned int f = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 0\n", f,
+            opt_ir, addr);
+    unsigned int flag = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load i1, ptr %%%u\n", flag, f);
+    fprintf(ctx->out,
+            "  br i1 %%%u, label %%propagate.some.%u, label "
+            "%%propagate.none.%u\n",
+            flag, id, id);
+    fprintf(ctx->out, "propagate.none.%u:\n", id);
+    ctx->uses_memset = true;
+    fprintf(ctx->out,
+            "  call void @llvm.memset.p0.i64(ptr %%sret, i8 0, i64 ptrtoint "
+            "(ptr getelementptr (%s, ptr null, i32 1) to i64), i1 false)\n",
+            ir_type(ctx, ctx->fn_ret));
+    emit_defers(ctx, 0);
+    fprintf(ctx->out, "  ret void\n");
+    fprintf(ctx->out, "propagate.some.%u:\n", id);
+    unsigned int pp = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %s, i32 0, i32 1\n", pp,
+            opt_ir, addr);
+    return arena_format(ctx->arena, "%%%u", pp);
   }
   default:
     return NULL;
@@ -1154,7 +1250,6 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
           .ref = arena_format(ctx->arena, "0x%016llX", bits),
       };
     }
-    // LLVM IR only accepts decimal integer constants (0x... means float)
     if (expr->number.value[0] == '0' &&
         (expr->number.value[1] == 'x' || expr->number.value[1] == 'X')) {
       return (value_t){
@@ -1214,6 +1309,18 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
             ir_type(ctx, expr->type), slot);
     return (value_t){.type = expr->type,
                      .ref = arena_format(ctx->arena, "%%%u", slot)};
+  }
+  case EXPR_UNWRAP:
+  case EXPR_PROPAGATE: {
+    const char *addr = emit_addr(ctx, expr);
+    if (is_agg(ctx, expr->type)) {
+      return (value_t){.type = expr->type, .ref = addr};
+    }
+    unsigned int reg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg,
+            ir_type(ctx, expr->type), addr);
+    return (value_t){.type = expr->type,
+                     .ref = arena_format(ctx->arena, "%%%u", reg)};
   }
   case EXPR_COALESCE: {
     expr_t *lhs = expr->coalesce.lhs;
@@ -2138,6 +2245,14 @@ static void emit_struct_into(ctx_t *ctx, const char *dest, expr_t *expr) {
   if (src == NULL) {
     src = emit_value(ctx, expr).ref;
   }
+  if (expr->type.kind == TYPE_STRUCT || expr->type.kind == TYPE_ARRAY) {
+    ctx->uses_memcpy = true;
+    fprintf(ctx->out,
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %s, ptr %s, i64 ptrtoint "
+            "(ptr getelementptr (%s, ptr null, i32 1) to i64), i1 false)\n",
+            dest, src, ir_type(ctx, expr->type));
+    return;
+  }
   unsigned int reg = ctx->reg++;
   fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", reg, ir_type(ctx, expr->type),
           src);
@@ -2522,19 +2637,29 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
       }
       break;
     case STMT_BINDING: {
-      const char *ptr = arena_format(ctx->arena, "%%%s", stmt->binding.name);
+      const char *ptr = claim_fn_reg(ctx, stmt->binding.name);
       fprintf(ctx->out, "  %s = alloca %s\n", ptr,
               ir_type(ctx, stmt->binding.type));
       add_local(ctx, stmt->binding.name, stmt->binding.type, ptr);
 
       expr_t *init = stmt->binding.init;
       if (init == NULL) {
-        fprintf(ctx->out, "  store %s %s, ptr %s\n",
-                ir_type(ctx, stmt->binding.type),
-                is_agg(ctx, stmt->binding.type)
-                    ? "zeroinitializer"
-                    : zero_value(stmt->binding.type.kind),
-                ptr);
+        if (stmt->binding.type.kind == TYPE_STRUCT ||
+            stmt->binding.type.kind == TYPE_ARRAY) {
+          ctx->uses_memset = true;
+          fprintf(ctx->out,
+                  "  call void @llvm.memset.p0.i64(ptr %s, i8 0, i64 ptrtoint "
+                  "(ptr getelementptr (%s, ptr null, i32 1) to i64), i1 "
+                  "false)\n",
+                  ptr, ir_type(ctx, stmt->binding.type));
+        } else {
+          fprintf(ctx->out, "  store %s %s, ptr %s\n",
+                  ir_type(ctx, stmt->binding.type),
+                  is_agg(ctx, stmt->binding.type)
+                      ? "zeroinitializer"
+                      : zero_value(stmt->binding.type.kind),
+                  ptr);
+        }
       } else if (is_agg(ctx, stmt->binding.type)) {
         emit_aggregate_into(ctx, ptr, stmt->binding.type, init);
       } else {
@@ -2676,7 +2801,7 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
 
   const char *type = type_kind_to_ir(stmt->for_loop.start->type.kind);
-  const char *slot = arena_format(ctx->arena, "%%%s", stmt->for_loop.var);
+  const char *slot = claim_fn_reg(ctx, stmt->for_loop.var);
   fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
   value_t start = emit_value(ctx, stmt->for_loop.start);
   fprintf(ctx->out, "  store %s %s, ptr %s\n", type, start.ref, slot);
@@ -2739,7 +2864,7 @@ static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
     base = emit_addr(ctx, iter);
   }
 
-  const char *xslot = arena_format(ctx->arena, "%%%s", stmt->for_loop.var);
+  const char *xslot = claim_fn_reg(ctx, stmt->for_loop.var);
   fprintf(ctx->out, "  %s = alloca %s\n", xslot, elem_ir);
   add_local(ctx, stmt->for_loop.var, elem, xslot);
 
@@ -2929,6 +3054,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->loop_label = 0;
   ctx->locals = NULL;
   ctx->locals_tail = NULL;
+  ctx->fn_regs = NULL;
   ctx->defers = NULL;
   ctx->defer_count = 0;
   ctx->loop_defer_base = 0;
@@ -2936,6 +3062,13 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->fn_name = name;
 
   bool sret = is_agg(ctx, decl->fn.return_type);
+  if (sret) {
+    record_fn_reg(ctx, "%sret");
+  }
+  for (const param_t *param = decl->fn.params; param != NULL;
+       param = param->next) {
+    record_fn_reg(ctx, arena_format(ctx->arena, "%%%s", param->name));
+  }
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
           sret ? "void" : ir_type(ctx, decl->fn.return_type),
@@ -2974,6 +3107,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
       continue;
     }
     const char *slot = arena_format(ctx->arena, "%%%s.addr", param->name);
+    record_fn_reg(ctx, slot);
     const char *type = type_kind_to_ir(param->type.kind);
     fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
     fprintf(ctx->out, "  store %s %%%s, ptr %s\n", type, param->name, slot);
@@ -3000,13 +3134,26 @@ static int emit_entry_point(ctx_t *ctx, decl_t *decl) {
 
   const char *args_name = decl->fn.params->name;
 
+  ctx->locals = NULL;
+  ctx->locals_tail = NULL;
+  ctx->fn_regs = NULL;
+  ctx->defers = NULL;
+  ctx->defer_count = 0;
+  ctx->loop_defer_base = 0;
+  ctx->fn_ret = decl->fn.return_type;
+  ctx->fn_name = decl->name;
+  record_fn_reg(ctx, "%argc");
+  record_fn_reg(ctx, "%argv");
+  const char *args_slot = claim_fn_reg(ctx, args_name);
+  add_local(ctx, args_name, decl->fn.params->type, args_slot);
+
   if (find_fn(ctx, "strlen") == NULL) {
     fprintf(ctx->out, "declare i64 @strlen(ptr)\n");
   }
   fprintf(ctx->out, "define i32 @main(i32 %%argc, ptr %%argv) {\n");
 
   fprintf(ctx->out, "entry:\n");
-  fprintf(ctx->out, "  %%%s = alloca { ptr, i64 }\n", args_name);
+  fprintf(ctx->out, "  %s = alloca { ptr, i64 }\n", args_slot);
   unsigned int argc = ctx->reg++;
   fprintf(ctx->out, "  %%%u = sext i32 %%argc to i64\n", argc);
   unsigned int strs = ctx->reg++;
@@ -3057,13 +3204,13 @@ static int emit_entry_point(ctx_t *ctx, decl_t *decl) {
 
   unsigned int args_ptr = ctx->reg++;
   fprintf(ctx->out,
-          "  %%%u = getelementptr { ptr, i64 }, ptr %%%s, i32 0, i32 0\n",
-          args_ptr, args_name);
+          "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 0\n",
+          args_ptr, args_slot);
   fprintf(ctx->out, "  store ptr %%%u, ptr %%%u\n", strs, args_ptr);
   unsigned int args_len = ctx->reg++;
   fprintf(ctx->out,
-          "  %%%u = getelementptr { ptr, i64 }, ptr %%%s, i32 0, i32 1\n",
-          args_len, args_name);
+          "  %%%u = getelementptr { ptr, i64 }, ptr %s, i32 0, i32 1\n",
+          args_len, args_slot);
   fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", argc, args_len);
 
   if (emit_block(ctx, decl->fn.body, decl->fn.return_type, decl->name) != 0) {
@@ -3113,6 +3260,16 @@ static int emit_decl(ctx_t *ctx, decl_t *decl) {
               decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
               decl->global.mutable ? "global" : "constant",
               ir_type(ctx, decl->global.type));
+      return 0;
+    }
+    if (decl->global.init->kind == EXPR_STRING &&
+        decl->global.type.kind == TYPE_STR) {
+      fprintf(ctx->out, "@%s = %s%s { ptr, i64 } { ptr @.str.%d, i64 %zu }\n",
+              decl->name,
+              decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
+              decl->global.mutable ? "global" : "constant",
+              string_index(ctx, decl->global.init),
+              decl->global.init->string.length);
       return 0;
     }
     value_t value = emit_value(ctx, decl->global.init);
@@ -3214,6 +3371,17 @@ int codegen_emit(FILE *out, compilation_t *compilation, arena_t *arena) {
     if (emit_decl(&ctx, module->unit->root) != 0) {
       return 1;
     }
+  }
+
+  if (ctx.uses_memcpy) {
+    fprintf(ctx.out,
+            "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n");
+  }
+  if (ctx.uses_memset) {
+    fprintf(ctx.out, "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)\n");
+  }
+  if (ctx.uses_abort && find_fn(&ctx, "abort") == NULL) {
+    fprintf(ctx.out, "declare void @abort()\n");
   }
 
   return 0;

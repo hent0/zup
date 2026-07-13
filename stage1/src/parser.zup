@@ -1,0 +1,5 @@
+const lexer = import("lexer.zup");
+
+pub struct Parser {
+  lexer: lexer.Lexer,
+}

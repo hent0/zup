@@ -1,0 +1,38 @@
+--TEST--
+postfix '?' unwraps an optional or early-returns null from the enclosing optional-returning function; pending defers still run on the null path
+--FILE--
+const std = import("std");
+
+fn half(n: i64): ?i64 {
+  if n % 2 == 0 {
+    return n / 2;
+  }
+  return null;
+}
+
+fn quarter(n: i64): ?i64 {
+  const h = half(n)?;
+  return half(h)?;
+}
+
+fn withDefer(n: i64): ?i64 {
+  defer std.io.println("cleanup");
+  const v = half(n)?;
+  return v;
+}
+
+pub fn main(): i32 {
+  std.io.println("q8={}", quarter(8) ?? -1);
+  std.io.println("q6={}", quarter(6) ?? -1);
+  std.io.println("q5={}", quarter(5) ?? -1);
+  std.io.println("d3={}", withDefer(3) ?? -1);
+  return 0;
+}
+--EXPECT--
+q8=2
+q6=-1
+q5=-1
+cleanup
+d3=-1
+--EXIT--
+0

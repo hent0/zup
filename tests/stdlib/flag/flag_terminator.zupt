@@ -1,5 +1,5 @@
 --TEST--
-flag: "--" ends parsing and is consumed; a bare "-" and the first non-flag stop parsing as positionals
+flag: "--" ends parsing and is consumed so later flags become positionals; a bare "-" is a positional but flags after it still parse
 --FILE--
 const std = import("std");
 
@@ -21,6 +21,6 @@ pub fn main(): i32 {
 }
 --EXPECT--
 s=x rest.len=2 rest0=-s=y rest1=z
-s=def rest.len=2 rest0=-
+s=y rest.len=1 rest0=-
 --EXIT--
 0

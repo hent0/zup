@@ -1,5 +1,6 @@
 pub const std = import("std");
 pub const token = import("token.zup");
+const source = import("source.zup");
 
 pub struct Lexer {
   src: str,
@@ -9,13 +10,13 @@ pub struct Lexer {
   current: u8,
   arena: std.mem.Arena,
 
-  pub fn init(src: str, arena: std.mem.Arena): Lexer {
+  pub fn init(src: source.Source, arena: std.mem.Arena): Lexer {
     return {
-      src: src,
+      src: src.src,
       line: 1,
       col: 1,
       cursor: 0,
-      current: src[0],
+      current: src.src[0],
       arena: arena,
     };
   }

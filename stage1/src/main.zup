@@ -1,49 +1,68 @@
 const std = import("std");
-const lexer = import("lexer.zup");
+const compiler = import("compiler.zup");
 
-enum Mode {
-  Compile,
-  Tokenize,
-  Ir,
-  Ast,
+const version = "0.0.1";
+
+fn parseArgs(args: []str): compiler.CompilerOpts {
+  let fs = std.flag.FlagSet.init();
+  fs.addStr("o", "", "output path");
+  fs.addBool("tokenize", false, "output only tokens");
+  fs.addBool("ir", false, "output only LLVM IR");
+  fs.addBool("ast", false, "dump ast");
+  fs.addBool("keep-ir", false, "keep generated LLVM IR after compile");
+  fs.addBool("static", false, "compile static");
+  fs.addStrList("l", "link against library (passed to clang as -l<lib>)");
+  fs.addStrList("L", "add library search path");
+  fs.addBool("version", false, "print version");
+  fs.parse(args);
+
+  if fs.getBool("version") {
+    std.io.println("zup {}", version);
+    std.exit(0);
+  }
+
+  const rest = fs.args();
+  if rest.len < 1 {
+    std.io.printerrln("error: no input provided");
+    fs.usage();
+    std.exit(1);
+  }
+
+  let mode: compiler.Mode = .Compile;
+  if fs.getBool("tokenize") {
+    mode = .Tokenize;
+  }
+  if fs.getBool("ir") {
+    mode = .Ir;
+  }
+  if fs.getBool("ast") {
+    mode = .Ast;
+  }
+
+  let output: ?str = null;
+  if fs.getStr("o").len > 0 {
+    output = fs.getStr("o");
+  }
+
+  return compiler.CompilerOpts.init(
+    rest[0],
+    output,
+    mode,
+    fs.getBool("keep-ir"),
+    fs.getBool("static"),
+    fs.getStrList("l"),
+    fs.getStrList("L")
+  );
 }
 
 pub fn main(args: []str): i32 {
-  if args.len < 2 {
-    std.io.printerrln("error: no input provided");
-    return 1;
-  }
+  const opts = parseArgs(args);
 
   const arena = std.mem.Arena.init();
   defer arena.destroy();
 
-  const file = std.io.open(args[1], .Read);
-  defer file.close();
-
-  if !file.isValid() {
-    std.io.printerrln("error: failed to read file");
-    return 1;
-  }
-
-  const size = file.size();
-  let buf: []u8 = arena.alloc(size);
-  let total: i64 = 0;
-
-  let n: i64 = file.read(buf[total..size]);
-  while n > 0 {
-    total = total + n;
-    n = file.read(buf[total..size]);
-  }
-
-  let src: str = buf[0..total] as str;
-
-  // Tokenize
-  const l = lexer.Lexer.init(src, arena);
-  let tok = l.nextToken();
-  while tok.kind != .Eof {
-    tok.debug();
-    tok = l.nextToken();
-  }
+  const c = compiler.Compiler.init(arena);
+  c.compile(opts);
 
   return 0;
 }

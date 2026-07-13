@@ -1,0 +1,22 @@
+--TEST--
+force-unwrapping a null optional aborts the program (SIGABRT)
+--FILE--
+const std = import("std");
+
+fn maybe(k: i64): ?i64 {
+  if k > 0 {
+    return k;
+  }
+  return null;
+}
+
+pub fn main(): i32 {
+  std.io.println("before");
+  const x = maybe(0)!;
+  std.io.println("after {}", x);
+  return 0;
+}
+--EXPECT--
+before
+--EXIT--
+134

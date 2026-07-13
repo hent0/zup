@@ -112,14 +112,19 @@ pub struct File {
   }
 }
 
-pub fn open(path: str, mode: Mode): File {
+pub fn open(path: str, mode: Mode): ?File {
   let flags: i32 = match mode {
     .Read => 0,
     .Write => 577,
     .Append => 1089,
   };
 
-  return File{fd: sys.open(path.ptr, flags, 438)};
+  const fd = sys.open(path.ptr, flags, 438);
+  if fd <= 0 {
+    return null;
+  }
+
+  return File{fd: fd};
 }
 
 pub fn stdin(): File {

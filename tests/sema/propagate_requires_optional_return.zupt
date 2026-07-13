@@ -1,0 +1,19 @@
+--TEST--
+postfix '?' is rejected in a function whose return type is not an optional
+--FILE--
+fn maybe(): ?i64 {
+  return 1;
+}
+
+fn bad(): i64 {
+  maybe()?;
+  return 0;
+}
+
+pub fn main(): i32 {
+  return bad() as i32;
+}
+--EXPECTERR--
+zup: error: '?' can only be used in a function returning an optional [6:3]
+--EXIT--
+1

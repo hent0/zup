@@ -1,0 +1,29 @@
+--TEST--
+flag: flags and positionals may be interleaved; parsing does not stop at the first non-flag
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  fs.addBool("tokenize", false, "tokens");
+  fs.addStr("o", "", "output");
+
+  const argv: []str = ["prog", "input.zup", "-tokenize", "extra", "-o", "out.ll", "last"];
+  fs.parse(argv);
+
+  const rest = fs.args();
+  std.io.println("tokenize={} o={}", fs.getBool("tokenize"), fs.getStr("o"));
+  std.io.println("rest.len={}", rest.len);
+  for a in rest {
+    std.io.println("pos={}", a);
+  }
+  return 0;
+}
+--EXPECT--
+tokenize=true o=out.ll
+rest.len=3
+pos=input.zup
+pos=extra
+pos=last
+--EXIT--
+0

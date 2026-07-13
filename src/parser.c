@@ -156,10 +156,9 @@ static type_t parse_type(parser_t *parser) {
     while (match(parser, TOKEN_DOT)) {
       token_t member =
           expect(parser, TOKEN_ID, "expected struct name after '.'");
-      type.module = type.module == NULL
-                        ? type.name
-                        : arena_format(parser->arena, "%s.%s", type.module,
-                                       type.name);
+      type.module = type.module == NULL ? type.name
+                                        : arena_format(parser->arena, "%s.%s",
+                                                       type.module, type.name);
       type.name = member.value;
     }
     break;
@@ -464,6 +463,9 @@ static expr_t *parse_postfix(parser_t *parser) {
         expect(parser, TOKEN_RBRACKET, "expected ']' after index");
         expr = ast_index_init(expr, index, parser->arena);
       }
+    } else if (check(parser, TOKEN_BANG)) {
+      advance(parser);
+      expr = ast_unwrap_init(expr, parser->arena);
     } else {
       break;
     }
@@ -701,10 +703,29 @@ static expr_t *parse_or(parser_t *parser) {
   return left;
 }
 
+static bool is_propagate_follower(TokenKind kind) {
+  switch (kind) {
+  case TOKEN_SEMICOLON:
+  case TOKEN_COMMA:
+  case TOKEN_RPAREN:
+  case TOKEN_RBRACKET:
+  case TOKEN_RBRACE:
+  case TOKEN_COLON:
+  case TOKEN_QUESTION_QUESTION:
+  case TOKEN_EOF:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static expr_t *parse_ternary(parser_t *parser) {
   expr_t *cond = parse_or(parser);
   if (cond == NULL || !match(parser, TOKEN_QUESTION)) {
     return cond;
+  }
+  if (is_propagate_follower(parser->current.kind)) {
+    return ast_propagate_init(cond, parser->arena);
   }
   expr_t *then = parse_ternary(parser);
   if (then == NULL) {
@@ -813,9 +834,8 @@ static decl_t *parse_global_binding(parser_t *parser, Visibility visibility) {
   binding_t binding = parse_binding(parser);
 
   if (binding.init != NULL && binding.init->kind == EXPR_IMPORT) {
-    decl_t *decl = ast_import_decl_init(binding.token, binding.name,
-                                        binding.init->import.path,
-                                        parser->arena);
+    decl_t *decl = ast_import_decl_init(
+        binding.token, binding.name, binding.init->import.path, parser->arena);
     decl->visibility = visibility;
     return decl;
   }
@@ -1307,8 +1327,8 @@ static decl_t *parse_enum(parser_t *parser, Visibility visibility) {
 
     if (match(parser, TOKEN_EQUAL)) {
       bool negative = match(parser, TOKEN_MINUS);
-      token_t num =
-          expect(parser, TOKEN_NUMBER, "expected integer value for enum member");
+      token_t num = expect(parser, TOKEN_NUMBER,
+                           "expected integer value for enum member");
       if (num.kind != TOKEN_NUMBER) {
         break;
       }

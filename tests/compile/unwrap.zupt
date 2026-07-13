@@ -1,0 +1,43 @@
+--TEST--
+postfix '!' force-unwraps an optional to its payload: scalar, struct (with method call), and chained on a call result
+--FILE--
+const std = import("std");
+
+struct Box {
+  v: i64,
+
+  fn get(self): i64 {
+    return self.v;
+  }
+}
+
+fn maybeInt(k: i64): ?i64 {
+  if k > 0 {
+    return k * 10;
+  }
+  return null;
+}
+
+fn maybeBox(k: i64): ?Box {
+  if k > 0 {
+    return Box{v: k};
+  }
+  return null;
+}
+
+pub fn main(): i32 {
+  const n = maybeInt(4)!;
+  std.io.println("n={}", n);
+
+  const b: Box = maybeBox(7)!;
+  std.io.println("box.v={}", b.v);
+
+  std.io.println("chained={}", maybeBox(9)!.get());
+  return 0;
+}
+--EXPECT--
+n=40
+box.v=7
+chained=9
+--EXIT--
+0

@@ -4,14 +4,22 @@ the open/defer close idiom: the file handle is released at scope exit and the wr
 const std = import("std");
 
 fn writeIt() {
-  const file = std.io.open("/tmp/zup_defer.txt", .Write);
+  const opened = std.io.open("/tmp/zup_defer.txt", .Write);
+  if opened == null {
+    return;
+  }
+  const file = opened!;
   defer file.close();
   file.writeln("deferred");
 }
 
 pub fn main(): i32 {
   writeIt();
-  let f: std.io.File = std.io.open("/tmp/zup_defer.txt", .Read);
+  const opened = std.io.open("/tmp/zup_defer.txt", .Read);
+  if opened == null {
+    return 1;
+  }
+  let f: std.io.File = opened!;
   defer f.close();
   let buf: [16]u8;
   std.io.println(f.readln(buf) ?? "");

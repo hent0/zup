@@ -1,0 +1,25 @@
+const std = import("std");
+
+pub fn main(args: []str): i32 {
+  let fs = std.flag.FlagSet.init();
+  fs.addBool("verbose", false, "enable verbose output");
+  fs.addInt("n", 1, "number of greetings");
+  fs.addStr("name", "world", "who to greet");
+  fs.parse(args);
+
+  let i: i64 = 0;
+  while i < fs.getInt("n") {
+    if fs.getBool("verbose") {
+      std.io.println("iteration {}", i);
+    }
+    std.io.println("hello, {}", fs.getStr("name"));
+    i++;
+  }
+
+  const rest = fs.args();
+  for a in rest {
+    std.io.println("positional: {}", a);
+  }
+
+  return 0;
+}

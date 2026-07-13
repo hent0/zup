@@ -1,6 +1,7 @@
 pub const io = import("io/io.zup");
 pub const mem = import("mem/mem.zup");
 pub const ascii = import("ascii/ascii.zup");
+pub const flag = import("flag.zup");
 
 pub extern fn exit(code: i32);
 extern fn abort();

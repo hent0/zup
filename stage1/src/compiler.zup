@@ -1,0 +1,78 @@
+const std = import("std");
+const lexer = import("lexer.zup");
+const source = import("source.zup");
+
+pub struct Source {
+  path: str,
+  src: str,
+
+  pub fn init(path: str, src: str): Source {
+    return {
+      path: path,
+      src: src,
+    };
+  }
+}
+
+pub enum Mode {
+  Compile,
+  Tokenize,
+  Ir,
+  Ast,
+}
+
+pub struct CompilerOpts {
+  pub input: str,
+  pub output: ?str,
+  pub mode: Mode,
+  pub keep_ir: bool,
+  pub static: bool,
+  pub link_libs: []str,
+  pub link_paths: []str,
+
+  pub fn init(input: str, output: ?str, mode: Mode, keep_ir: bool, static: bool, link_libs: []str, link_paths: []str): CompilerOpts {
+    return {
+      input: input,
+      output: output,
+      mode: mode,
+      keep_ir: keep_ir,
+      static: static,
+      link_libs: link_libs,
+      link_paths: link_paths,
+    };
+  }
+}
+
+pub struct Compiler {
+  arena: std.mem.Arena,
+
+  pub fn init(arena: std.mem.Arena): Compiler {
+    return {
+      arena: arena,
+    };
+  }
+
+  pub fn compile(self, opts: CompilerOpts) {
+    match opts.mode {
+      .Tokenize => self.tokenize(source.Source.init(opts.input, self.arena)),
+      _ => {
+        std.io.printerrln("Not implemented!");
+        std.exit(2);
+      },
+    };
+  }
+
+  fn tokenize(self, src: ?Source) {
+    if src == null {
+      std.io.printerrln("failed to read file");
+      std.exit(2);
+    }
+
+    const l = lexer.Lexer.init(src!, self.arena);
+    let tok = l.nextToken();
+    while tok.kind != .Eof {
+      tok.debug();
+      tok = l.nextToken();
+    }
+  }
+}

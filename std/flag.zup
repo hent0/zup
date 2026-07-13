@@ -1,0 +1,458 @@
+const io = import("io/io.zup");
+const ascii = import("ascii/ascii.zup");
+
+extern fn exit(code: i32);
+extern fn strtod(s: cstr, end: i64): f64;
+
+pub enum FlagValue {
+  Bool: bool,
+  Int: i64,
+  Float: f64,
+  Str: str,
+  StrList,
+}
+
+pub struct Flag {
+  pub name: str,
+  pub usage: str,
+  pub value: FlagValue,
+  pub default: FlagValue,
+  pub set: bool,
+  pub list: [16]str,
+  pub list_count: i64,
+}
+
+pub struct FlagSet {
+  name: str,
+  flags: [64]Flag,
+  count: i64,
+  positionals: [64]str,
+  positional_count: i64,
+  parsed: bool,
+
+  pub fn init(name: str = ""): FlagSet {
+    let fs: FlagSet;
+    fs.name = name;
+    return fs;
+  }
+
+  pub fn addBool(self, name: str, default: bool, usage: str) {
+    self.add(name, usage, .Bool(default));
+  }
+
+  pub fn addInt(self, name: str, default: i64, usage: str) {
+    self.add(name, usage, .Int(default));
+  }
+
+  pub fn addFloat(self, name: str, default: f64, usage: str) {
+    self.add(name, usage, .Float(default));
+  }
+
+  pub fn addStr(self, name: str, default: str, usage: str) {
+    self.add(name, usage, .Str(default));
+  }
+
+  pub fn addStrList(self, name: str, usage: str) {
+    self.add(name, usage, .StrList);
+  }
+
+  pub fn parse(self, argv: []str) {
+    if self.name.len == 0 && argv.len > 0 {
+      self.name = argv[0];
+    }
+    self.parsed = true;
+
+    let i: i64 = 1;
+    while i < argv.len {
+      const s = argv[i];
+      if s.len < 2 || s[0] != '-' {
+        self.addPositional(s);
+        i++;
+        continue;
+      }
+
+      let start: i64 = 1;
+      if s[1] == '-' {
+        if s.len == 2 {
+          i++;
+          while i < argv.len {
+            self.addPositional(argv[i]);
+            i++;
+          }
+          break;
+        }
+        start = 2;
+      }
+
+      let name: str = s[start..s.len];
+      if name[0] == '-' || name[0] == '=' {
+        io.printerrln("bad flag syntax: {}", s);
+        self.die();
+      }
+      i++;
+
+      let has_value = false;
+      let value: str = "";
+      let j: i64 = 0;
+      while j < name.len {
+        if name[j] == '=' {
+          value = name[j + 1..name.len];
+          name = name[0..j];
+          has_value = true;
+          break;
+        }
+        j++;
+      }
+
+      const found = self.find(name);
+      if found == null {
+        if name == "help" || name == "h" {
+          self.usage();
+          exit(0);
+        }
+        io.printerrln("flag provided but not defined: -{}", name);
+        self.die();
+      }
+      const idx = found ?? 0;
+
+      const is_bool = match self.flags[idx].value {
+        .Bool(b) => true,
+        _ => false,
+      };
+
+      if is_bool {
+        let b = true;
+        if has_value {
+          const pb = parseBool(value);
+          if pb == null {
+            io.printerrln("invalid boolean value \"{}\" for -{}", value, name);
+            self.die();
+          }
+          b = pb ?? false;
+        }
+        self.flags[idx].value = .Bool(b);
+      } else {
+        if !has_value {
+          if i >= argv.len {
+            io.printerrln("flag needs an argument: -{}", name);
+            self.die();
+          }
+          value = argv[i];
+          i++;
+        }
+
+        match self.flags[idx].value {
+          .Int(old) => {
+            const iv = parseInt(value);
+            if iv == null {
+              io.printerrln("invalid value \"{}\" for flag -{}", value, name);
+              self.die();
+            }
+            self.flags[idx].value = .Int(iv ?? 0);
+          },
+          .Float(old) => {
+            const fv = parseFloat(value);
+            if fv == null {
+              io.printerrln("invalid value \"{}\" for flag -{}", value, name);
+              self.die();
+            }
+            self.flags[idx].value = .Float(fv ?? 0.0);
+          },
+          .Str(old) => {
+            self.flags[idx].value = .Str(value);
+          },
+          .StrList => {
+            if self.flags[idx].list_count == 16 {
+              io.printerrln("too many values for flag -{} (max 16)", name);
+              self.die();
+            }
+            self.flags[idx].list[self.flags[idx].list_count] = value;
+            self.flags[idx].list_count++;
+          },
+          _ => {},
+        };
+      }
+
+      self.flags[idx].set = true;
+    }
+  }
+
+  fn addPositional(self, value: str) {
+    if self.positional_count == 64 {
+      io.printerrln("too many positional arguments (max 64)");
+      self.die();
+    }
+    self.positionals[self.positional_count] = value;
+    self.positional_count++;
+  }
+
+  pub fn getBool(self, name: str): bool {
+    const i = self.mustFind(name);
+    return match self.flags[i].value {
+      .Bool(b) => b,
+      _ => typeErrBool(name),
+    };
+  }
+
+  pub fn getInt(self, name: str): i64 {
+    const i = self.mustFind(name);
+    return match self.flags[i].value {
+      .Int(v) => v,
+      _ => typeErrInt(name),
+    };
+  }
+
+  pub fn getFloat(self, name: str): f64 {
+    const i = self.mustFind(name);
+    return match self.flags[i].value {
+      .Float(v) => v,
+      _ => typeErrFloat(name),
+    };
+  }
+
+  pub fn getStr(self, name: str): str {
+    const i = self.mustFind(name);
+    return match self.flags[i].value {
+      .Str(v) => v,
+      _ => typeErrStr(name),
+    };
+  }
+
+  pub fn getStrList(self, name: str): []str {
+    const i = self.mustFind(name);
+    return match self.flags[i].value {
+      .StrList => self.flags[i].list[0..self.flags[i].list_count],
+      _ => typeErrStrList(name),
+    };
+  }
+
+  pub fn wasSet(self, name: str): bool {
+    const i = self.mustFind(name);
+    return self.flags[i].set;
+  }
+
+  pub fn args(self): []str {
+    return self.positionals[0..self.positional_count];
+  }
+
+  pub fn usage(self) {
+    io.printerrln("Usage of {}:", self.name);
+    self.defaults();
+  }
+
+  pub fn defaults(self) {
+    let i: i64 = 0;
+    while i < self.count {
+      const f = self.flags[i];
+      match f.default {
+        .Bool(b) => {
+          io.printerr("  -{}    \t{}", f.name, f.usage);
+          if b {
+            io.printerr(" (default true)");
+          }
+        },
+        .Int(n) => {
+          io.printerr("  -{} int    \t{}", f.name, f.usage);
+          if n != 0 {
+            io.printerr(" (default {})", n);
+          }
+        },
+        .Float(x) => {
+          io.printerr("  -{} float    \t{}", f.name, f.usage);
+          if x != 0.0 {
+            io.printerr(" (default {})", x);
+          }
+        },
+        .Str(s) => {
+          io.printerr("  -{} string    \t{}", f.name, f.usage);
+          if s.len > 0 {
+            io.printerr(" (default \"{}\")", s);
+          }
+        },
+        .StrList => {
+          io.printerr("  -{} string    \t{}", f.name, f.usage);
+        },
+      };
+      io.printerr("\n");
+      i++;
+    }
+  }
+
+  fn add(self, name: str, usage: str, default: FlagValue) {
+    if self.find(name) != null {
+      io.printerrln("flag redefined: -{}", name);
+      exit(2);
+    }
+    if self.count == 64 {
+      io.printerrln("too many flags defined (max 64)");
+      exit(2);
+    }
+    let f: Flag;
+    f.name = name;
+    f.usage = usage;
+    f.value = default;
+    f.default = default;
+    self.flags[self.count] = f;
+    self.count++;
+  }
+
+  fn find(self, name: str): ?i64 {
+    let i: i64 = 0;
+    while i < self.count {
+      if self.flags[i].name == name {
+        return i;
+      }
+      i++;
+    }
+    return null;
+  }
+
+  fn mustFind(self, name: str): i64 {
+    const idx = self.find(name);
+    if idx == null {
+      io.printerrln("flag: lookup of undefined flag: {}", name);
+      exit(2);
+    }
+    return idx ?? 0;
+  }
+
+  fn die(self) {
+    self.usage();
+    exit(2);
+  }
+}
+
+fn parseBool(s: str): ?bool {
+  if s == "1" || s == "t" || s == "T" || s == "true" || s == "TRUE" || s == "True" {
+    return true;
+  }
+  if s == "0" || s == "f" || s == "F" || s == "false" || s == "FALSE" || s == "False" {
+    return false;
+  }
+  return null;
+}
+
+pub fn parseInt(s: str): ?i64 {
+  let i: i64 = 0;
+  let neg = false;
+  if s.len > 0 && (s[0] == '-' || s[0] == '+') {
+    neg = s[0] == '-';
+    i = 1;
+  }
+  if i >= s.len {
+    return null;
+  }
+
+  let v: i64 = 0;
+  if i + 1 < s.len && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X') {
+    i += 2;
+    if i >= s.len {
+      return null;
+    }
+    while i < s.len {
+      const d = ascii.hexToI64(s[i]);
+      if d == null {
+        return null;
+      }
+      v = v * 16 + (d ?? 0);
+      i++;
+    }
+  } else {
+    while i < s.len {
+      if !ascii.isDigit(s[i]) {
+        return null;
+      }
+      v = v * 10 + (s[i] - '0') as i64;
+      i++;
+    }
+  }
+
+  return neg ? 0 - v : v;
+}
+
+fn parseFloat(s: str): ?f64 {
+  if s.len == 0 || s.len > 63 || !validFloat(s) {
+    return null;
+  }
+
+  let buf: [64]u8;
+  let i: i64 = 0;
+  while i < s.len {
+    buf[i] = s[i];
+    i++;
+  }
+  buf[s.len] = 0;
+  const view: []u8 = buf;
+  return strtod(view.ptr, 0);
+}
+
+fn validFloat(s: str): bool {
+  let i: i64 = 0;
+  if s[0] == '+' || s[0] == '-' {
+    i = 1;
+  }
+
+  let digits = false;
+  while i < s.len && ascii.isDigit(s[i]) {
+    digits = true;
+    i++;
+  }
+  if i < s.len && s[i] == '.' {
+    i++;
+    while i < s.len && ascii.isDigit(s[i]) {
+      digits = true;
+      i++;
+    }
+  }
+  if !digits {
+    return false;
+  }
+
+  if i < s.len && (s[i] == 'e' || s[i] == 'E') {
+    i++;
+    if i < s.len && (s[i] == '+' || s[i] == '-') {
+      i++;
+    }
+    let exp_digits = false;
+    while i < s.len && ascii.isDigit(s[i]) {
+      exp_digits = true;
+      i++;
+    }
+    if !exp_digits {
+      return false;
+    }
+  }
+
+  return i == s.len;
+}
+
+fn typeErrBool(name: str): bool {
+  io.printerrln("flag: -{} is not a bool flag", name);
+  exit(2);
+  return false;
+}
+
+fn typeErrInt(name: str): i64 {
+  io.printerrln("flag: -{} is not an int flag", name);
+  exit(2);
+  return 0;
+}
+
+fn typeErrFloat(name: str): f64 {
+  io.printerrln("flag: -{} is not a float flag", name);
+  exit(2);
+  return 0.0;
+}
+
+fn typeErrStr(name: str): str {
+  io.printerrln("flag: -{} is not a string flag", name);
+  exit(2);
+  return "";
+}
+
+fn typeErrStrList(name: str): []str {
+  io.printerrln("flag: -{} is not a string list flag", name);
+  exit(2);
+  let e: [1]str;
+  return e[0..0];
+}

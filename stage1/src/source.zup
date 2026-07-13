@@ -1,0 +1,29 @@
+const std = import("std");
+
+pub struct Source {
+  pub path: str,
+  pub src: str,
+
+  pub fn init(path: str, arena: std.mem.Arena): ?Source {
+    // TODO: Add reading from stdin
+    std.assert(path != "-", "reading from stdin not implemented");
+
+    const file = std.io.open(path, .Read)?;
+    defer file.close();
+
+    const size = file.size();
+    let buf: []u8 = arena.alloc(size);
+    let total: i64 = 0;
+
+    let n: i64 = file.read(buf[total..size]);
+    while n > 0 {
+      total += n;
+      n = file.read(buf[total..size]);
+    }
+
+    return {
+      path: path,
+      src: buf[0..total] as str,
+    };
+  }
+}

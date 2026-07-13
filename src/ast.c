@@ -87,6 +87,9 @@ char *type_to_str(type_t type) {
   case TYPE_ARRAY:
   case TYPE_SLICE:
   case TYPE_OPTIONAL: {
+    if (type.element == NULL) {
+      return type_kind_to_str(type.kind);
+    }
     static char bufs[8][64];
     static unsigned next = 0;
     char *buf = bufs[next++ % 8];
@@ -166,6 +169,18 @@ char *binop_to_ir_float(BinaryOp op) {
     return "fdiv";
   case BINOP_REM:
     return "frem";
+  case BINOP_EQ:
+    return "fcmp oeq";
+  case BINOP_NE:
+    return "fcmp une";
+  case BINOP_LT:
+    return "fcmp olt";
+  case BINOP_LE:
+    return "fcmp ole";
+  case BINOP_GT:
+    return "fcmp ogt";
+  case BINOP_GE:
+    return "fcmp oge";
   default:
     return "?";
   }
@@ -511,6 +526,28 @@ expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena) {
   expr->next = NULL;
   expr->coalesce.lhs = lhs;
   expr->coalesce.rhs = rhs;
+  return expr;
+}
+
+expr_t *ast_unwrap_init(expr_t *operand, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_UNWRAP;
+  expr->line = operand->line;
+  expr->col = operand->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->unwrap.operand = operand;
+  return expr;
+}
+
+expr_t *ast_propagate_init(expr_t *operand, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_PROPAGATE;
+  expr->line = operand->line;
+  expr->col = operand->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->propagate.operand = operand;
   return expr;
 }
 
@@ -878,6 +915,14 @@ static void dump_expr(const expr_t *expr, int depth) {
     printf("Coalesce\n");
     dump_expr(expr->coalesce.lhs, depth + 1);
     dump_expr(expr->coalesce.rhs, depth + 1);
+    break;
+  case EXPR_UNWRAP:
+    printf("Unwrap\n");
+    dump_expr(expr->unwrap.operand, depth + 1);
+    break;
+  case EXPR_PROPAGATE:
+    printf("Propagate\n");
+    dump_expr(expr->propagate.operand, depth + 1);
     break;
   case EXPR_TERNARY:
     printf("Ternary\n");
