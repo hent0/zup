@@ -465,7 +465,7 @@ static type_t qualify_param_type(sema_t *sema, type_t t, const char *stem) {
     return t;
   }
   if ((t.kind == TYPE_SLICE || t.kind == TYPE_ARRAY ||
-       t.kind == TYPE_OPTIONAL) &&
+       t.kind == TYPE_OPTIONAL || t.kind == TYPE_POINTER) &&
       t.element != NULL) {
     type_t *element = arena_alloc(sema->arena, sizeof(type_t));
     *element = qualify_param_type(sema, *t.element, stem);

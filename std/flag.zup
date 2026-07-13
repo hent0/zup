@@ -36,32 +36,32 @@ pub struct FlagSet {
     return fs;
   }
 
-  pub fn addBool(self, name: str, default: bool, usage: str): FlagSet {
+  pub fn addBool(self, name: str, default: bool, usage: str): *FlagSet {
     self.add(name, usage, .Bool(default));
-    return self;
+    return &self;
   }
 
-  pub fn addInt(self, name: str, default: i64, usage: str): FlagSet {
+  pub fn addInt(self, name: str, default: i64, usage: str): *FlagSet {
     self.add(name, usage, .Int(default));
-    return self;
+    return &self;
   }
 
-  pub fn addFloat(self, name: str, default: f64, usage: str): FlagSet {
+  pub fn addFloat(self, name: str, default: f64, usage: str): *FlagSet {
     self.add(name, usage, .Float(default));
-    return self;
+    return &self;
   }
 
-  pub fn addStr(self, name: str, default: str, usage: str): FlagSet {
+  pub fn addStr(self, name: str, default: str, usage: str): *FlagSet {
     self.add(name, usage, .Str(default));
-    return self;
+    return &self;
   }
 
-  pub fn addStrList(self, name: str, usage: str): FlagSet {
+  pub fn addStrList(self, name: str, usage: str): *FlagSet {
     self.add(name, usage, .StrList);
-    return self;
+    return &self;
   }
 
-  pub fn parse(self, argv: []str): FlagSet {
+  pub fn parse(self, argv: []str): *FlagSet {
     if self.name.len == 0 && argv.len > 0 {
       self.name = argv[0];
     }
@@ -118,9 +118,9 @@ pub struct FlagSet {
         io.printerrln("flag provided but not defined: -{}", name);
         self.die();
       }
-      const idx = found ?? 0;
+      const f = &self.flags[found ?? 0];
 
-      const is_bool = match self.flags[idx].value {
+      const is_bool = match f.value {
         .Bool(b) => true,
         _ => false,
       };
@@ -135,7 +135,7 @@ pub struct FlagSet {
           }
           b = pb ?? false;
         }
-        self.flags[idx].value = .Bool(b);
+        f.value = .Bool(b);
       } else {
         if !has_value {
           if i >= argv.len {
@@ -146,14 +146,14 @@ pub struct FlagSet {
           i++;
         }
 
-        match self.flags[idx].value {
+        match f.value {
           .Int(old) => {
             const iv = parseInt(value);
             if iv == null {
               io.printerrln("invalid value \"{}\" for flag -{}", value, name);
               self.die();
             }
-            self.flags[idx].value = .Int(iv ?? 0);
+            f.value = .Int(iv ?? 0);
           },
           .Float(old) => {
             const fv = parseFloat(value);
@@ -161,27 +161,27 @@ pub struct FlagSet {
               io.printerrln("invalid value \"{}\" for flag -{}", value, name);
               self.die();
             }
-            self.flags[idx].value = .Float(fv ?? 0.0);
+            f.value = .Float(fv ?? 0.0);
           },
           .Str(old) => {
-            self.flags[idx].value = .Str(value);
+            f.value = .Str(value);
           },
           .StrList => {
-            if self.flags[idx].list_count == 16 {
+            if f.list_count == 16 {
               io.printerrln("too many values for flag -{} (max 16)", name);
               self.die();
             }
-            self.flags[idx].list[self.flags[idx].list_count] = value;
-            self.flags[idx].list_count++;
+            f.list[f.list_count] = value;
+            f.list_count++;
           },
           _ => {},
         };
       }
 
-      self.flags[idx].set = true;
+      f.set = true;
     }
 
-    return self;
+    return &self;
   }
 
   fn addPositional(self, value: str) {
@@ -194,48 +194,47 @@ pub struct FlagSet {
   }
 
   pub fn getBool(self, name: str): bool {
-    const i = self.mustFind(name);
-    return match self.flags[i].value {
+    const f = self.mustFind(name);
+    return match f.value {
       .Bool(b) => b,
       _ => typeErrBool(name),
     };
   }
 
   pub fn getInt(self, name: str): i64 {
-    const i = self.mustFind(name);
-    return match self.flags[i].value {
+    const f = self.mustFind(name);
+    return match f.value {
       .Int(v) => v,
       _ => typeErrInt(name),
     };
   }
 
   pub fn getFloat(self, name: str): f64 {
-    const i = self.mustFind(name);
-    return match self.flags[i].value {
+    const f = self.mustFind(name);
+    return match f.value {
       .Float(v) => v,
       _ => typeErrFloat(name),
     };
   }
 
   pub fn getStr(self, name: str): str {
-    const i = self.mustFind(name);
-    return match self.flags[i].value {
+    const f = self.mustFind(name);
+    return match f.value {
       .Str(v) => v,
       _ => typeErrStr(name),
     };
   }
 
   pub fn getStrList(self, name: str): []str {
-    const i = self.mustFind(name);
-    return match self.flags[i].value {
-      .StrList => self.flags[i].list[0..self.flags[i].list_count],
+    const f = self.mustFind(name);
+    return match f.value {
+      .StrList => f.list[0..f.list_count],
       _ => typeErrStrList(name),
     };
   }
 
   pub fn wasSet(self, name: str): bool {
-    const i = self.mustFind(name);
-    return self.flags[i].set;
+    return self.mustFind(name).set;
   }
 
   pub fn args(self): []str {
@@ -250,7 +249,7 @@ pub struct FlagSet {
   pub fn defaults(self) {
     let i: i64 = 0;
     while i < self.count {
-      const f = self.flags[i];
+      const f = &self.flags[i];
       match f.default {
         .Bool(b) => {
           io.printerr("  -{}    \t{}", f.name, f.usage);
@@ -314,13 +313,13 @@ pub struct FlagSet {
     return null;
   }
 
-  fn mustFind(self, name: str): i64 {
+  fn mustFind(self, name: str): *Flag {
     const idx = self.find(name);
     if idx == null {
       io.printerrln("flag: lookup of undefined flag: {}", name);
       exit(2);
     }
-    return idx ?? 0;
+    return &self.flags[idx ?? 0];
   }
 
   fn die(self) {

@@ -1,0 +1,22 @@
+--TEST--
+flag: add*/parse return *FlagSet, so chained calls mutate the original set instead of a copy
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let fs = std.flag.FlagSet.init("prog");
+  const argv: []str = ["prog", "-v", "-n=12", "rest"];
+  fs.addBool("v", false, "verbose")
+    .addInt("n", 7, "count")
+    .addStr("s", "def", "text")
+    .parse(argv);
+
+  std.io.println("v={} n={} s={}", fs.getBool("v"), fs.getInt("n"), fs.getStr("s"));
+  std.io.println("args={}", fs.args().len);
+  return 0;
+}
+--EXPECT--
+v=true n=12 s=def
+args=1
+--EXIT--
+0

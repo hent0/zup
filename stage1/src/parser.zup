@@ -17,6 +17,19 @@ pub struct Parser {
     };
   }
 
+  pub fn parse(self) {
+    while !self.check(.Eof) {
+      if self.check(.Invalid) {
+        self.advance();
+      } else if self.startsDecl() {
+        self.declaration();
+      } else {
+        diag.error(self.span(), .Message("expected a top-level declaration"));
+        self.advance();
+      }
+    }
+  }
+
   fn advance(self): token.Token {
     const prev = self.current;
     self.current = self.lex.nextToken();
@@ -49,19 +62,6 @@ pub struct Parser {
       .Pub, .Fn, .Const, .Let, .Struct, .Enum, .Extern, .Import => true,
       _ => false,
     };
-  }
-
-  pub fn parse(self) {
-    while !self.check(.Eof) {
-      if self.check(.Invalid) {
-        self.advance();
-      } else if self.startsDecl() {
-        self.declaration();
-      } else {
-        diag.error(self.span(), .Message("expected a top-level declaration"));
-        self.advance();
-      }
-    }
   }
 
   fn declaration(self) {

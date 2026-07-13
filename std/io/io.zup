@@ -207,9 +207,8 @@ fn boolStr(v: i64): str {
 }
 
 fn errno(): i32 {
-  const b = __errno_location()[0..4];
-  return (b[0] as i32) | ((b[1] as i32) << 8) | ((b[2] as i32) << 16) |
-         ((b[3] as i32) << 24);
+  const b = __errno_location()[0..sizeof(i32)] as []i32;
+  return b[0];
 }
 
 fn classifyOpen(path: str, code: i32): IoError {
