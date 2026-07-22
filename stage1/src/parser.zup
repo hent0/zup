@@ -3,31 +3,54 @@ const lexer = import("lexer.zup");
 const token = import("token.zup");
 const source = import("source.zup");
 const diag = import("diag.zup");
+const ast = import("ast.zup");
+const utils = import("utils.zup");
+
+struct Binding {
+  span: diag.Span,
+  name: str,
+  ty: ast.Type,
+  mutable: bool,
+  init: u32,
+}
+
+struct ParamResult {
+  param: ast.Param,
+  variadic: bool,
+  ok: bool,
+}
+
+struct ParamListResult {
+  params: ast.Range,
+  variadic: bool,
+}
 
 pub struct Parser {
   lex: lexer.Lexer,
   current: token.Token,
+  ast: *ast.Ast,
+  no_struct_literal: bool,
 
-  pub fn init(src: source.Source, arena: std.mem.Arena): Parser {
-    const lex = lexer.Lexer.init(src, arena);
+  pub fn init(src: source.Source, ast: *ast.Ast): Parser {
+    let lex = lexer.Lexer.init(src, ast.arena);
+    const first = lex.nextToken();
 
     return {
       lex: lex,
-      current: lex.nextToken(),
+      current: first,
+      ast: ast,
+      no_struct_literal: false,
     };
   }
 
-  pub fn parse(self) {
+  pub fn parse(self): u32 {
+    let members = ast.U32List.init(self.ast.arena);
     while !self.check(.Eof) {
-      if self.check(.Invalid) {
-        self.advance();
-      } else if self.startsDecl() {
-        self.declaration();
-      } else {
-        diag.error(self.span(), .Message("expected a top-level declaration"));
-        self.advance();
-      }
+      const d = self.parseDeclaration();
+      if d == 0 { break; }
+      members.push(d);
     }
+    return self.ast.containerDecl("", self.ast.extra.append(members));
   }
 
   fn advance(self): token.Token {
@@ -36,8 +59,15 @@ pub struct Parser {
     return prev;
   }
 
-  fn check(self, kind: token.TokenKind): bool {
-    return self.current.kind == kind;
+  fn check(self, kind: token.TokenKind, advance: bool = false): bool {
+    if self.current.kind != kind {
+      return false;
+    }
+
+    if advance {
+      self.advance();
+    }
+    return true;
   }
 
   fn span(self): diag.Span {
@@ -47,53 +77,1035 @@ pub struct Parser {
     };
   }
 
-  fn expect(self, kind: token.TokenKind, what: str): bool {
-    if self.check(kind) {
-      self.advance();
-      return true;
-    }
-
-    diag.error(self.span(), .Expected(what));
-    return false;
+  fn text(self, t: token.Token): str {
+    return match t.value {
+      .Text(s) => s,
+      _ => "",
+    };
   }
 
-  fn startsDecl(self): bool {
-    return match self.current.kind {
-      .Pub, .Fn, .Const, .Let, .Struct, .Enum, .Extern, .Import => true,
+  fn parseError(self, msg: str) {
+    diag.error(self.span(), .Message(utils.withGot(self.ast.arena, msg, self.current.kind.toString())));
+  }
+
+  fn expect(self, kind: token.TokenKind, what: str): token.Token {
+    if self.check(kind) {
+      return self.advance();
+    }
+
+    self.parseError(what);
+    return self.current;
+  }
+
+  fn parseDeclaration(self): u32 {
+    const vis: ast.Visibility = self.check(.Pub, true) ? .Public : .Private;
+
+    if self.check(.Extern) {
+      return self.parseExtern(vis);
+    }
+
+    match true {
+      self.check(.Fn) => { return self.parseFn(vis, false); },
+      self.check(.Const) || self.check(.Let) => { return self.parseGlobalBinding(vis); },
+      self.check(.Struct) => { return self.parseStruct(vis); },
+      self.check(.Enum) => { return self.parseEnum(vis); },
+      _ => {
+        self.parseError("expected a declaration");
+        return 0;
+      }
+    }
+    return 0;
+  }
+
+  fn parseExtern(self, vis: ast.Visibility): u32 {
+    const kw = self.advance();
+    self.expect(.Fn, "expected 'fn' after 'extern'");
+    const name = self.expect(.Id, "expected function name");
+    const pl = self.parseParamList(true);
+    const ret = self.parseReturnType();
+    self.expect(.Semicolon, "expected ';' after extern declaration");
+    if self.check(.Lbrace) {
+      self.parseBlock();
+    }
+    return self.ast.fnDecl(kw.span(), vis, self.text(name), pl.params, ret, ast.Range.empty(), true, pl.variadic);
+  }
+
+  fn parseMethod(self, struct_name: str, vis: ast.Visibility): u32 {
+    const kw = self.expect(.Fn, "expected 'fn'");
+    const name = self.expect(.Id, "expected method name");
+    self.expect(.Lparen, "expected '(' after method name");
+
+    let list = ast.U32List.init(self.ast.arena);
+    if self.check(.Id) && self.text(self.current) == "self" {
+      const s = self.advance();
+      let selfp = ast.Param.init();
+      selfp.name = self.text(s);
+      selfp.ty.kind = .Struct;
+      selfp.ty.name = struct_name;
+      selfp.ty.span = s.span();
+      selfp.is_self = true;
+      list.push(self.ast.params.push(selfp));
+      if !self.check(.Rparen) {
+        self.expect(.Comma, "expected ',' after self");
+      }
+    }
+
+    while !self.check(.Rparen) {
+      const p = self.parseParam();
+      if !p.ok { break; }
+      if p.variadic {
+        diag.error(self.span(), .Message("methods cannot take variadic parameters"));
+      }
+      list.push(self.ast.params.push(p.param));
+      if !self.check(.Comma, true) { break; }
+    }
+    self.expect(.Rparen, "expected ')' after parameters");
+
+    const ret = self.parseReturnType();
+    const body = self.parseBlock();
+    return self.ast.fnDecl(kw.span(), vis, self.text(name), self.ast.extra.append(list), ret, body, false, false);
+  }
+
+  fn parseStruct(self, vis: ast.Visibility): u32 {
+    const kw = self.advance();
+    const name = self.expect(.Id, "expected struct name");
+    self.expect(.Lbrace, "expected '{' after struct name");
+
+    let fields = ast.U32List.init(self.ast.arena);
+    let members = ast.U32List.init(self.ast.arena);
+
+    while !self.check(.Rbrace) && !self.check(.Eof) {
+      const member_vis: ast.Visibility = self.check(.Pub, true) ? .Public : .Private;
+
+      if self.check(.Fn) {
+        members.push(self.parseMethod(self.text(name), member_vis));
+        continue;
+      }
+
+      const fname = self.expect(.Id, "expected field name");
+      if fname.kind != .Id { break; }
+      self.expect(.Colon, "expected ':' after field name");
+
+      let f = ast.Field.init();
+      f.span = fname.span();
+      f.name = self.text(fname);
+      f.ty = self.parseType();
+      f.visibility = member_vis;
+      if self.check(.Equal, true) {
+        f.default_value = self.parseExpr();
+      }
+      fields.push(self.ast.fields.push(f));
+      self.check(.Comma, true);
+    }
+
+    self.expect(.Rbrace, "expected '}' after struct body");
+    return self.ast.structDecl(kw.span(), vis, self.text(name), self.ast.extra.append(fields), self.ast.extra.append(members));
+  }
+
+  fn parseEnum(self, vis: ast.Visibility): u32 {
+    const kw = self.advance();
+    const name = self.expect(.Id, "expected enum name");
+    self.expect(.Lbrace, "expected '{' after struct name");
+
+    let members = ast.U32List.init(self.ast.arena);
+    let methods = ast.U32List.init(self.ast.arena);
+    let next_value: i64 = 0;
+
+    while !self.check(.Rbrace) && !self.check(.Eof) {
+      if self.check(.Pub) || self.check(.Fn) {
+        const member_vis: ast.Visibility = self.check(.Pub, true) ? .Public : .Private;
+        methods.push(self.parseMethod(self.text(name), member_vis));
+        continue;
+      }
+
+      const mname = self.expect(.Id, "expected enum member name");
+      if mname.kind != .Id { break; }
+
+      let m = ast.EnumMember.init();
+      m.span = mname.span();
+      m.name = self.text(mname);
+
+      if self.check(.Colon, true) {
+        m.payload = self.parseType();
+        m.has_payload = true;
+      }
+
+      if self.check(.Equal, true) {
+        const negative = self.check(.Minus, true);
+        const num = self.expect(.Number, "expected integer value for enum member");
+        if num.kind != .Number { break; }
+        const numtext = num.numberText(self.ast.arena);
+        if containsDot(numtext) {
+          diag.error(num.span(), .Message("enum member value must be an integer"));
+        }
+        const value = parseArraySize(numtext);
+        next_value = negative ? -value : value;
+      }
+      m.value = next_value;
+      next_value += 1;
+
+      members.push(self.ast.enum_members.push(m));
+      self.check(.Comma, true);
+    }
+
+    self.expect(.Rbrace, "expected '}'");
+    return self.ast.enumDecl(kw.span(), vis, self.text(name), self.ast.extra.append(members), self.ast.extra.append(methods));
+  }
+
+  fn parseFn(self, vis: ast.Visibility, is_extern: bool): u32 {
+    const kw = self.advance();
+    const name = self.expect(.Id, "expected function name");
+    const pl = self.parseParamList(is_extern);
+    const ret = self.parseReturnType();
+    const body = self.parseBlock();
+    return self.ast.fnDecl(kw.span(), vis, self.text(name), pl.params, ret, body, is_extern, pl.variadic);
+  }
+
+  fn parseParam(self): ParamResult {
+    let r: ParamResult;
+    r.ok = true;
+    r.param = ast.Param.init();
+    r.param.mutable = !self.check(.Const, true);
+    const id = self.expect(.Id, "expected identifier");
+    self.expect(.Colon, "expected ':' after identifier");
+
+    if self.check(.DotDotDot) {
+      const dots = self.advance();
+      let elem: ast.Type;
+      elem.kind = .Struct;
+      elem.name = "Arg";
+      elem.span = dots.span();
+      r.param.ty.kind = .Slice;
+      r.param.ty.elem = self.ast.types.push(elem);
+      r.param.ty.span = dots.span();
+      r.variadic = true;
+    } else {
+      r.param.ty = self.parseType();
+      if r.param.ty.kind == .Unknown {
+        r.ok = false;
+        return r;
+      }
+    }
+
+    if self.check(.Equal, true) {
+      r.param.default_value = self.parseExpr();
+    }
+
+    r.param.name = self.text(id);
+    return r;
+  }
+
+  fn parseParamList(self, allow_variadic: bool): ParamListResult {
+    let r: ParamListResult;
+    self.expect(.Lparen, "expected '(' after function name");
+    let list = ast.U32List.init(self.ast.arena);
+
+    while !self.check(.Rparen) {
+      if list.len > 0 {
+        self.expect(.Comma, "expected ',' between arguments");
+      }
+
+      if self.check(.DotDotDot) {
+        const dots = self.advance();
+        if !allow_variadic {
+          diag.error(dots.span(), .Message("variadic '...' is only allowed in extern declarations"));
+        } else if list.len == 0 {
+          diag.error(dots.span(), .Message("a variadic function requires at least one fixed parameter"));
+        }
+        r.variadic = true;
+        break;
+      }
+
+      const p = self.parseParam();
+      if !p.ok {
+        break;
+      }
+      list.push(self.ast.params.push(p.param));
+
+      if p.variadic {
+        r.variadic = true;
+        if !self.check(.Rparen) {
+          diag.error(self.span(), .Message("the variadic parameter must be last"));
+        }
+        break;
+      }
+    }
+
+    self.expect(.Rparen, "expected ')' after parameters");
+    r.params = self.ast.extra.append(list);
+    return r;
+  }
+
+  fn parseReturnType(self): ast.Type {
+    if self.check(.Colon, true) {
+      return self.parseType();
+    }
+    let t: ast.Type;
+    t.kind = .Void;
+    return t;
+  }
+
+  fn parseType(self): ast.Type {
+    let t: ast.Type;
+    t.span = self.span();
+
+    if self.check(.Question, true) {
+      t.kind = .Optional;
+      t.elem = self.ast.types.push(self.parseType());
+      return t;
+    }
+
+    if self.check(.Star, true) {
+      t.kind = .Pointer;
+      t.elem = self.ast.types.push(self.parseType());
+      return t;
+    }
+
+    if self.check(.Lbracket, true) {
+      match self.current.kind {
+        .Rbracket => { t.kind = .Slice; },
+        .Number => {
+          t.kind = .Array;
+          t.array_length = parseArraySize(self.current.numberText(self.ast.arena));
+          self.advance();
+        },
+        .Underscore => {
+          t.kind = .Array;
+          t.array_length = 0;
+          self.advance();
+        },
+        _ => {
+          self.parseError("expected an array size");
+          return t;
+        },
+      }
+
+      self.expect(.Rbracket, "expected ']'");
+      t.elem = self.ast.types.push(self.parseType());
+      return t;
+    }
+
+    match self.current.kind {
+      .Void => { t.kind = .Void; self.advance(); },
+      .Bool => { t.kind = .Bool; self.advance(); },
+      .I8 => { t.kind = .I8; self.advance(); },
+      .U8 => { t.kind = .U8; self.advance(); },
+      .I16 => { t.kind = .I16; self.advance(); },
+      .U16 => { t.kind = .U16; self.advance(); },
+      .I32 => { t.kind = .I32; self.advance(); },
+      .U32 => { t.kind = .U32; self.advance(); },
+      .I64 => { t.kind = .I64; self.advance(); },
+      .U64 => { t.kind = .U64; self.advance(); },
+      .F32 => { t.kind = .F32; self.advance(); },
+      .F64 => { t.kind = .F64; self.advance(); },
+      .Cstr => { t.kind = .Cstr; self.advance(); },
+      .Str => { t.kind = .Str; self.advance(); },
+      .Id => {
+        const id = self.advance();
+        t.kind = .Struct;
+        t.name = self.text(id);
+        while self.check(.Dot, true) {
+          const member = self.expect(.Id, "expected struct name after '.'");
+          t.module = t.module.len == 0 ? t.name : utils.joinPath(self.ast.arena, t.module, t.name);
+          t.name = self.text(member);
+        }
+      },
+      _ => {
+        self.parseError("expected a type");
+      },
+    };
+    return t;
+  }
+
+  fn parseBlock(self): ast.Range {
+    self.expect(.Lbrace, "expected '{'");
+    let stmts = ast.U32List.init(self.ast.arena);
+    while !self.check(.Rbrace) && !self.check(.Eof) {
+      const s = self.parseStmt();
+      if s == 0 { break; }
+      stmts.push(s);
+    }
+    self.expect(.Rbrace, "expected '}'");
+    return self.ast.extra.append(stmts);
+  }
+
+  fn isAssignTarget(self, e: u32): bool {
+    return match self.ast.exprs.at(e).kind {
+      .Id(n) => true,
+      .Field(f) => true,
+      .Index(x) => true,
       _ => false,
     };
   }
 
-  fn declaration(self) {
-    if self.check(.Pub) {
-      self.advance();
-    }
+  fn parseStmt(self): u32 {
+    const sp = self.span();
 
-    if self.check(.Fn) {
-      self.advance();
-      self.expect(.Id, "a function name");
-    } else {
-      self.advance();
-    }
+    match true {
+      self.check(.Return, true) => {
+        const v = self.check(.Semicolon) ? 0 as u32 : self.parseExpr();
+        self.expect(.Semicolon, "expected ';' after return statement");
+        return self.ast.returnStmt(sp, v);
+      },
+      self.check(.If) => { return self.parseIf(); },
+      self.check(.Const) || self.check(.Let) => {
+        const b = self.parseBinding();
+        return self.ast.bindingStmt(b.span, b.name, b.ty, b.mutable, b.init);
+      },
+      self.check(.While) => { return self.parseWhile(); },
+      self.check(.For) => { return self.parseFor(); },
+      self.check(.Break, true) => {
+        self.expect(.Semicolon, "expected ';'");
+        return self.ast.breakStmt(sp);
+      },
+      self.check(.Continue, true) => {
+        self.expect(.Semicolon, "expected ';'");
+        return self.ast.continueStmt(sp);
+      },
+      self.check(.Defer, true) => {
+        const value = self.parseExpr();
+        self.expect(.Semicolon, "expected ';' after defer");
+        return self.ast.deferStmt(sp, value);
+      },
+      _ => {
+        if !self.current.kind.startExpr() {
+          self.parseError("expected statement");
+          return 0;
+        }
 
-    self.skipToEnd();
+        const e = self.parseExpr();
+        if e == 0 { return 0; }
+
+        if self.check(.PlusPlus) || self.check(.MinusMinus) {
+          const increment = self.check(.PlusPlus);
+          const op = self.advance();
+          if !self.isAssignTarget(e) {
+            self.parseError("invalid assignment target");
+            return 0;
+          }
+
+          self.expect(.Semicolon, increment ? "expected ';' after '++'" : "expected ';' after '--'");
+          const inc_op: ast.BinaryOp = increment ? .Add : .Sub;
+          const one = self.ast.number(op.span(), "1");
+          return self.ast.assignStmt(sp, e, one, true, false, inc_op);
+        }
+
+        let compound = true;
+        let cop: ast.BinaryOp = .Add;
+
+        match self.current.kind {
+          .PlusEqual => { cop = .Add; },
+          .MinusEqual => { cop = .Sub; },
+          .StarEqual => { cop = .Mul; },
+          .SlashEqual => { cop = .Div; },
+          .PercentEqual => { cop = .Rem; },
+          .AmpersandEqual => { cop = .Bitand; },
+          .PipeEqual => { cop = .Bitor; },
+          .CaretEqual => { cop = .Bitxor; },
+          .LessLessEqual => { cop = .Shl; },
+          .GreaterGreaterEqual => { cop = .Shr; },
+          _ => { compound = false; },
+        };
+
+        const coalesce = self.check(.QuestionQuestionEqual);
+
+        if self.check(.Equal, true) || compound || coalesce {
+          if compound || coalesce { self.advance(); }
+
+          if !self.isAssignTarget(e) {
+            self.parseError("invalid assignment target");
+            return 0;
+          }
+
+          const value = self.parseExpr();
+          if value == 0 { return 0; }
+
+          self.expect(.Semicolon, "expected ';' after assignment");
+          return self.ast.assignStmt(sp, e, value, compound, coalesce, cop);
+        }
+
+        match self.ast.exprs.at(e).kind {
+          .Match(m) => { self.check(.Semicolon, true); },
+          _ => { self.expect(.Semicolon, "expected ';' after expression statement"); },
+        };
+        return self.ast.exprStmt(sp, e);
+      },
+    };
+    return 0;
   }
 
-  fn skipToEnd(self) {
-    let depth: i64 = 0;
-    while !self.check(.Eof) {
-      const kind = self.current.kind;
-      self.advance();
-      if kind == .Lbrace {
-        depth += 1;
-      } else if kind == .Rbrace {
-        depth -= 1;
-        if depth <= 0 {
-          return;
-        }
-      } else if kind == .Semicolon && depth == 0 {
-        return;
+  fn parseIf(self): u32 {
+    const kw = self.advance();
+    const saved = self.no_struct_literal;
+    self.no_struct_literal = true;
+    const cond = self.parseExpr();
+    self.no_struct_literal = saved;
+    const then_body = self.parseBlock();
+
+    let else_body = ast.Range.empty();
+    if self.check(.Else, true) {
+      if self.check(.If) {
+        let one = ast.U32List.init(self.ast.arena);
+        one.push(self.parseIf());
+        else_body = self.ast.extra.append(one);
+      } else {
+        else_body = self.parseBlock();
       }
     }
+    return self.ast.ifStmt(kw.span(), cond, then_body, else_body);
+  }
+
+  fn parseWhile(self): u32 {
+    const kw = self.advance();
+    const saved = self.no_struct_literal;
+    self.no_struct_literal = true;
+    const cond = self.parseExpr();
+    self.no_struct_literal = saved;
+    const body = self.parseBlock();
+    return self.ast.whileStmt(kw.span(), cond, body);
+  }
+
+  fn parseFor(self): u32 {
+    const kw = self.advance();
+    const id = self.expect(.Id, "expected identifier");
+    self.expect(.In, "expected 'in'");
+    const saved = self.no_struct_literal;
+    self.no_struct_literal = true;
+    const start = self.parseExpr();
+
+    if self.check(.DotDot, true) {
+      const end = self.parseExpr();
+      self.no_struct_literal = saved;
+      return self.ast.forStmt(kw.span(), self.text(id), start, end, self.parseBlock());
+    }
+
+    self.no_struct_literal = saved;
+    return self.ast.foreachStmt(kw.span(), self.text(id), start, self.parseBlock());
+  }
+
+  fn parseExpr(self): u32 {
+    const lhs = self.parseTernary();
+    if lhs != 0 && self.check(.QuestionQuestion, true) {
+      const rhs = self.parseExpr();
+      if rhs == 0 { return 0; }
+      return self.ast.coalesce(lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseOr(self): u32 {
+    let lhs = self.parseAnd();
+    while lhs != 0 && self.check(.PipePipe, true) {
+      const rhs = self.parseAnd();
+      if rhs == 0 {
+        return 0;
+      }
+      lhs = self.ast.binary(.Or, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseAnd(self): u32 {
+    let lhs = self.parseBitor();
+    while lhs != 0 && self.check(.AmpersandAmpersand, true) {
+      const rhs = self.parseBitor();
+      if rhs == 0 {
+        return 0;
+      }
+      lhs = self.ast.binary(.And, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseBitor(self): u32 {
+    let lhs = self.parseBitxor();
+    while lhs != 0 && self.check(.Pipe, true) {
+      const rhs = self.parseBitxor();
+      if rhs == 0 {
+        return 0;
+      }
+      lhs = self.ast.binary(.Bitor, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseBitxor(self): u32 {
+    let lhs = self.parseBitand();
+    while lhs != 0 && self.check(.Caret, true) {
+      const rhs = self.parseBitand();
+      if rhs == 0 {
+        return 0;
+      }
+      lhs = self.ast.binary(.Bitxor, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseBitand(self): u32 {
+    let lhs = self.parseComparison();
+    while lhs != 0 && self.check(.Ampersand, true) {
+      const rhs = self.parseComparison();
+      if rhs == 0 {
+        return 0;
+      }
+      lhs = self.ast.binary(.Bitand, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseComparison(self): u32 {
+    let lhs = self.parseShift();
+    while lhs != 0 {
+      let op: ast.BinaryOp = .Add;
+      match true {
+        self.check(.EqualEqual, true) => { op = .Eq; },
+        self.check(.BangEqual, true) => { op = .Ne; },
+        self.check(.Less, true) => { op = .Lt; },
+        self.check(.LessEqual, true) => { op = .Le; },
+        self.check(.Greater, true) => { op = .Gt; },
+        self.check(.GreaterEqual, true) => { op = .Ge; },
+        _ => { return lhs; },
+      }
+      const rhs = self.parseShift();
+      if rhs == 0 { return 0; }
+      lhs = self.ast.binary(op, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseShift(self): u32 {
+    let lhs = self.parseAdditive();
+    while lhs != 0 {
+      let op: ast.BinaryOp = .Add;
+      match true {
+        self.check(.LessLess, true) => { op = .Shl; },
+        self.check(.GreaterGreater, true) => { op = .Shr; },
+        _ => { return lhs; },
+      }
+      const rhs = self.parseAdditive();
+      if rhs == 0 { return 0; }
+      lhs = self.ast.binary(op, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseAdditive(self): u32 {
+    let lhs = self.parseMultiplicative();
+    while lhs != 0 {
+      let op: ast.BinaryOp = .Add;
+      match true {
+        self.check(.Plus, true) => { op = .Add; },
+        self.check(.Minus, true) => { op = .Sub; },
+        _ => { return lhs; },
+      }
+      const rhs = self.parseMultiplicative();
+      if rhs == 0 { return 0; }
+      lhs = self.ast.binary(op, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseMultiplicative(self): u32 {
+    let lhs = self.parseCast();
+    while lhs != 0 {
+      let op: ast.BinaryOp = .Add;
+      match true {
+        self.check(.Star, true) => { op = .Mul; },
+        self.check(.Slash, true) => { op = .Div; },
+        self.check(.Percent, true) => { op = .Rem; },
+        _ => { return lhs; },
+      }
+      const rhs = self.parseCast();
+      if rhs == 0 { return 0; }
+      lhs = self.ast.binary(op, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  fn parseCast(self): u32 {
+    let e = self.parseUnary();
+    while e != 0 && self.check(.As, true) {
+      e = self.ast.cast(e, self.parseType());
+    }
+    return e;
+  }
+
+  fn parseUnary(self): u32 {
+    return match true {
+      self.check(.Bang, true) => self.ast.unary(.Not, self.parseUnary()),
+      self.check(.Minus, true) => self.ast.unary(.Neg, self.parseUnary()),
+      self.check(.Ampersand, true) => self.ast.unary(.Addr, self.parseUnary()),
+      _ => self.parsePostfix(),
+    };
+  }
+
+  fn parseTernary(self): u32 {
+    const cond = self.parseOr();
+    if cond == 0 || !self.check(.Question, true) { return cond; }
+
+    if self.current.kind.isPropagateFollower() {
+      return self.ast.propagate(cond);
+    }
+
+    const then = self.parseTernary();
+    if then == 0 { return 0; }
+
+    self.expect(.Colon, "expected ':' in ternary expression");
+    const els = self.parseTernary();
+    if els == 0 { return 0; }
+
+    return self.ast.ternary(cond, then, els);
+  }
+
+  fn parsePostfix(self): u32 {
+    let e = self.parsePrimary();
+    while true {
+      match true {
+        self.check(.Dot, true) => {
+          const name = self.expect(.Id, "expected field name after '.'");
+          e = self.ast.fieldAccess(e, name.span(), self.text(name));
+        },
+        self.check(.Lparen) && self.isField(e) => {
+          e = self.parseCallArgs(e);
+        },
+        self.check(.Lbrace) && !self.no_struct_literal && self.isModuleLit(e) => {
+          match self.ast.exprs.at(e).kind {
+            .Field(f) => {
+              e = self.parseStructBody(self.ast.exprs.at(e).span, f.name, self.fieldChainPath(f.base));
+            },
+            _ => {},
+          };
+        },
+        self.check(.Lbracket, true) => {
+          const idx = self.parseExpr();
+          match true {
+            self.check(.DotDot, true) => {
+              const end = self.parseExpr();
+              self.expect(.Rbracket, "expected ']' after slice range");
+              e = self.ast.sliceRange(e, idx, end);
+            },
+            _ => {
+              self.expect(.Rbracket, "expected ']' after index");
+              e = self.ast.index(e, idx);
+            },
+          }
+        },
+        self.check(.Bang, true) => {
+          e = self.ast.unwrap(e);
+        },
+        _ => { return e; }
+      }
+    }
+    return 0;
+  }
+
+  fn isField(self, e: u32): bool {
+    return match self.ast.exprs.at(e).kind {
+      .Field(f) => true,
+      _ => false,
+    };
+  }
+
+  fn fieldChainPath(self, e: u32): str {
+    match self.ast.exprs.at(e).kind {
+      .Id(n) => { return n; },
+      .Field(f) => {
+        const base = self.fieldChainPath(f.base);
+        if base.len == 0 {
+          return "";
+        }
+        return utils.joinPath(self.ast.arena, base, f.name);
+      },
+      _ => { return ""; },
+    };
+    return "";
+  }
+
+  fn isModuleLit(self, e: u32): bool {
+    return match self.ast.exprs.at(e).kind {
+      .Field(f) => self.fieldChainPath(f.base).len > 0,
+      _ => false,
+    };
+  }
+
+  fn parseStructBody(self, sp: diag.Span, type_name: str, module: str): u32 {
+    self.expect(.Lbrace, "expected '{' after struct name");
+    let inits = ast.U32List.init(self.ast.arena);
+    if !self.check(.Rbrace) {
+      while true {
+        if self.check(.Rbrace) { break; }
+        const name = self.expect(.Id, "expected field name");
+        self.expect(.Colon, "expected ':' after field name");
+        const value = self.parseExpr();
+        if value == 0 { return 0; }
+        let init: ast.FieldInit;
+        init.span = name.span();
+        init.name = self.text(name);
+        init.value = value;
+        inits.push(self.ast.field_inits.push(init));
+        if !self.check(.Comma, true) { break; }
+      }
+    }
+    self.expect(.Rbrace, "expected '}' after struct fields");
+    return self.ast.structLiteral(sp, type_name, module, self.ast.extra.append(inits));
+  }
+
+  fn parseMatch(self): u32 {
+    const kw = self.advance();
+    const saved = self.no_struct_literal;
+    self.no_struct_literal = true;
+    const scrutinee = self.parseExpr();
+    self.no_struct_literal = saved;
+
+    self.expect(.Lbrace, "expected '{' after match value");
+    let arms = ast.U32List.init(self.ast.arena);
+
+    while !self.check(.Rbrace) && !self.check(.Eof) {
+      let arm = ast.MatchArm.init();
+      arm.span = self.span();
+
+      if !self.check(.Underscore, true) {
+        arm.pattern = self.parseExpr();
+        let bound = false;
+        if arm.pattern != 0 {
+          match self.ast.exprs.at(arm.pattern).kind {
+            .EnumLiteral(el) => {
+              if el.payload != 0 {
+                match self.ast.exprs.at(el.payload).kind {
+                  .Id(n) => {
+                    arm.binding = n;
+                    self.ast.exprs.at(arm.pattern).kind = .EnumLiteral(ast.EnumLiteralExpr{name: el.name, payload: 0});
+                    bound = true;
+                  },
+                  _ => {
+                    self.parseError("variant binding must be an identifier");
+                    return 0;
+                  },
+                };
+              }
+            },
+            _ => {},
+          };
+        }
+        if !bound && self.check(.DotDotDot, true) {
+          arm.pattern_end = self.parseExpr();
+        }
+      }
+
+      if self.check(.Comma) {
+        if arm.pattern == 0 {
+          self.parseError("'_' cannot be combined with other patterns");
+          return 0;
+        }
+        self.advance();
+        arm.or_next = true;
+        arms.push(self.ast.match_arms.push(arm));
+        continue;
+      }
+
+      self.expect(.FatArrow, "expected '=>' after match pattern");
+      if self.check(.Lbrace) {
+        arm.is_block = true;
+        arm.body = self.parseBlock();
+      } else {
+        arm.value = self.parseExpr();
+      }
+      arms.push(self.ast.match_arms.push(arm));
+
+      if !self.check(.Comma, true) && !arm.is_block {
+        break;
+      }
+    }
+
+    self.expect(.Rbrace, "expected '}' after match arms");
+    return self.ast.matchExpr(kw.span(), scrutinee, self.ast.extra.append(arms));
+  }
+
+  fn parseCallArgs(self, callee: u32): u32 {
+    self.expect(.Lparen, "expected '(' before arguments");
+    let args = ast.U32List.init(self.ast.arena);
+    if !self.check(.Rparen) {
+      while true {
+        const arg = self.parseExpr();
+        if arg == 0 {
+          break;
+        }
+        args.push(arg);
+        if !self.check(.Comma, true) {
+          break;
+        }
+      }
+    }
+    self.expect(.Rparen, "expected ')' after arguments");
+    return self.ast.call(callee, self.ast.extra.append(args), false);
+  }
+
+  fn parsePrimary(self): u32 {
+    const t = self.current;
+    const sp = self.span();
+    match self.current.kind {
+      .True => {
+        self.advance();
+        return self.ast.boolean(true, sp);
+      },
+      .False => {
+        self.advance();
+        return self.ast.boolean(false, sp);
+      },
+      .Number => {
+        self.advance();
+        return self.ast.number(sp, t.numberText(self.ast.arena));
+      },
+      .String => {
+        self.advance();
+        return self.ast.string(sp, self.text(t));
+      },
+      .Import => {
+        self.advance();
+        self.expect(.Lparen, "expected '(' after 'import'");
+        const path = self.expect(.String, "expected a module path string");
+        self.expect(.Rparen, "expected ')' after import path");
+        return self.ast.importExpr(sp, self.text(path));
+      },
+      .Sizeof => {
+        self.advance();
+        self.expect(.Lparen, "expected '(' after 'sizeof'");
+        const target = self.parseType();
+        self.expect(.Rparen, "expected ')' after sizeof type");
+        return self.ast.sizeofExpr(sp, target);
+      },
+      .Id => {
+        self.advance();
+        if self.check(.Lparen) {
+          return self.parseCallArgs(self.ast.id(sp, self.text(t)));
+        }
+        if self.check(.Lbrace) && !self.no_struct_literal {
+          return self.parseStructBody(sp, self.text(t), "");
+        }
+        return self.ast.id(sp, self.text(t));
+      },
+      .Dot => {
+        self.advance();
+        const name = self.expect(.Id, "expected enum member name after '.'");
+        let payload: u32 = 0;
+        if self.check(.Lparen, true) {
+          payload = self.parseExpr();
+          self.expect(.Rparen, "expected ')' after variant payload");
+        }
+        return self.ast.enumLiteral(name.span(), self.text(name), payload);
+      },
+      .Match => { return self.parseMatch(); },
+      .Null => {
+        self.advance();
+        return self.ast.nullExpr(sp);
+      },
+      .Lbrace => {
+        if self.no_struct_literal {
+          self.parseError("expected an expression");
+          return 0;
+        }
+        return self.parseStructBody(sp, "", "");
+      },
+      .Lparen => {
+        self.advance();
+        const inner = self.parseExpr();
+        self.expect(.Rparen, "expected ')'");
+        return inner;
+      },
+      .Lbracket => {
+        self.advance();
+        let elems = ast.U32List.init(self.ast.arena);
+        while !self.check(.Rbracket) {
+          const elem = self.parseExpr();
+          if elem == 0 {
+            break;
+          }
+          elems.push(elem);
+          if !self.check(.Comma, true) {
+            break;
+          }
+        }
+        self.expect(.Rbracket, "expected ']' after array elements");
+        return self.ast.array(sp, self.ast.extra.append(elems));
+      },
+      _ => {
+        self.parseError("expected an expression");
+        return 0;
+      },
+    };
+    return 0;
+  }
+
+  fn parseBinding(self): Binding {
+    const mutable = self.check(.Let);
+    const kw = self.advance();
+    const id = self.expect(.Id, "expected identifier");
+
+    let ty: ast.Type;
+    if self.check(.Colon, true) {
+      ty = self.parseType();
+    }
+
+    let init: u32 = 0;
+    if self.check(.Equal, true) {
+      init = self.parseExpr();
+    } else if !mutable {
+      self.parseError("const requires an initializer");
+    }
+
+    self.expect(.Semicolon, "expected ';' after binding");
+    return {
+      span: kw.span(),
+      name: self.text(id),
+      ty: ty,
+      mutable: mutable,
+      init: init,
+    };
+  }
+
+  fn parseGlobalBinding(self, vis: ast.Visibility): u32 {
+    const b = self.parseBinding();
+    if b.init != 0 {
+      match self.ast.exprs.at(b.init).kind {
+        .Import(path) => {
+          return self.ast.importDecl(b.span, vis, b.name, path);
+        },
+        _ => {},
+      }
+    }
+    return self.ast.globalDecl(b.span, vis, b.name, b.ty, b.mutable, b.init);
   }
 }
+
+fn parseArraySize(text: str): i64 {
+  let v: i64 = 0;
+  let i: i64 = 0;
+  let base: i64 = 10;
+
+  if text.len > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+    base = 16;
+    i = 2;
+  }
+
+  while i < text.len {
+    const d = std.ascii.hexToI64(text[i]) ?? -1;
+    if d < 0 { break; }
+    v = v * base + d;
+    i += 1;
+  }
+
+  return v;
+}
+
+fn containsDot(text: str): bool {
+  let i: i64 = 0;
+  while i < text.len {
+    if text[i] == '.' {
+      return true;
+    }
+    i += 1;
+  }
+  return false;
+}
+
+

@@ -1,0 +1,43 @@
+--TEST--
+a method body may reference struct fields and enum methods of types declared later in the file: every declaration's types resolve before any method body is checked
+--FILE--
+const std = import("std");
+
+enum E {
+  A,
+  B,
+
+  pub fn toString(self): str {
+    return match self { .A => "a", .B => "b" };
+  }
+}
+
+enum K {
+  Boolean: bool,
+  Bin: BE,
+}
+
+struct W {
+  kind: K,
+
+  pub fn go(self): str {
+    return match self.kind {
+      .Bin(b) => b.op.toString(),
+      _ => "?",
+    };
+  }
+}
+
+// declared after the method that reads its enum-typed field
+struct BE { op: E }
+
+pub fn main(): i32 {
+  let w: W;
+  w.kind = .Bin(BE{op: .B});
+  std.io.println("{}", w.go());
+  return w.go() == "b" ? 7 : 1;
+}
+--EXPECT--
+b
+--EXIT--
+7

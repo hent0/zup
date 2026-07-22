@@ -4,3 +4,5 @@ build/
 tests/**/*.diff
 tests/**/*.out
 tests/**/*.err
+.nvim.lua
+stage1/build/

@@ -104,14 +104,14 @@ fn add(severity: Severity, span: Span, kind: DiagKind) {
 }
 
 fn render(path: str, src: str, d: Diagnostic) {
-  std.io.printerr("{}:{}:{}: {}: ", path, d.span.line, d.span.col, d.severity.toString());
+  std.io.printerr("zup: {}: ", d.severity.toString());
   match d.kind {
-    .Message(m) => std.io.printerrln("{}", m),
-    .UnexpectedToken(t) => std.io.printerrln("unexpected token {}", t),
-    .Undefined(n) => std.io.printerrln("undefined '{}'", n),
-    .Expected(w) => std.io.printerrln("expected {}", w),
+    .Message(m) => std.io.printerr("{}", m),
+    .UnexpectedToken(t) => std.io.printerr("unexpected token {}", t),
+    .Undefined(n) => std.io.printerr("undefined '{}'", n),
+    .Expected(w) => std.io.printerr("expected {}", w),
   };
-  caret(src, d.span);
+  std.io.printerrln(" {} [{}:{}]", path, d.span.line, d.span.col);
 }
 
 fn caret(src: str, span: Span) {

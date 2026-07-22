@@ -44,6 +44,7 @@
           just
           valgrind # memory debugging
           gdb
+          llvm
         ];
       };
     });

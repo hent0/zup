@@ -272,6 +272,30 @@ static bool is_agg(ctx_t *ctx, type_t type) {
 
 static size_t round_up8(size_t n) { return (n + 7) / 8 * 8; }
 
+static type_t rel_member_type(ctx_t *ctx, const char *owner_ref, type_t t) {
+  const char *dot = owner_ref != NULL ? strrchr(owner_ref, '.') : NULL;
+  if (dot == NULL) {
+    return t;
+  }
+  if ((t.kind == TYPE_STRUCT || t.kind == TYPE_ENUM) && t.name != NULL &&
+      strchr(t.name, '.') == NULL) {
+    char *q = arena_format(ctx->arena, "%.*s.%s", (int)(dot - owner_ref),
+                           owner_ref, t.name);
+    if (find_struct(ctx, q) != NULL) {
+      t.name = q;
+    }
+    return t;
+  }
+  if ((t.kind == TYPE_ARRAY || t.kind == TYPE_SLICE ||
+       t.kind == TYPE_OPTIONAL || t.kind == TYPE_POINTER) &&
+      t.element != NULL) {
+    type_t *element = arena_alloc(ctx->arena, sizeof(type_t));
+    *element = rel_member_type(ctx, owner_ref, *t.element);
+    t.element = element;
+  }
+  return t;
+}
+
 static size_t type_size(ctx_t *ctx, type_t type) {
   switch (type.kind) {
   case TYPE_BOOL:
@@ -299,13 +323,14 @@ static size_t type_size(ctx_t *ctx, type_t type) {
   case TYPE_OPTIONAL:
     return 8 + round_up8(type_size(ctx, *type.element));
   case TYPE_STRUCT: {
-    const decl_t *s = find_struct(ctx, struct_ref(ctx, type.name));
+    const char *ref = struct_ref(ctx, type.name);
+    const decl_t *s = find_struct(ctx, ref);
     if (s == NULL) {
       return 8;
     }
     size_t n = 0;
     for (field_t *f = s->strct.fields; f != NULL; f = f->next) {
-      n += round_up8(type_size(ctx, f->type));
+      n += round_up8(type_size(ctx, rel_member_type(ctx, ref, f->type)));
     }
     return n ? n : 8;
   }
@@ -313,11 +338,12 @@ static size_t type_size(ctx_t *ctx, type_t type) {
     if (!is_tagged_enum(ctx, type)) {
       return 8;
     }
-    const decl_t *e = find_struct(ctx, struct_ref(ctx, type.name));
+    const char *ref = struct_ref(ctx, type.name);
+    const decl_t *e = find_struct(ctx, ref);
     size_t max = 0;
     for (enum_member_t *m = e->enm.members; m != NULL; m = m->next) {
       if (m->has_payload) {
-        size_t s = type_size(ctx, m->payload);
+        size_t s = type_size(ctx, rel_member_type(ctx, ref, m->payload));
         if (s > max) {
           max = s;
         }
@@ -330,7 +356,8 @@ static size_t type_size(ctx_t *ctx, type_t type) {
   }
 }
 
-static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm);
+static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm,
+                                 const char *owner_ref);
 
 static size_t c_abi_align(ctx_t *ctx, type_t type) {
   switch (type.kind) {
@@ -352,13 +379,14 @@ static size_t c_abi_align(ctx_t *ctx, type_t type) {
     return a > 1 ? a : 1;
   }
   case TYPE_STRUCT: {
-    const decl_t *s = find_struct(ctx, struct_ref(ctx, type.name));
+    const char *ref = struct_ref(ctx, type.name);
+    const decl_t *s = find_struct(ctx, ref);
     if (s == NULL) {
       return 8;
     }
     size_t align = 1;
     for (field_t *f = s->strct.fields; f != NULL; f = f->next) {
-      size_t fa = c_abi_align(ctx, f->type);
+      size_t fa = c_abi_align(ctx, rel_member_type(ctx, ref, f->type));
       if (fa > align) {
         align = fa;
       }
@@ -394,28 +422,31 @@ static size_t c_abi_size(ctx_t *ctx, type_t type) {
     return (n + a - 1) / a * a;
   }
   case TYPE_STRUCT: {
-    const decl_t *s = find_struct(ctx, struct_ref(ctx, type.name));
+    const char *ref = struct_ref(ctx, type.name);
+    const decl_t *s = find_struct(ctx, ref);
     if (s == NULL) {
       return 8;
     }
     size_t off = 0;
     size_t align = 1;
     for (field_t *f = s->strct.fields; f != NULL; f = f->next) {
-      size_t fa = c_abi_align(ctx, f->type);
+      type_t fty = rel_member_type(ctx, ref, f->type);
+      size_t fa = c_abi_align(ctx, fty);
       off = (off + fa - 1) / fa * fa;
-      off += c_abi_size(ctx, f->type);
+      off += c_abi_size(ctx, fty);
       if (fa > align) {
         align = fa;
       }
     }
     return (off + align - 1) / align * align;
   }
-  case TYPE_ENUM:
+  case TYPE_ENUM: {
     if (!is_tagged_enum(ctx, type)) {
       return 8;
     }
-    return 8 + 8 * enum_payload_slots(
-                       ctx, find_struct(ctx, struct_ref(ctx, type.name)));
+    const char *ref = struct_ref(ctx, type.name);
+    return 8 + 8 * enum_payload_slots(ctx, find_struct(ctx, ref), ref);
+  }
   default:
     return 8;
   }
@@ -555,11 +586,12 @@ static const char *cabi_load_args(ctx_t *ctx, const char *addr, cabi_t c) {
   return arena_format(ctx->arena, "%s %%%u, %s %%%u", c.ty[0], lo, c.ty[1], hi);
 }
 
-static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm) {
+static size_t enum_payload_slots(ctx_t *ctx, const decl_t *enm,
+                                 const char *owner_ref) {
   size_t max = 0;
   for (enum_member_t *m = enm->enm.members; m != NULL; m = m->next) {
     if (m->has_payload) {
-      size_t s = type_size(ctx, m->payload);
+      size_t s = type_size(ctx, rel_member_type(ctx, owner_ref, m->payload));
       if (s > max) {
         max = s;
       }
@@ -1261,7 +1293,13 @@ static value_t emit_str_equality(ctx_t *ctx, expr_t *expr) {
   expr_t *rhs = expr->binary.rhs;
 
   const char *lhs_addr = lhs->kind == EXPR_STRING ? NULL : emit_addr(ctx, lhs);
+  if (lhs_addr == NULL && lhs->kind != EXPR_STRING) {
+    lhs_addr = emit_value(ctx, lhs).ref;
+  }
   const char *rhs_addr = rhs->kind == EXPR_STRING ? NULL : emit_addr(ctx, rhs);
+  if (rhs_addr == NULL && rhs->kind != EXPR_STRING) {
+    rhs_addr = emit_value(ctx, rhs).ref;
+  }
 
   const char *lhs_len = str_len(ctx, lhs, lhs_addr);
   const char *rhs_len = str_len(ctx, rhs, rhs_addr);
@@ -1810,17 +1848,18 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       bool recv_is_ptr = recv->type.kind == TYPE_POINTER;
       type_t recv_type = recv_is_ptr ? *recv->type.element : recv->type;
       if (recv_type.kind == TYPE_ENUM && recv_type.name != NULL) {
+        const char *recv_ref = struct_ref(ctx, recv_type.name);
         name = NULL;
         for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
           if (s->decl->kind == DECL_ENUM &&
-              strcmp(s->decl->name, recv_type.name) == 0) {
+              (strcmp(s->decl->name, recv_type.name) == 0 ||
+               strcmp(s->name, recv_ref) == 0)) {
             name = arena_format(ctx->arena, "%s.%s", s->name, member);
             break;
           }
         }
         if (name == NULL) {
-          name = mangle(
-              ctx, arena_format(ctx->arena, "%s.%s", recv_type.name, member));
+          name = arena_format(ctx->arena, "%s.%s", recv_ref, member);
         }
       } else {
         name = arena_format(ctx->arena, "%s.%s",
@@ -1862,9 +1901,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
         recv->type.kind == TYPE_POINTER ? *recv->type.element : recv->type;
     const decl_t *owner = NULL;
     if (rtype.kind == TYPE_ENUM && rtype.name != NULL) {
+      const char *rref = struct_ref(ctx, rtype.name);
       for (ctx_struct_t *s = ctx->structs; s != NULL; s = s->next) {
         if (s->decl->kind == DECL_ENUM &&
-            strcmp(s->decl->name, rtype.name) == 0) {
+            (strcmp(s->decl->name, rtype.name) == 0 ||
+             strcmp(s->name, rref) == 0)) {
           owner = s->decl;
           break;
         }
@@ -3419,7 +3460,8 @@ static void emit_struct_types(ctx_t *ctx, decl_t *decl) {
       return;
     }
     fprintf(ctx->out, "%%%s = type { i32, [%zu x i64] }\n",
-            mangle(ctx, decl->name), enum_payload_slots(ctx, decl));
+            mangle(ctx, decl->name),
+            enum_payload_slots(ctx, decl, mangle(ctx, decl->name)));
     return;
   }
   if (decl->kind != DECL_STRUCT) {

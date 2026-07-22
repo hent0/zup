@@ -9,9 +9,10 @@ pub struct Source {
   pub path: str,
   pub src: str,
 
-  pub fn init(path: str, arena: std.mem.Arena): SourceResult {
-    // TODO: Add reading from stdin
-    std.assert(path != "-", "reading from stdin not implemented");
+  pub fn init(path: str, arena: *std.mem.Arena): SourceResult {
+    if path == "-" {
+      return readStdin(arena);
+    }
 
     let file: std.io.File = std.io.File{fd: -1};
     match std.io.open(path, .Read) {
@@ -45,4 +46,31 @@ pub struct Source {
       src: buf[0..total] as str,
     });
   }
+}
+
+fn readStdin(arena: *std.mem.Arena): SourceResult {
+  const file = std.io.stdin();
+  let cap: i64 = 4096;
+  let buf: []u8 = arena.alloc(cap);
+  let total: i64 = 0;
+  let reading = true;
+  while reading {
+    if total >= cap {
+      let bigger: []u8 = arena.alloc(cap * 2);
+      let i: i64 = 0;
+      while i < total {
+        bigger[i] = buf[i];
+        i += 1;
+        buf = bigger;
+        cap *=2;
+      }
+    }
+
+    match file.read(buf[total..cap]) {
+      .Ok(n) => { if n == 0 { reading = false; } else { total += n; } },
+      .Err(e) => { return .Err(e); },
+    }
+  }
+
+  return .Ok(Source{path: "<stdin>", src: buf[0..total] as str});
 }

@@ -1,0 +1,20 @@
+--TEST--
+a non-entry module calling a method on an enum imported from a third module mangles the callee with the enum's prefix, not the caller's
+--PREPARE--
+printf 'pub enum Kind {\n  A,\n  B,\n\n  pub fn score(self): i64 {\n    return match self { .A => 1, .B => 2 };\n  }\n}\n' > "${TMPDIR:-/tmp}/zup_kb.zup"
+printf 'const kb = import("zup_kb.zup");\n\npub fn run(): i64 {\n  const k: kb.Kind = .B;\n  return k.score();\n}\n' > "${TMPDIR:-/tmp}/zup_ka.zup"
+--FILE--
+const std = import("std");
+const ka = import("zup_ka.zup");
+
+pub fn main(): i32 {
+  const v = ka.run();
+  std.io.println("{}", v);
+  return v as i32;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_kb.zup" "${TMPDIR:-/tmp}/zup_ka.zup"
+--EXPECT--
+2
+--EXIT--
+2

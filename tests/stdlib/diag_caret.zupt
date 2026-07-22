@@ -1,5 +1,5 @@
 --TEST--
-stage1 diag: accumulates structured diagnostics and renders each with a source line and a caret under the column
+stage1 diag: accumulates structured diagnostics and renders each in stage0's format "zup: <severity>: <msg> <path> [<line>:<col>]"
 --PREPARE--
 cp stage1/src/diag.zup "${TMPDIR:-/tmp}/zup_diag.zup"
 --FILE--
@@ -22,14 +22,8 @@ rm -f "${TMPDIR:-/tmp}/zup_diag.zup"
 --EXPECT--
 errors=2 hadErrors=true
 --EXPECTERR--
-t.zup:1:9: error: expected an expression
-    let x = ;
-            ^
-t.zup:1:5: warning: unused binding 'x'
-    let x = ;
-        ^
-t.zup:2:1: error: undefined 'foo'
-    foo()
-    ^
+zup: error: expected an expression t.zup [1:9]
+zup: warning: unused binding 'x' t.zup [1:5]
+zup: error: undefined 'foo' t.zup [2:1]
 --EXIT--
 0

@@ -1470,10 +1470,17 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
       result = (exprty_t){.kind = TYPE_VOID, .ok = false};
       break;
     }
-    result = (exprty_t){.kind = field->type.kind,
-                        .name = field->type.name,
-                        .element = field->type.element,
-                        .array_length = field->type.array_length,
+    type_t fty = field->type;
+    const char *fdot = base.name != NULL ? strrchr(base.name, '.') : NULL;
+    if (fdot != NULL) {
+      const char *fstem =
+          arena_format(sema->arena, "%.*s", (int)(fdot - base.name), base.name);
+      fty = qualify_param_type(sema, fty, fstem);
+    }
+    result = (exprty_t){.kind = fty.kind,
+                        .name = fty.name,
+                        .element = fty.element,
+                        .array_length = fty.array_length,
                         .ok = true};
     break;
   }
@@ -2668,10 +2675,6 @@ static void check_struct(sema_t *sema, const decl_t *strct) {
       }
     }
   }
-  for (decl_t *member = strct->strct.members; member != NULL;
-       member = member->next) {
-    check_fn(sema, member);
-  }
 }
 
 static void check_enum(sema_t *sema, const decl_t *enm) {
@@ -2709,10 +2712,6 @@ static void check_enum(sema_t *sema, const decl_t *enm) {
         break;
       }
     }
-  }
-  for (decl_t *method = enm->enm.methods; method != NULL;
-       method = method->next) {
-    check_fn(sema, method);
   }
 }
 
@@ -2979,6 +2978,15 @@ int semantic_check(unit_t *unit, arena_t *arena, bool require_main) {
       check_enum(&sema, types.structs[i].decl);
     } else {
       check_struct(&sema, types.structs[i].decl);
+    }
+  }
+
+  for (size_t i = 0; i < local_type_count; i++) {
+    decl_t *owner = types.structs[i].decl;
+    decl_t *members =
+        owner->kind == DECL_STRUCT ? owner->strct.members : owner->enm.methods;
+    for (decl_t *m = members; m != NULL; m = m->next) {
+      check_fn(&sema, m);
     }
   }
 

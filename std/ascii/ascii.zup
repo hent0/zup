@@ -33,3 +33,19 @@ pub fn hexToI64(c: u8): ?i64 {
     _ => null,
   };
 }
+
+pub fn endsWith(needle: str, haystack: str): bool {
+  if needle.len > haystack.len {
+    return false;
+  }
+
+  return haystack[haystack.len - needle.len..haystack.len] == needle;
+}
+
+pub fn startsWith(needle: str, haystack: str): bool {
+  if needle.len > haystack.len {
+    return false;
+  }
+
+  return haystack[0..needle.len] == needle;
+}

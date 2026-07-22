@@ -1,0 +1,27 @@
+--TEST--
+field access on an imported struct yields module-qualified types: nested struct fields read through it, and a match payload binding of an imported tagged enum exposes the payload's fields
+--PREPARE--
+printf 'pub struct Pair {\n  pub x: i64,\n  pub y: i64,\n}\n\npub enum Shape {\n  Dot,\n  Line: Pair,\n}\n\npub struct Holder {\n  pub shape: Shape,\n  pub pair: Pair,\n}\n' > "${TMPDIR:-/tmp}/zup_paymod.zup"
+--FILE--
+const std = import("std");
+const m = import("zup_paymod.zup");
+
+pub fn main(): i32 {
+  let h: m.Holder;
+  h.pair = m.Pair{x: 1, y: 2};
+  h.shape = .Line(m.Pair{x: 30, y: 9});
+
+  const n = match h.shape {
+    .Line(p) => p.x + p.y,
+    _ => 0,
+  };
+
+  std.io.println("n={} px={} py={}", n, h.pair.x, h.pair.y);
+  return (n + h.pair.x + h.pair.y) as i32;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_paymod.zup"
+--EXPECT--
+n=39 px=1 py=2
+--EXIT--
+42

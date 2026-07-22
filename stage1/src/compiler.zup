@@ -3,6 +3,8 @@ const lexer = import("lexer.zup");
 const parser = import("parser.zup");
 const source = import("source.zup");
 const diag = import("diag.zup");
+const ast = import("ast.zup");
+const loader = import("loader.zup");
 
 pub struct Source {
   path: str,
@@ -46,36 +48,34 @@ pub struct CompilerOpts {
 }
 
 pub struct Compiler {
-  arena: std.mem.Arena,
+  arena: *std.mem.Arena,
 
-  pub fn init(arena: std.mem.Arena): Compiler {
+  pub fn init(arena: *std.mem.Arena): Compiler {
     return {
       arena: arena,
     };
   }
 
   pub fn compile(self, opts: CompilerOpts) {
-    match source.Source.init(opts.input, self.arena) {
-      .Ok(src) => {
-        match opts.mode {
-          .Tokenize => self.tokenize(src),
-          .Ast => self.parse(src),
-          _ => {
-            std.io.printerrln("Not implemented!");
-            std.exit(2);
+    match opts.mode {
+      .Tokenize => {
+        match source.Source.init(opts.input, self.arena) {
+          .Ok(src) => {
+            self.tokenize(src);
+            diag.report(src.path, src.src);
+            diag.expectNoErrors();
+          },
+          .Err(e) => {
+            std.io.printerrln("zup: error: cannot read '{}'", opts.input);
+            std.exit(1);
           },
         };
-
-        diag.report(src.path, src.src);
-        diag.expectNoErrors();
       },
-      .Err(e) => {
-        match e {
-          .NotFound(p) => std.io.printerrln("error: cannot open '{}': no such file", p),
-          .Permission(p) => std.io.printerrln("error: cannot open '{}': permission denied", p),
-          .Errno(c) => std.io.printerrln("error: cannot open '{}': errno {}", opts.input, c),
-        };
-        std.exit(1);
+      .Ast => self.parse(opts.input),
+      _ => {
+        self.parseOnly(opts.input);
+        std.io.printerrln("Not implemented!");
+        std.exit(2);
       },
     };
   }
@@ -89,8 +89,18 @@ pub struct Compiler {
     }
   }
 
-  fn parse(self, src: source.Source) {
-    let p = parser.Parser.init(src, self.arena);
-    p.parse();
+  fn parseOnly(self, path: str) {
+    let a = ast.Ast.init(self.arena);
+    loader.load(&a, path);
+  }
+
+  fn parse(self, path: str) {
+    let a = ast.Ast.init(self.arena);
+
+    const entry_mod = loader.load(&a, path);
+
+    if entry_mod != 0 && !diag.hadErrors() {
+      a.decls.at(a.modules.at(entry_mod).root).dump(&a, std.io.stdout(), 0);
+    }
   }
 }

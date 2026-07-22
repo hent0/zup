@@ -1,0 +1,33 @@
+const std = import("std");
+
+pub fn joinPath(arena: *std.mem.Arena, a: str, b: str): str {
+  return concat(arena, a, ".", b);
+}
+
+pub fn withGot(arena: *std.mem.Arena, msg: str, got: str): str {
+  return concat(arena, msg, " (got ", got, ")");
+}
+
+pub fn concat(arena: *std.mem.Arena, a: str, b: str, c: str = "", d: str = "", e: str = "", f: str = "", g: str = "", h: str = "", i: str = ""): str {
+  let buf = arena.alloc(a.len + b.len + c.len + d.len + e.len + f.len + g.len + h.len + i.len);
+  let n: i64 = 0;
+  let j: i64 = 0;
+  while j < a.len { buf[n] = a[j]; n += 1; j += 1; }
+  j = 0;
+  while j < b.len { buf[n] = b[j]; n += 1; j += 1; }
+  j = 0;
+  while j < c.len { buf[n] = c[j]; n += 1; j += 1; }
+  j = 0;
+  while j < d.len { buf[n] = d[j]; n += 1; j += 1; }
+  j = 0;
+  while j < e.len { buf[n] = e[j]; n += 1; j += 1; }
+  j = 0;
+  while j < f.len { buf[n] = f[j]; n += 1; j += 1; }
+  j = 0;
+  while j < g.len { buf[n] = g[j]; n += 1; j += 1; }
+  j = 0;
+  while j < h.len { buf[n] = h[j]; n += 1; j += 1; }
+  j = 0;
+  while j < i.len { buf[n] = i[j]; n += 1; j += 1; }
+  return buf[0..n] as str;
+}

@@ -1,10 +1,11 @@
 const std = import("std");
+const flag = import("flag");
 const compiler = import("compiler.zup");
 
 const version = "0.0.1";
 
 fn parseArgs(args: []str): compiler.CompilerOpts {
-  let fs = std.flag.FlagSet.init()
+  let fs = flag.FlagSet.init()
     .addStr("o", "", "output path")
     .addBool("tokenize", false, "output only tokens")
     .addBool("ir", false, "output only LLVM IR")
@@ -57,7 +58,7 @@ pub fn main(args: []str): i32 {
   const arena = std.mem.Arena.init();
   defer arena.destroy();
 
-  const c = compiler.Compiler.init(arena);
+  const c = compiler.Compiler.init(&arena);
   c.compile(opts);
 
   return 0;

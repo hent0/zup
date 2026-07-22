@@ -1,0 +1,3249 @@
+const std = import("std");
+const diag = import("diag.zup");
+const ast = import("ast.zup");
+const utils = import("utils.zup");
+
+struct Entry {
+  name: str,
+  decl: u32,
+}
+
+struct Tab {
+  arena: *std.mem.Arena,
+  items: []Entry,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): Tab {
+    let t: Tab;
+    t.arena = arena;
+    return t;
+  }
+
+  pub fn push(self, name: str, decl: u32) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Entry)) as []Entry;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = Entry{name: name, decl: decl};
+    self.len += 1;
+  }
+
+  pub fn lookup(self, name: str): u32 {
+    let i: i64 = 0;
+    while i < self.len {
+      if self.items[i].name == name {
+        return self.items[i].decl;
+      }
+      i += 1;
+    }
+    return 0;
+  }
+}
+
+struct Visited {
+  names: [512]str,
+  count: i64,
+
+  fn contains(self, name: str): bool {
+    let i: i64 = 0;
+    while i < self.count {
+      if self.names[i] == name {
+        return true;
+      }
+      i += 1;
+    }
+    return false;
+  }
+
+  fn add(self, name: str) {
+    if self.count < 512 {
+      self.names[self.count] = name;
+      self.count += 1;
+    }
+  }
+}
+
+struct ExprTy {
+  ty: ast.Type,
+  ok: bool,
+}
+
+fn fail(): ExprTy {
+  let r: ExprTy;
+  r.ty.kind = .Void;
+  return r;
+}
+
+fn okKind(kind: ast.TypeKind): ExprTy {
+  let r: ExprTy;
+  r.ty.kind = kind;
+  r.ok = true;
+  return r;
+}
+
+fn unknownTy(): ast.Type {
+  let t: ast.Type;
+  return t;
+}
+
+fn kindTy(kind: ast.TypeKind): ast.Type {
+  let t: ast.Type;
+  t.kind = kind;
+  return t;
+}
+
+struct Local {
+  name: str,
+  ty: ast.Type,
+  mutable: bool,
+  is_loop_var: bool,
+}
+
+struct Scope {
+  arena: *std.mem.Arena,
+  items: []Local,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): Scope {
+    let s: Scope;
+    s.arena = arena;
+    return s;
+  }
+
+  pub fn push(self, l: Local) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Local)) as []Local;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = l;
+    self.len += 1;
+  }
+
+  pub fn lookup(self, name: str): i64 {
+    let i: i64 = 0;
+    while i < self.len {
+      if self.items[i].name == name {
+        return i;
+      }
+      i += 1;
+    }
+    return -1;
+  }
+
+  pub fn ty(self, idx: i64): ast.Type {
+    return self.items[idx].ty;
+  }
+
+  pub fn isMutable(self, idx: i64): bool {
+    return self.items[idx].mutable;
+  }
+
+  pub fn isLoopVar(self, idx: i64): bool {
+    return self.items[idx].is_loop_var;
+  }
+}
+
+pub struct Sema {
+  a: *ast.Ast,
+  types: Tab,
+  local_types: i64,
+  fns: Tab,
+  globals: Tab,
+  reachable: ast.ModuleList,
+  module: u32,
+  gscope: Scope,
+  scope: Scope,
+  has_scope: bool,
+  cur_fn: u32,
+  loop_depth: i64,
+  stem: str,
+
+  fn rootMembers(self): ast.Range {
+    return match self.a.decls.at(self.a.modules.at(self.module).root).kind {
+      .Container(members) => members,
+      _ => ast.Range.empty(),
+    };
+  }
+
+  fn registerLocals(self) {
+    const members = self.rootMembers();
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      const name = self.a.decls.at(di).name;
+      match self.a.decls.at(di).kind {
+        .Fn(f) => {
+          if self.fns.lookup(name) != 0 {
+            diag.error(self.a.decls.at(di).span,
+              .Message(utils.concat(self.a.arena, "redefinition of function '", name, "'")));
+          } else {
+            self.fns.push(name, di);
+          }
+        },
+        .Struct(s) => {
+          if self.types.lookup(name) != 0 {
+            diag.error(self.a.decls.at(di).span,
+              .Message(utils.concat(self.a.arena, "redefinition of type '", name, "'")));
+          } else {
+            self.types.push(name, di);
+          }
+        },
+        .Enum(e) => {
+          if self.types.lookup(name) != 0 {
+            diag.error(self.a.decls.at(di).span,
+              .Message(utils.concat(self.a.arena, "redefinition of type '", name, "'")));
+          } else {
+            self.types.push(name, di);
+          }
+        },
+        _ => {},
+      };
+      i += 1;
+    }
+    self.local_types = self.types.len;
+  }
+
+  fn collectReachable(self, module: u32) {
+    let seen: i64 = 1;
+    while seen < self.reachable.len {
+      if self.reachable.at(seen as u32).root == self.a.modules.at(module).root {
+        return;
+      }
+      seen += 1;
+    }
+    self.reachable.push(ast.Module{
+      path: self.a.modules.at(module).path,
+      root: self.a.modules.at(module).root,
+      loading: false,
+    });
+
+    const members = self.moduleMembers(module);
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).visibility == .Public {
+        match self.a.decls.at(di).kind {
+          .Import(imp) => {
+            if imp.resolved != 0 {
+              self.collectReachable(imp.resolved);
+            }
+          },
+          _ => {},
+        };
+      }
+      i += 1;
+    }
+  }
+
+  fn moduleMembers(self, module: u32): ast.Range {
+    return match self.a.decls.at(self.a.modules.at(module).root).kind {
+      .Container(members) => members,
+      _ => ast.Range.empty(),
+    };
+  }
+
+  fn membersOfRoot(self, root: u32): ast.Range {
+    return match self.a.decls.at(root).kind {
+      .Container(members) => members,
+      _ => ast.Range.empty(),
+    };
+  }
+
+  fn registerImports(self) {
+    const members = self.rootMembers();
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      match self.a.decls.at(di).kind {
+        .Import(imp) => {
+          if imp.resolved != 0 {
+            self.collectReachable(imp.resolved);
+          }
+        },
+        _ => {},
+      };
+      i += 1;
+    }
+
+    let r: i64 = 1;
+    while r < self.reachable.len {
+      const stem = moduleStem(self.a.arena, self.reachable.at(r as u32).path);
+      const mmembers = self.membersOfRoot(self.reachable.at(r as u32).root);
+      let j: u32 = 0;
+      while j < mmembers.len {
+        const dj = self.a.extra.get(mmembers.start + j);
+        if self.a.decls.at(dj).visibility == .Public {
+          match self.a.decls.at(dj).kind {
+            .Struct(s) => { self.types.push(utils.concat(self.a.arena, stem, ".", self.a.decls.at(dj).name), dj); },
+            .Enum(e) => { self.types.push(utils.concat(self.a.arena, stem, ".", self.a.decls.at(dj).name), dj); },
+            _ => {},
+          };
+        }
+        j += 1;
+      }
+      r += 1;
+    }
+  }
+
+  fn resolveModuleAlias(self, path: str): u32 {
+    let mod: u32 = 0;
+    let seg_start: i64 = 0;
+    let i: i64 = 0;
+    while i <= path.len {
+      if i == path.len || path[i] == '.' {
+        const seg = path[seg_start..i];
+        if mod == 0 {
+          mod = self.lookupImportAlias(self.rootMembers(), seg, false);
+        } else {
+          mod = self.lookupImportAlias(self.moduleMembers(mod), seg, true);
+        }
+        if mod == 0 {
+          return 0;
+        }
+        seg_start = i + 1;
+      }
+      i += 1;
+    }
+    return mod;
+  }
+
+  fn lookupImportAlias(self, members: ast.Range, name: str, pub_only: bool): u32 {
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      if !pub_only || self.a.decls.at(di).visibility == .Public {
+        match self.a.decls.at(di).kind {
+          .Import(imp) => {
+            if self.a.decls.at(di).name == name {
+              return imp.resolved;
+            }
+          },
+          _ => {},
+        };
+      }
+      i += 1;
+    }
+    return 0;
+  }
+
+  fn modulePubType(self, module: u32, name: str, want_enum: bool): u32 {
+    const members = self.moduleMembers(module);
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
+        match self.a.decls.at(di).kind {
+          .Struct(s) => {
+            if !want_enum {
+              return di;
+            }
+          },
+          .Enum(e) => {
+            if want_enum {
+              return di;
+            }
+          },
+          _ => {},
+        };
+      }
+      i += 1;
+    }
+    return 0;
+  }
+
+  fn resolveType(self, t: *ast.Type) {
+    if t.kind == .Array || t.kind == .Slice || t.kind == .Optional || t.kind == .Pointer {
+      if t.elem != 0 {
+        self.resolveType(self.a.types.at(t.elem));
+      }
+      return;
+    }
+    if t.kind != .Struct {
+      return;
+    }
+
+    if t.module.len > 0 {
+      const mod = self.resolveModuleAlias(t.module);
+      if mod == 0 {
+        diag.error(t.span, .Message(utils.concat(self.a.arena, "'", t.module, "' is not a module")));
+        t.kind = .Unknown;
+        t.module = "";
+        return;
+      }
+      const stem = moduleStem(self.a.arena, self.a.modules.at(mod).path);
+      if self.modulePubType(mod, t.name, false) != 0 {
+        t.name = utils.concat(self.a.arena, stem, ".", t.name);
+        t.module = "";
+        return;
+      }
+      if self.modulePubType(mod, t.name, true) != 0 {
+        t.kind = .Enum;
+        t.name = utils.concat(self.a.arena, stem, ".", t.name);
+        t.module = "";
+        return;
+      }
+      diag.error(t.span, .Message(utils.concat(self.a.arena, "module '", t.module, "' has no public struct '", t.name, "'")));
+      t.kind = .Unknown;
+      t.module = "";
+      return;
+    }
+
+    const decl = self.types.lookup(t.name);
+    if decl != 0 {
+      match self.a.decls.at(decl).kind {
+        .Enum(e) => { t.kind = .Enum; },
+        _ => {},
+      };
+    }
+  }
+
+  fn checkTypeExists(self, t: *ast.Type): bool {
+    if t.kind == .Array || t.kind == .Slice || t.kind == .Optional || t.kind == .Pointer {
+      if t.elem != 0 {
+        return self.checkTypeExists(self.a.types.at(t.elem));
+      }
+      return true;
+    }
+    if t.kind != .Struct {
+      return true;
+    }
+    const decl = self.types.lookup(t.name);
+    if decl == 0 {
+      diag.error(t.span, .Message(utils.concat(self.a.arena, "unknown type '", t.name, "'")));
+      return false;
+    }
+    match self.a.decls.at(decl).kind {
+      .Enum(e) => { t.kind = .Enum; },
+      _ => {},
+    };
+    return true;
+  }
+
+  fn typeCopy(self, idx: u32): ast.Type {
+    let t: ast.Type;
+    t.kind = self.a.types.at(idx).kind;
+    t.name = self.a.types.at(idx).name;
+    t.module = self.a.types.at(idx).module;
+    t.elem = self.a.types.at(idx).elem;
+    t.array_length = self.a.types.at(idx).array_length;
+    t.span = self.a.types.at(idx).span;
+    return t;
+  }
+
+  fn reachesByValue(self, start: str, t: ast.Type, v: *Visited): bool {
+    if t.kind == .Array || t.kind == .Optional {
+      if t.elem == 0 {
+        return false;
+      }
+      return self.reachesByValue(start, self.typeCopy(t.elem), v);
+    }
+    if t.kind != .Struct && t.kind != .Enum {
+      return false;
+    }
+    if t.name == start {
+      return true;
+    }
+    if v.contains(t.name) {
+      return false;
+    }
+    const decl = self.types.lookup(t.name);
+    if decl == 0 {
+      return false;
+    }
+    v.add(t.name);
+
+    match self.a.decls.at(decl).kind {
+      .Struct(s) => {
+        let i: u32 = 0;
+        while i < s.fields.len {
+          const fi = self.a.extra.get(s.fields.start + i);
+          if self.reachesByValue(start, self.a.fields.at(fi).ty, v) {
+            return true;
+          }
+          i += 1;
+        }
+      },
+      .Enum(e) => {
+        let i: u32 = 0;
+        while i < e.members.len {
+          const mi = self.a.extra.get(e.members.start + i);
+          if self.a.enum_members.at(mi).has_payload {
+            if self.reachesByValue(start, self.a.enum_members.at(mi).payload, v) {
+              return true;
+            }
+          }
+          i += 1;
+        }
+      },
+      _ => {},
+    };
+    return false;
+  }
+
+  fn containsSelfByValue(self, name: str, t: ast.Type): bool {
+    let v: Visited;
+    return self.reachesByValue(name, t, &v);
+  }
+
+  fn checkStruct(self, d: u32) {
+    const sname = self.a.decls.at(d).name;
+    match self.a.decls.at(d).kind {
+      .Struct(s) => {
+        let i: u32 = 0;
+        while i < s.fields.len {
+          const fi = self.a.extra.get(s.fields.start + i);
+          self.resolveType(&self.a.fields.at(fi).ty);
+          self.checkTypeExists(&self.a.fields.at(fi).ty);
+
+          if self.containsSelfByValue(sname, self.a.fields.at(fi).ty) {
+            diag.error(self.a.fields.at(fi).span,
+              .Message(utils.concat(self.a.arena, "field '", self.a.fields.at(fi).name,
+                "' makes struct '", sname, "' recursive by value and infinitely sized; break the cycle with a slice")));
+          }
+
+          let j: u32 = 0;
+          while j < i {
+            const pj = self.a.extra.get(s.fields.start + j);
+            if self.a.fields.at(pj).name == self.a.fields.at(fi).name {
+              diag.error(self.a.fields.at(fi).span,
+                .Message(utils.concat(self.a.arena, "duplicate field '", self.a.fields.at(fi).name, "'")));
+              j = i;
+            }
+            j += 1;
+          }
+
+          const dv = self.a.fields.at(fi).default_value;
+          if dv != 0 {
+            if !self.isConstInit(dv) {
+              diag.error(self.a.exprs.at(dv).span,
+                .Message("struct field default must be a constant"));
+            } else {
+              const fty = copyOf(&self.a.fields.at(fi).ty);
+              const dty = self.checkExpr(dv, fty);
+              if dty.ok && !self.assignable(fty, dty.ty) {
+                diag.error(self.a.exprs.at(dv).span,
+                  .Message(utils.concat(self.a.arena,
+                    "cannot assign ", dty.ty.kind.toString(), " to field '", self.a.fields.at(fi).name,
+                    "' of type ", self.typeText(fty))));
+              }
+            }
+          }
+          i += 1;
+        }
+      },
+      _ => {},
+    };
+  }
+
+  fn checkEnum(self, d: u32) {
+    const ename = self.a.decls.at(d).name;
+    match self.a.decls.at(d).kind {
+      .Enum(e) => {
+        let tagged = false;
+        let i: u32 = 0;
+        while i < e.members.len {
+          const mi = self.a.extra.get(e.members.start + i);
+          if self.a.enum_members.at(mi).has_payload {
+            tagged = true;
+            self.resolveType(&self.a.enum_members.at(mi).payload);
+            self.checkTypeExists(&self.a.enum_members.at(mi).payload);
+            if self.containsSelfByValue(ename, self.a.enum_members.at(mi).payload) {
+              diag.error(self.a.enum_members.at(mi).span,
+                .Message(utils.concat(self.a.arena, "variant '", self.a.enum_members.at(mi).name,
+                  "' makes enum '", ename, "' recursive by value and infinitely sized; break the cycle with a slice")));
+            }
+          }
+          i += 1;
+        }
+
+        i = 0;
+        while i < e.members.len {
+          const mj = self.a.extra.get(e.members.start + i);
+          let j: u32 = 0;
+          while j < i {
+            const pj = self.a.extra.get(e.members.start + j);
+            if self.a.enum_members.at(pj).name == self.a.enum_members.at(mj).name {
+              diag.error(self.a.enum_members.at(mj).span,
+                .Message(utils.concat(self.a.arena, "duplicate enum member '", self.a.enum_members.at(mj).name, "'")));
+              j = i;
+            } else if self.a.enum_members.at(pj).value == self.a.enum_members.at(mj).value {
+              diag.error(self.a.enum_members.at(mj).span,
+                .Message(utils.concat(self.a.arena, "duplicate enum value ", intText(self.a.arena, self.a.enum_members.at(mj).value),
+                  " for member '", self.a.enum_members.at(mj).name,
+                  "' (already used by '", self.a.enum_members.at(pj).name, "')")));
+              j = i;
+            }
+            j += 1;
+          }
+          i += 1;
+        }
+
+        let ne = e;
+        ne.tagged = tagged;
+        self.a.decls.at(d).kind = .Enum(ne);
+      },
+      _ => {},
+    };
+  }
+
+  fn checkGlobals(self) {
+    const members = self.rootMembers();
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      const name = self.a.decls.at(di).name;
+      match self.a.decls.at(di).kind {
+        .Global(g) => {
+          if self.globals.lookup(name) != 0 || self.fns.lookup(name) != 0 {
+            diag.error(self.a.decls.at(di).span,
+              .Message(utils.concat(self.a.arena, "redeclaration of '", name, "'")));
+          } else {
+            let ng = g;
+            self.resolveType(&ng.ty);
+            if ng.init == 0 {
+              if ng.ty.kind == .Unknown {
+                diag.error(self.a.decls.at(di).span,
+                  .Message(utils.concat(self.a.arena, "global '", name, "' without an initializer needs a type annotation")));
+              }
+            } else if !self.isConstInit(ng.init) {
+              diag.error(self.a.exprs.at(ng.init).span,
+                .Message("global initializer must be a constant"));
+            } else {
+              const init = self.checkExpr(ng.init, ng.ty);
+              if ng.ty.kind == .Unknown {
+                ng.ty.kind = init.ty.kind;
+              } else if init.ok && !self.assignable(ng.ty, init.ty) {
+                diag.error(self.a.decls.at(di).span,
+                  .Message(utils.concat(self.a.arena, "cannot assign ", init.ty.kind.toString(),
+                    " to '", name, "' of type ", ng.ty.kind.toString())));
+              }
+            }
+            self.a.decls.at(di).kind = .Global(ng);
+            self.globals.push(name, di);
+            self.gscope.push(Local{name: name, ty: ng.ty, mutable: ng.mutable, is_loop_var: false});
+          }
+        },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn resolveSignatures(self) {
+    const members = self.rootMembers();
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      match self.a.decls.at(di).kind {
+        .Fn(f) => { self.resolveSignature(di, f); },
+        .Struct(s) => { self.resolveMemberSignatures(s.members); },
+        .Enum(e) => { self.resolveMemberSignatures(e.methods); },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn resolveMemberSignatures(self, methods: ast.Range) {
+    let i: u32 = 0;
+    while i < methods.len {
+      const di = self.a.extra.get(methods.start + i);
+      match self.a.decls.at(di).kind {
+        .Fn(f) => { self.resolveSignature(di, f); },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn resolveSignature(self, d: u32, f: ast.FnDecl) {
+    let i: u32 = 0;
+    while i < f.params.len {
+      const pi = self.a.extra.get(f.params.start + i);
+      self.resolveType(&self.a.params.at(pi).ty);
+      i += 1;
+    }
+    let nf = f;
+    self.resolveType(&nf.return_type);
+    self.a.decls.at(d).kind = .Fn(nf);
+  }
+
+  fn checkTypes(self) {
+    let i: i64 = 0;
+    while i < self.local_types {
+      const di = self.types.items[i].decl;
+      match self.a.decls.at(di).kind {
+        .Struct(s) => { self.checkStruct(di); },
+        .Enum(e) => { self.checkEnum(di); },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn checkEntryPoint(self) {
+    const main_decl = self.fns.lookup("main");
+    if main_decl == 0 {
+      std.io.printerrln("zup: error: no entry point: 'main' function is required");
+      std.exit(1);
+    }
+    if self.a.decls.at(main_decl).visibility != .Public {
+      diag.error(self.a.decls.at(main_decl).span,
+        .Message("'main' must be public (declared with 'pub')"));
+    }
+    match self.a.decls.at(main_decl).kind {
+      .Fn(f) => {
+        if f.return_type.kind != .I32 {
+          diag.error(self.a.decls.at(main_decl).span, .Message("'main' must return i32"));
+        }
+        if f.params.len > 1 {
+          diag.error(self.a.decls.at(main_decl).span,
+            .Message("'main' takes at most one parameter (the argument list as '[]str')"));
+        } else if f.params.len == 1 {
+          const pi = self.a.extra.get(f.params.start);
+          const pty = copyOf(&self.a.params.at(pi).ty);
+          const slice_of_str = pty.kind == .Slice && pty.elem != 0
+            && self.a.types.at(pty.elem).kind == .Str;
+          if !slice_of_str {
+            diag.error(self.a.decls.at(main_decl).span,
+              .Message("'main' parameter must be of type '[]str'"));
+          }
+        }
+      },
+      _ => {},
+    };
+  }
+
+  fn typeEq(self, x: ast.Type, y: ast.Type): bool {
+    if x.kind != y.kind {
+      return false;
+    }
+    if x.kind == .Enum || x.kind == .Struct {
+      return enumNameEq(x.name, y.name);
+    }
+    if x.kind == .Array {
+      return x.array_length == y.array_length
+        && self.typeEq(self.typeCopy(x.elem), self.typeCopy(y.elem));
+    }
+    if x.kind == .Slice || x.kind == .Optional || x.kind == .Pointer {
+      return self.typeEq(self.typeCopy(x.elem), self.typeCopy(y.elem));
+    }
+    return true;
+  }
+
+  fn assignable(self, to: ast.Type, from: ast.Type): bool {
+    if to.kind == .Cstr && from.kind == .Str {
+      return true;
+    }
+    if to.kind == .Optional && from.kind != .Optional {
+      return self.assignable(self.typeCopy(to.elem), from);
+    }
+    if to.kind == .Optional && from.kind == .Optional {
+      return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
+    }
+    if to.kind == .Slice && (from.kind == .Array || from.kind == .Slice) {
+      return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
+    }
+    if to.kind != from.kind {
+      return false;
+    }
+    if to.kind == .Enum || to.kind == .Struct {
+      return enumNameEq(to.name, from.name);
+    }
+    if to.kind == .Array {
+      return from.elem != 0 && to.array_length == from.array_length
+        && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
+    }
+    if to.kind == .Pointer {
+      return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
+    }
+    return true;
+  }
+
+  fn typeText(self, t: ast.Type): str {
+    if t.kind == .Struct || t.kind == .Enum {
+      return t.name;
+    }
+    if t.kind == .Array || t.kind == .Slice || t.kind == .Optional || t.kind == .Pointer {
+      if t.elem == 0 {
+        return t.kind.toString();
+      }
+      const inner = self.typeText(self.typeCopy(t.elem));
+      if t.kind == .Slice {
+        return utils.concat(self.a.arena, "[]", inner);
+      }
+      if t.kind == .Optional {
+        return utils.concat(self.a.arena, "?", inner);
+      }
+      if t.kind == .Pointer {
+        return utils.concat(self.a.arena, "*", inner);
+      }
+      return utils.concat(self.a.arena, "[", intText(self.a.arena, t.array_length), "]", inner);
+    }
+    return t.kind.toString();
+  }
+
+  fn importsPubEnum(self, name: str): u32 {
+    let r: i64 = 1;
+    while r < self.reachable.len {
+      const members = self.membersOfRoot(self.reachable.at(r as u32).root);
+      let i: u32 = 0;
+      while i < members.len {
+        const di = self.a.extra.get(members.start + i);
+        if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
+          match self.a.decls.at(di).kind {
+            .Enum(e) => { return di; },
+            _ => {},
+          };
+        }
+        i += 1;
+      }
+      r += 1;
+    }
+    return 0;
+  }
+
+  fn enumIsTagged(self, name: str): bool {
+    if name.len == 0 {
+      return false;
+    }
+    let d = self.types.lookup(name);
+    if d == 0 {
+      d = self.importsPubEnum(name);
+    }
+    if d == 0 {
+      return false;
+    }
+    return match self.a.decls.at(d).kind {
+      .Enum(e) => e.tagged,
+      _ => false,
+    };
+  }
+
+  fn literalOutOfRange(self, span: diag.Span, text: str, kind: ast.TypeKind): bool {
+    let v: u64 = 0;
+    let overflow = false;
+    let base: u64 = 10;
+    let i: i64 = 0;
+    if text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+      base = 16;
+      i = 2;
+    }
+    while i < text.len {
+      const ch = text[i];
+      let d: u64 = 255;
+      if ch >= '0' && ch <= '9' {
+        d = (ch - '0') as u64;
+      } else if base == 16 && ch >= 'a' && ch <= 'f' {
+        d = (ch - 'a') as u64 + 10;
+      } else if base == 16 && ch >= 'A' && ch <= 'F' {
+        d = (ch - 'A') as u64 + 10;
+      }
+      if d >= base {
+        break;
+      }
+      if v > (U64_MAX - d) / base {
+        overflow = true;
+        break;
+      }
+      v = v * base + d;
+      i += 1;
+    }
+
+    if overflow || v > intMax(kind) {
+      let k = kind;
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "integer literal ", text, " out of range for ", k.toString())));
+      return true;
+    }
+    return false;
+  }
+
+  fn isConstInit(self, e: u32): bool {
+    if e == 0 {
+      return false;
+    }
+    return match self.a.exprs.at(e).kind {
+      .Number(n) => true,
+      .Boolean(b) => true,
+      .String(s) => true,
+      .Null => true,
+      _ => false,
+    };
+  }
+
+  fn isLitExpr(self, e: u32): bool {
+    return match self.a.exprs.at(e).kind {
+      .Number(n) => true,
+      .EnumLiteral(el) => true,
+      .Null => true,
+      _ => false,
+    };
+  }
+
+  fn isNullExpr(self, e: u32): bool {
+    return match self.a.exprs.at(e).kind {
+      .Null => true,
+      _ => false,
+    };
+  }
+
+  fn fnReturnType(self, d: u32): ast.Type {
+    return match self.a.decls.at(d).kind {
+      .Fn(f) => f.return_type,
+      _ => unknownTy(),
+    };
+  }
+
+  fn lvalueRoot(self, e: u32): str {
+    let cur = e;
+    let walking = true;
+    while walking {
+      match self.a.exprs.at(cur).kind {
+        .Field(fx) => { cur = fx.base; },
+        .Index(ix) => { cur = ix.base; },
+        _ => { walking = false; },
+      };
+    }
+    return match self.a.exprs.at(cur).kind {
+      .Id(n) => n,
+      _ => "",
+    };
+  }
+
+  fn lvalueThroughPointer(self, e: u32): bool {
+    let cur = e;
+    let walking = true;
+    while walking {
+      let base: u32 = 0;
+      match self.a.exprs.at(cur).kind {
+        .Field(fx) => { base = fx.base; },
+        .Index(ix) => { base = ix.base; },
+        _ => { walking = false; },
+      };
+      if walking {
+        if self.a.exprs.at(base).ty.kind == .Pointer {
+          return true;
+        }
+        cur = base;
+      }
+    }
+    return false;
+  }
+
+  fn checkExpr(self, e: u32, expected: ast.Type): ExprTy {
+    if e == 0 {
+      return fail();
+    }
+    const result: ExprTy = match self.a.exprs.at(e).kind {
+      .Boolean(bv) => okKind(.Bool),
+      .Number(nv) => self.checkNumber(e, nv, expected),
+      .String(sv) => okKind(.Str),
+      .Null => self.checkNull(e, expected),
+      .Id(idn) => self.checkId(e, idn),
+      .Binary(bin) => self.checkBinaryExpr(e, bin, expected),
+      .Unary(un) => self.checkUnaryExpr(e, un, expected),
+      .Cast(cst) => self.checkCast(e, cst),
+      .Sizeof(szt) => self.checkSizeof(e, szt),
+      .Ternary(ter) => self.checkTernary(e, ter, expected),
+      .Coalesce(coa) => self.checkCoalesce(e, coa),
+      .Unwrap(uw) => self.checkUnwrap(e, uw),
+      .Propagate(pg) => self.checkPropagate(e, pg),
+      .Call(cl) => self.checkCallDispatch(e, cl),
+      .Field(fld) => self.checkField(e, fld),
+      .StructLiteral(stl) => self.checkStructLiteral(e, stl, expected),
+      .Array(arr) => self.checkArray(e, arr, expected),
+      .Index(ixp) => self.checkIndex(e, ixp),
+      .SliceRange(slr) => self.checkSliceRange(e, slr),
+      .EnumLiteral(enl) => self.checkEnumLiteral(e, enl, expected),
+      .Match(mtc) => self.checkMatch(e, mtc, expected),
+      _ => fail(),
+    };
+    self.a.exprs.at(e).ty.kind = result.ty.kind;
+    self.a.exprs.at(e).ty.name = result.ty.name;
+    self.a.exprs.at(e).ty.elem = result.ty.elem;
+    self.a.exprs.at(e).ty.array_length = result.ty.array_length;
+    return result;
+  }
+
+  fn checkNumber(self, e: u32, text: str, expected: ast.Type): ExprTy {
+    let want = expected;
+    while want.kind == .Optional && want.elem != 0 {
+      want = self.typeCopy(want.elem);
+    }
+    if numberIsFloat(text) {
+      let fk: ast.TypeKind = .F64;
+      if want.kind.isFloat() {
+        fk = want.kind;
+      }
+      return okKind(fk);
+    }
+    let ik: ast.TypeKind = .I32;
+    if want.kind.isInteger() {
+      ik = want.kind;
+    }
+    if self.literalOutOfRange(self.a.exprs.at(e).span, text, ik) {
+      return fail();
+    }
+    return okKind(ik);
+  }
+
+  fn checkNull(self, e: u32, expected: ast.Type): ExprTy {
+    if expected.kind == .Optional && expected.elem != 0 {
+      let r: ExprTy;
+      r.ty.kind = .Optional;
+      r.ty.elem = expected.elem;
+      r.ok = true;
+      return r;
+    }
+    if expected.kind == .Cstr {
+      return okKind(.Cstr);
+    }
+    diag.error(self.a.exprs.at(e).span, .Message("cannot infer a type for 'null'"));
+    return fail();
+  }
+
+  fn checkId(self, e: u32, name: str): ExprTy {
+    let found = false;
+    let lt: ast.Type;
+    if self.has_scope {
+      const si = self.scope.lookup(name);
+      if si >= 0 {
+        found = true;
+        lt = self.scope.ty(si);
+      }
+    }
+    if !found {
+      const gi = self.gscope.lookup(name);
+      if gi >= 0 {
+        found = true;
+        lt = self.gscope.ty(gi);
+      }
+    }
+    if !found {
+      if self.lookupImportAlias(self.rootMembers(), name, false) != 0 {
+        diag.error(self.a.exprs.at(e).span,
+          .Message(utils.concat(self.a.arena, "'", name, "' is a module, not a value")));
+      } else if self.types.lookup(name) != 0 {
+        diag.error(self.a.exprs.at(e).span,
+          .Message(utils.concat(self.a.arena, "'", name, "' is a type, not a value")));
+      } else {
+        diag.error(self.a.exprs.at(e).span,
+          .Message(utils.concat(self.a.arena, "undefined name '", name, "'")));
+      }
+      return fail();
+    }
+    let r: ExprTy;
+    r.ty = lt;
+    r.ok = true;
+    return r;
+  }
+
+  fn checkBinaryExpr(self, e: u32, b: ast.BinaryExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    const lhs_lit = self.isLitExpr(b.lhs);
+    const rhs_lit = self.isLitExpr(b.rhs);
+
+    let lhs: ExprTy;
+    let rhs: ExprTy;
+    if rhs_lit && !lhs_lit {
+      lhs = self.checkExpr(b.lhs, expected);
+      let hint = expected;
+      if lhs.ty.kind.isNumeric() || lhs.ty.kind == .Enum || lhs.ty.kind == .Optional || lhs.ty.kind == .Cstr {
+        hint = lhs.ty;
+      }
+      rhs = self.checkExpr(b.rhs, hint);
+    } else if lhs_lit && !rhs_lit {
+      rhs = self.checkExpr(b.rhs, expected);
+      let hint2 = expected;
+      if rhs.ty.kind.isNumeric() || rhs.ty.kind == .Enum || rhs.ty.kind == .Optional || rhs.ty.kind == .Cstr {
+        hint2 = rhs.ty;
+      }
+      lhs = self.checkExpr(b.lhs, hint2);
+    } else {
+      lhs = self.checkExpr(b.lhs, expected);
+      rhs = self.checkExpr(b.rhs, expected);
+    }
+
+    if !lhs.ok || !rhs.ok {
+      return fail();
+    }
+
+    const is_eqne = b.op == .Eq || b.op == .Ne;
+
+    if b.op.isLogical() {
+      if lhs.ty.kind != .Bool || rhs.ty.kind != .Bool {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot apply '", b.op.toString(), "' to ", lhs.ty.kind.toString(),
+          " and ", rhs.ty.kind.toString())));
+        return fail();
+      }
+      return okKind(.Bool);
+    }
+
+    if lhs.ty.kind == .Str && rhs.ty.kind == .Str && is_eqne {
+      return okKind(.Bool);
+    }
+
+    if lhs.ty.kind == .Enum && rhs.ty.kind == .Enum && enumNameEq(lhs.ty.name, rhs.ty.name) && is_eqne {
+      if self.enumIsTagged(lhs.ty.name) {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot compare tagged union '", bareTypeName(lhs.ty.name),
+          "' with '==' or '!='; use match")));
+        return fail();
+      }
+      return okKind(.Bool);
+    }
+
+    if (self.isNullExpr(b.lhs) || self.isNullExpr(b.rhs))
+      && lhs.ty.kind == rhs.ty.kind
+      && (lhs.ty.kind == .Optional || lhs.ty.kind == .Cstr)
+      && is_eqne {
+      return okKind(.Bool);
+    }
+
+    const lhs_opt = lhs.ty.kind == .Optional;
+    const rhs_opt = rhs.ty.kind == .Optional;
+    if ((lhs_opt && !rhs_opt) || (!lhs_opt && rhs_opt)) && is_eqne {
+      let opt = lhs;
+      let oth = rhs;
+      if rhs_opt {
+        opt = rhs;
+        oth = lhs;
+      }
+      if opt.ty.elem != 0
+        && (oth.ty.kind.isNumeric() || oth.ty.kind == .Enum || oth.ty.kind == .Bool)
+        && self.typeEq(self.typeCopy(opt.ty.elem), oth.ty) {
+        return okKind(.Bool);
+      }
+    }
+
+    if !lhs.ty.kind.isNumeric() || lhs.ty.kind != rhs.ty.kind
+      || (lhs.ty.kind.isFloat() && !b.op.isArithmetic() && !b.op.isComparison()) {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot apply '", b.op.toString(), "' to ", lhs.ty.kind.toString(),
+        " and ", rhs.ty.kind.toString())));
+      return fail();
+    }
+
+    let rk = lhs.ty.kind;
+    if b.op.isComparison() {
+      rk = .Bool;
+    }
+    return okKind(rk);
+  }
+
+  fn checkUnaryExpr(self, e: u32, un: ast.UnaryExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    if un.op == .Addr {
+      let inner = unknownTy();
+      if expected.kind == .Pointer && expected.elem != 0 {
+        inner = self.typeCopy(expected.elem);
+      }
+      const aop = self.checkExpr(un.operand, inner);
+      if !aop.ok {
+        return fail();
+      }
+      const addressable = match self.a.exprs.at(un.operand).kind {
+        .Id(n) => true,
+        .Field(fx) => true,
+        .Index(ix) => true,
+        _ => false,
+      };
+      if !addressable {
+        diag.error(span, .Message("cannot take the address of a temporary; '&' requires a variable, field, or element"));
+        return fail();
+      }
+      let r: ExprTy;
+      r.ty.kind = .Pointer;
+      r.ty.elem = self.a.types.push(aop.ty);
+      r.ok = true;
+      return r;
+    }
+
+    const is_not = un.op == .Not;
+    let want = expected;
+    if is_not {
+      want = kindTy(.Bool);
+    }
+    const operand = self.checkExpr(un.operand, want);
+    let valid = operand.ty.kind.isSignedInteger() || operand.ty.kind.isFloat();
+    if is_not {
+      valid = operand.ty.kind == .Bool;
+    }
+    if !operand.ok {
+      return fail();
+    }
+    if !valid {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot apply '", un.op.toString(), "' to ", operand.ty.kind.toString())));
+      return fail();
+    }
+    if is_not {
+      return okKind(.Bool);
+    }
+    return okKind(operand.ty.kind);
+  }
+
+  fn checkCast(self, e: u32, c: ast.CastExpr): ExprTy {
+    const operand = self.checkExpr(c.operand, unknownTy());
+    let nc = c;
+    self.resolveType(&nc.target);
+    self.a.exprs.at(e).kind = .Cast(nc);
+
+    const target = nc.target.kind;
+    const bytes_to_str = operand.ty.kind == .Slice && operand.ty.elem != 0
+      && self.a.types.at(operand.ty.elem).kind == .U8 && target == .Str;
+    const str_to_bytes = operand.ty.kind == .Str && target == .Slice
+      && nc.target.elem != 0 && self.a.types.at(nc.target.elem).kind == .U8;
+    const slice_reinterpret = operand.ty.kind == .Slice && target == .Slice;
+    const valid = (operand.ty.kind.isNumeric() && target.isNumeric())
+      || (operand.ty.kind == .Enum && target.isInteger())
+      || (operand.ty.kind.isInteger() && target == .Enum)
+      || bytes_to_str || str_to_bytes || slice_reinterpret;
+
+    if operand.ok && !valid {
+      diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
+        "cannot cast ", self.typeText(operand.ty), " to ", self.typeText(nc.target))));
+      return fail();
+    }
+    let r: ExprTy;
+    r.ty.kind = target;
+    r.ty.name = nc.target.name;
+    r.ty.elem = nc.target.elem;
+    r.ok = operand.ok;
+    return r;
+  }
+
+  fn checkSizeof(self, e: u32, t: ast.Type): ExprTy {
+    let nt = t;
+    self.resolveType(&nt);
+    self.checkTypeExists(&nt);
+    self.a.exprs.at(e).kind = .Sizeof(nt);
+    return okKind(.I64);
+  }
+
+  fn checkTernary(self, e: u32, t: ast.TernaryExpr, expected: ast.Type): ExprTy {
+    const cond = self.checkExpr(t.cond, kindTy(.Bool));
+    if cond.ok && cond.ty.kind != .Bool {
+      diag.error(self.a.exprs.at(t.cond).span, .Message(utils.concat(self.a.arena,
+        "ternary condition must be bool, got ", cond.ty.kind.toString())));
+    }
+    const then = self.checkExpr(t.then, expected);
+    let hint = expected;
+    if then.ok {
+      hint = then.ty;
+    }
+    const els = self.checkExpr(t.els, hint);
+    let all_ok = cond.ok && cond.ty.kind == .Bool && then.ok && els.ok;
+    if then.ok && els.ok && !self.assignable(then.ty, els.ty) {
+      diag.error(self.a.exprs.at(t.els).span, .Message(utils.concat(self.a.arena,
+        "ternary branches must have the same type, got ", self.typeText(then.ty),
+        " and ", self.typeText(els.ty))));
+      all_ok = false;
+    }
+    let r: ExprTy;
+    r.ty = then.ty;
+    r.ok = all_ok;
+    return r;
+  }
+
+  fn checkCoalesce(self, e: u32, co: ast.PairExpr): ExprTy {
+    const lhs = self.checkExpr(co.lhs, unknownTy());
+    if !lhs.ok {
+      return fail();
+    }
+    if lhs.ty.kind != .Optional || lhs.ty.elem == 0 {
+      diag.error(self.a.exprs.at(co.lhs).span, .Message(utils.concat(self.a.arena,
+        "left side of '??' must be an optional, got ", self.typeText(lhs.ty))));
+      return fail();
+    }
+    const el = self.typeCopy(lhs.ty.elem);
+    const rhs = self.checkExpr(co.rhs, el);
+    let all_ok = rhs.ok;
+    if rhs.ok && !self.assignable(el, rhs.ty) {
+      diag.error(self.a.exprs.at(co.rhs).span, .Message(utils.concat(self.a.arena,
+        "'??' fallback has type ", self.typeText(rhs.ty), ", expected ", self.typeText(el))));
+      all_ok = false;
+    }
+    let r: ExprTy;
+    r.ty = el;
+    r.ok = all_ok;
+    return r;
+  }
+
+  fn checkUnwrap(self, e: u32, operand: u32): ExprTy {
+    const op = self.checkExpr(operand, unknownTy());
+    if !op.ok {
+      return fail();
+    }
+    if op.ty.kind != .Optional || op.ty.elem == 0 {
+      diag.error(self.a.exprs.at(operand).span, .Message(utils.concat(self.a.arena,
+        "operand of '!' must be an optional, got ", self.typeText(op.ty))));
+      return fail();
+    }
+    let r: ExprTy;
+    r.ty = self.typeCopy(op.ty.elem);
+    r.ok = true;
+    return r;
+  }
+
+  fn checkPropagate(self, e: u32, operand: u32): ExprTy {
+    const op = self.checkExpr(operand, unknownTy());
+    if !op.ok {
+      return fail();
+    }
+    if op.ty.kind != .Optional || op.ty.elem == 0 {
+      diag.error(self.a.exprs.at(operand).span, .Message(utils.concat(self.a.arena,
+        "operand of '?' must be an optional, got ", self.typeText(op.ty))));
+      return fail();
+    }
+    if self.cur_fn == 0 || self.fnReturnType(self.cur_fn).kind != .Optional {
+      diag.error(self.a.exprs.at(e).span,
+        .Message("'?' can only be used in a function returning an optional"));
+      return fail();
+    }
+    let r: ExprTy;
+    r.ty = self.typeCopy(op.ty.elem);
+    r.ok = true;
+    return r;
+  }
+
+  fn resolveModulePath(self, e: u32): u32 {
+    const id_name = match self.a.exprs.at(e).kind {
+      .Id(n) => n,
+      _ => "",
+    };
+    if id_name.len > 0 {
+      return self.lookupImportAlias(self.rootMembers(), id_name, false);
+    }
+    let fbase: u32 = 0;
+    let fname = "";
+    match self.a.exprs.at(e).kind {
+      .Field(fx) => { fbase = fx.base; fname = fx.name; },
+      _ => {},
+    };
+    if fbase == 0 {
+      return 0;
+    }
+    const base = self.resolveModulePath(fbase);
+    if base == 0 {
+      return 0;
+    }
+    return self.lookupImportAlias(self.moduleMembers(base), fname, true);
+  }
+
+  fn pathDisplayName(self, e: u32): str {
+    return match self.a.exprs.at(e).kind {
+      .Id(n) => n,
+      .Field(fx) => fx.name,
+      _ => "",
+    };
+  }
+
+  fn isValueName(self, name: str): bool {
+    if self.has_scope && self.scope.lookup(name) >= 0 {
+      return true;
+    }
+    return self.gscope.lookup(name) >= 0;
+  }
+
+  fn modulePubFn(self, module: u32, name: str): u32 {
+    const members = self.moduleMembers(module);
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
+        match self.a.decls.at(di).kind {
+          .Fn(f) => { return di; },
+          _ => {},
+        };
+      }
+      i += 1;
+    }
+    return 0;
+  }
+
+  fn findFnIn(self, members: ast.Range, name: str): u32 {
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).name == name {
+        match self.a.decls.at(di).kind {
+          .Fn(f) => { return di; },
+          _ => {},
+        };
+      }
+      i += 1;
+    }
+    return 0;
+  }
+
+  fn findFieldIn(self, fields: ast.Range, name: str): u32 {
+    let i: u32 = 0;
+    while i < fields.len {
+      const fi = self.a.extra.get(fields.start + i);
+      if self.a.fields.at(fi).name == name {
+        return fi;
+      }
+      i += 1;
+    }
+    return 0;
+  }
+
+  fn enumMemberOf(self, enum_d: u32, name: str): u32 {
+    match self.a.decls.at(enum_d).kind {
+      .Enum(en) => {
+        let i: u32 = 0;
+        while i < en.members.len {
+          const mi = self.a.extra.get(en.members.start + i);
+          if self.a.enum_members.at(mi).name == name {
+            return mi;
+          }
+          i += 1;
+        }
+      },
+      _ => {},
+    };
+    return 0;
+  }
+
+  fn qualifyParamType(self, t: ast.Type, stem: str): ast.Type {
+    if stem.len == 0 {
+      return t;
+    }
+    let nt = t;
+    if (nt.kind == .Struct || nt.kind == .Enum) && nt.name.len > 0 && lastDot(nt.name) < 0 {
+      nt.name = utils.concat(self.a.arena, stem, ".", nt.name);
+      return nt;
+    }
+    if (nt.kind == .Slice || nt.kind == .Array || nt.kind == .Optional || nt.kind == .Pointer)
+      && nt.elem != 0 {
+      nt.elem = self.a.types.push(self.qualifyParamType(self.typeCopy(nt.elem), stem));
+    }
+    return nt;
+  }
+
+  fn qualifyResult(self, r: ExprTy, stem: str): ExprTy {
+    if stem.len == 0 || !r.ok {
+      return r;
+    }
+    const t = self.qualifyParamType(r.ty, stem);
+    let nr = r;
+    nr.ty.name = t.name;
+    nr.ty.elem = t.elem;
+    return nr;
+  }
+
+  fn checkFnCall(self, e: u32, c: ast.CallExpr, fn_d: u32, name: str, stem: str): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    let fd: ast.FnDecl;
+    match self.a.decls.at(fn_d).kind {
+      .Fn(f) => { fd = f; },
+      _ => { return fail(); },
+    };
+
+    const boxed_variadic = fd.variadic && !fd.is_extern;
+    let fixed: u32 = fd.params.len;
+    if boxed_variadic && fixed > 0 {
+      fixed -= 1;
+    }
+
+    if fd.variadic {
+      if c.args.len < fixed {
+        const argword: str = fixed == 1 ? " argument" : " arguments";
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "'", name, "' expects at least ", intText(self.a.arena, fixed as i64), argword,
+          " but got ", intText(self.a.arena, c.args.len as i64))));
+      }
+    } else {
+      let required: u32 = 0;
+      let ri: u32 = 0;
+      while ri < fd.params.len {
+        const rp = self.a.extra.get(fd.params.start + ri);
+        if self.a.params.at(rp).default_value == 0 {
+          required += 1;
+        }
+        ri += 1;
+      }
+      if required == fd.params.len {
+        if c.args.len != fd.params.len {
+          const argword2: str = fd.params.len == 1 ? " argument" : " arguments";
+          diag.error(span, .Message(utils.concat(self.a.arena,
+            "'", name, "' expects ", intText(self.a.arena, fd.params.len as i64), argword2,
+            " but got ", intText(self.a.arena, c.args.len as i64))));
+        }
+      } else if c.args.len < required || c.args.len > fd.params.len {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "'", name, "' expects between ", intText(self.a.arena, required as i64),
+          " and ", intText(self.a.arena, fd.params.len as i64),
+          " arguments but got ", intText(self.a.arena, c.args.len as i64))));
+      }
+    }
+
+    let ai: u32 = 0;
+    while ai < c.args.len {
+      const arg = self.a.extra.get(c.args.start + ai);
+      if boxed_variadic && ai >= fixed {
+        const vt = self.checkExpr(arg, unknownTy());
+        if vt.ok && !varargBoxable(vt.ty.kind) {
+          diag.error(self.a.exprs.at(arg).span, .Message(utils.concat(self.a.arena,
+            "cannot pass ", self.typeText(vt.ty), " as a variadic argument")));
+        }
+      } else {
+        let ptype = unknownTy();
+        let pname = "";
+        if ai < fd.params.len {
+          const pd = self.a.extra.get(fd.params.start + ai);
+          ptype = self.qualifyParamType(copyOf(&self.a.params.at(pd).ty), stem);
+          pname = self.a.params.at(pd).name;
+        }
+        const at = self.checkExpr(arg, ptype);
+        if ai < fd.params.len && at.ok && !self.assignable(ptype, at.ty) {
+          diag.error(span, .Message(utils.concat(self.a.arena,
+            "cannot pass ", self.typeText(at.ty), " as argument '", pname,
+            "' of '", name, "' (expected ", self.typeText(ptype), ")")));
+        }
+      }
+      ai += 1;
+    }
+
+    let r: ExprTy;
+    r.ty.kind = fd.return_type.kind;
+    r.ty.name = fd.return_type.name;
+    r.ty.elem = fd.return_type.elem;
+    r.ty.array_length = fd.return_type.array_length;
+    r.ok = true;
+    return r;
+  }
+
+  fn checkCallDispatch(self, e: u32, c: ast.CallExpr): ExprTy {
+    const is_field = match self.a.exprs.at(c.callee).kind {
+      .Field(fx) => true,
+      _ => false,
+    };
+    if is_field {
+      return self.checkMethodCall(e, c);
+    }
+    return self.checkCall(e, c);
+  }
+
+  fn checkCall(self, e: u32, c: ast.CallExpr): ExprTy {
+    const name = match self.a.exprs.at(c.callee).kind {
+      .Id(n) => n,
+      _ => "",
+    };
+    const fn_d = self.fns.lookup(name);
+    if fn_d == 0 {
+      diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
+        "call to undefined function '", name, "'")));
+      return fail();
+    }
+    return self.checkFnCall(e, c, fn_d, name, "");
+  }
+
+  fn checkModuleCall(self, e: u32, c: ast.CallExpr, mod: u32, display: str): ExprTy {
+    const fname = match self.a.exprs.at(c.callee).kind {
+      .Field(fx) => fx.name,
+      _ => "",
+    };
+    const fn_d = self.modulePubFn(mod, fname);
+    if fn_d == 0 {
+      diag.error(self.a.exprs.at(c.callee).span, .Message(utils.concat(self.a.arena,
+        "module '", display, "' has no public function '", fname, "'")));
+      return fail();
+    }
+    const stem = moduleStem(self.a.arena, self.a.modules.at(mod).path);
+    const r = self.checkFnCall(e, c, fn_d, fname, stem);
+    return self.qualifyResult(r, stem);
+  }
+
+  fn checkMethodCall(self, e: u32, c: ast.CallExpr): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    const fspan = self.a.exprs.at(c.callee).span;
+    let fbase: u32 = 0;
+    let mname = "";
+    match self.a.exprs.at(c.callee).kind {
+      .Field(fx) => { fbase = fx.base; mname = fx.name; },
+      _ => { return fail(); },
+    };
+
+    const mod = self.resolveModulePath(fbase);
+    if mod != 0 {
+      return self.checkModuleCall(e, c, mod, self.pathDisplayName(fbase));
+    }
+
+    let ts_owner: u32 = 0;
+    let ts_stem = "";
+    const base_id = match self.a.exprs.at(fbase).kind {
+      .Id(n2) => n2,
+      _ => "",
+    };
+    let bb: u32 = 0;
+    let bname = "";
+    match self.a.exprs.at(fbase).kind {
+      .Field(fx2) => { bb = fx2.base; bname = fx2.name; },
+      _ => {},
+    };
+    if base_id.len > 0 {
+      if !self.isValueName(base_id) {
+        ts_owner = self.types.lookup(base_id);
+      }
+    } else if bb != 0 {
+      const owner_mod = self.resolveModulePath(bb);
+      if owner_mod != 0 {
+        ts_owner = self.modulePubType(owner_mod, bname, false);
+        if ts_owner == 0 {
+          ts_owner = self.modulePubType(owner_mod, bname, true);
+        }
+        if ts_owner != 0 {
+          ts_stem = moduleStem(self.a.arena, self.a.modules.at(owner_mod).path);
+        }
+      }
+    }
+
+    let owner_tagged = false;
+    if ts_owner != 0 {
+      owner_tagged = match self.a.decls.at(ts_owner).kind {
+        .Enum(en) => en.tagged,
+        _ => false,
+      };
+    }
+    if owner_tagged && self.enumMemberOf(ts_owner, mname) != 0 {
+      if c.args.len > 1 {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "variant '", mname, "' takes a single payload")));
+        return fail();
+      }
+      let ename = self.a.decls.at(ts_owner).name;
+      if ts_stem.len > 0 {
+        ename = utils.concat(self.a.arena, ts_stem, ".", ename);
+      }
+      let payload: u32 = 0;
+      if c.args.len > 0 {
+        payload = self.a.extra.get(c.args.start);
+      }
+      self.a.exprs.at(e).kind = .EnumLiteral(ast.EnumLiteralExpr{name: mname, payload: payload});
+      let want: ast.Type;
+      want.kind = .Enum;
+      want.name = ename;
+      return self.checkExpr(e, want);
+    }
+
+    if ts_owner != 0 {
+      let is_enum_owner = false;
+      let members = ast.Range.empty();
+      match self.a.decls.at(ts_owner).kind {
+        .Struct(sd) => { members = sd.members; },
+        .Enum(en2) => { is_enum_owner = true; members = en2.methods; },
+        _ => {},
+      };
+      const kind_str: str = is_enum_owner ? "enum" : "struct";
+      const owner_name = self.a.decls.at(ts_owner).name;
+
+      const fn_d = self.findFnIn(members, mname);
+      if fn_d == 0 {
+        diag.error(fspan, .Message(utils.concat(self.a.arena,
+          kind_str, " '", owner_name, "' has no function '", mname, "'")));
+        return fail();
+      }
+      let has_self0 = false;
+      match self.a.decls.at(fn_d).kind {
+        .Fn(f2) => {
+          if f2.params.len > 0 {
+            const p0 = self.a.extra.get(f2.params.start);
+            has_self0 = self.a.params.at(p0).is_self;
+          }
+        },
+        _ => {},
+      };
+      if has_self0 {
+        diag.error(fspan, .Message(utils.concat(self.a.arena,
+          "method '", mname, "' of ", kind_str, " '", owner_name, "' requires an instance")));
+        return fail();
+      }
+      if ts_stem.len > 0 && self.a.decls.at(fn_d).visibility != .Public {
+        diag.error(fspan, .Message(utils.concat(self.a.arena,
+          "method '", mname, "' of ", kind_str, " '", owner_name, "' is not public")));
+        return fail();
+      }
+      let qualified = owner_name;
+      if ts_stem.len > 0 {
+        qualified = utils.concat(self.a.arena, ts_stem, ".", owner_name);
+      }
+      let bk: ast.TypeKind = .Struct;
+      if is_enum_owner {
+        bk = .Enum;
+      }
+      self.a.exprs.at(fbase).ty.kind = bk;
+      self.a.exprs.at(fbase).ty.name = qualified;
+      self.a.exprs.at(fbase).ty.elem = 0;
+      self.a.exprs.at(fbase).ty.array_length = 0;
+      let nc = c;
+      nc.type_scoped = true;
+      self.a.exprs.at(e).kind = .Call(nc);
+      const tr = self.checkFnCall(e, nc, fn_d, mname, ts_stem);
+      return self.qualifyResult(tr, ts_stem);
+    }
+
+    if bb != 0 && self.resolveModulePath(bb) != 0 {
+      diag.error(self.a.exprs.at(fbase).span, .Message(utils.concat(self.a.arena,
+        "module '", self.pathDisplayName(bb), "' has no public module '", bname, "'")));
+      return fail();
+    }
+
+    let recv = self.checkExpr(fbase, unknownTy());
+    if !recv.ok {
+      return fail();
+    }
+    if recv.ty.kind == .Pointer && recv.ty.elem != 0 {
+      let nrecv: ExprTy;
+      nrecv.ty = self.typeCopy(recv.ty.elem);
+      nrecv.ok = true;
+      recv = nrecv;
+    }
+
+    let method: u32 = 0;
+    let imported = lastDot(recv.ty.name) >= 0;
+    if recv.ty.kind == .Struct {
+      const sd2 = self.types.lookup(recv.ty.name);
+      if sd2 != 0 {
+        match self.a.decls.at(sd2).kind {
+          .Struct(sdd) => { method = self.findFnIn(sdd.members, mname); },
+          _ => {},
+        };
+      }
+      if method == 0 {
+        diag.error(fspan, .Message(utils.concat(self.a.arena,
+          "struct '", recv.ty.name, "' has no method '", mname, "'")));
+        return fail();
+      }
+    } else if recv.ty.kind == .Enum && recv.ty.name.len > 0 {
+      let en_d = self.types.lookup(recv.ty.name);
+      if en_d == 0 {
+        en_d = self.importsPubEnum(recv.ty.name);
+        if en_d != 0 {
+          imported = true;
+        }
+      }
+      if en_d != 0 {
+        match self.a.decls.at(en_d).kind {
+          .Enum(edd) => { method = self.findFnIn(edd.methods, mname); },
+          _ => {},
+        };
+      }
+      if method == 0 {
+        diag.error(fspan, .Message(utils.concat(self.a.arena,
+          "enum '", recv.ty.name, "' has no method '", mname, "'")));
+        return fail();
+      }
+    } else {
+      let nt2: ast.Type;
+      nt2.kind = recv.ty.kind;
+      nt2.name = recv.ty.name;
+      diag.error(fspan, .Message(utils.concat(self.a.arena,
+        "cannot call method '", mname, "' on non-struct type ", self.typeText(nt2))));
+      return fail();
+    }
+    if imported && self.a.decls.at(method).visibility != .Public {
+      const rk_str: str = recv.ty.kind == .Enum ? "enum" : "struct";
+      diag.error(fspan, .Message(utils.concat(self.a.arena,
+        "method '", mname, "' of ", rk_str, " '", bareTypeName(recv.ty.name), "' is not public")));
+      return fail();
+    }
+
+    let mf: ast.FnDecl;
+    match self.a.decls.at(method).kind {
+      .Fn(f3) => { mf = f3; },
+      _ => { return fail(); },
+    };
+    let has_self = false;
+    if mf.params.len > 0 {
+      const p1 = self.a.extra.get(mf.params.start);
+      has_self = self.a.params.at(p1).is_self;
+    }
+    if !has_self {
+      diag.error(fspan, .Message(utils.concat(self.a.arena,
+        "'", mname, "' does not take 'self'; call it through the type")));
+      return fail();
+    }
+
+    const expected_n: u32 = mf.params.len - 1;
+    let required2: u32 = 0;
+    let qi: u32 = 1;
+    while qi < mf.params.len {
+      const pq = self.a.extra.get(mf.params.start + qi);
+      if self.a.params.at(pq).default_value == 0 {
+        required2 += 1;
+      }
+      qi += 1;
+    }
+    if required2 == expected_n {
+      if c.args.len != expected_n {
+        const argword3: str = expected_n == 1 ? " argument" : " arguments";
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "'", mname, "' expects ", intText(self.a.arena, expected_n as i64), argword3,
+          " but got ", intText(self.a.arena, c.args.len as i64))));
+      }
+    } else if c.args.len < required2 || c.args.len > expected_n {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "'", mname, "' expects between ", intText(self.a.arena, required2 as i64),
+        " and ", intText(self.a.arena, expected_n as i64),
+        " arguments but got ", intText(self.a.arena, c.args.len as i64))));
+    }
+
+    let ai2: u32 = 0;
+    while ai2 < c.args.len {
+      const arg2 = self.a.extra.get(c.args.start + ai2);
+      let ptype2 = unknownTy();
+      let pn2 = "";
+      const pslot = ai2 + 1;
+      if pslot < mf.params.len {
+        const pd2 = self.a.extra.get(mf.params.start + pslot);
+        ptype2 = copyOf(&self.a.params.at(pd2).ty);
+        pn2 = self.a.params.at(pd2).name;
+      }
+      const at2 = self.checkExpr(arg2, ptype2);
+      if pslot < mf.params.len && at2.ok && !self.assignable(ptype2, at2.ty) {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot pass ", self.typeText(at2.ty), " as argument '", pn2,
+          "' of '", mname, "' (expected ", self.typeText(ptype2), ")")));
+      }
+      ai2 += 1;
+    }
+
+    let mr: ExprTy;
+    mr.ty.kind = mf.return_type.kind;
+    mr.ty.name = mf.return_type.name;
+    mr.ty.elem = mf.return_type.elem;
+    mr.ty.array_length = mf.return_type.array_length;
+    mr.ok = true;
+    const rdot = lastDot(recv.ty.name);
+    if rdot >= 0 {
+      mr = self.qualifyResult(mr, recv.ty.name[0..rdot]);
+    }
+    return mr;
+  }
+
+  fn checkField(self, e: u32, fx: ast.FieldExpr): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    const base_id = match self.a.exprs.at(fx.base).kind {
+      .Id(n) => n,
+      _ => "",
+    };
+    if base_id.len > 0 && !self.isValueName(base_id) {
+      const en_d = self.types.lookup(base_id);
+      let is_enum = false;
+      if en_d != 0 {
+        is_enum = match self.a.decls.at(en_d).kind {
+          .Enum(en) => true,
+          _ => false,
+        };
+      }
+      if is_enum {
+        const ename = self.a.decls.at(en_d).name;
+        const mi = self.enumMemberOf(en_d, fx.name);
+        if mi == 0 {
+          diag.error(span, .Message(utils.concat(self.a.arena,
+            "enum '", ename, "' has no member '", fx.name, "'")));
+          return fail();
+        }
+        const tagged = match self.a.decls.at(en_d).kind {
+          .Enum(en2) => en2.tagged,
+          _ => false,
+        };
+        if tagged {
+          self.a.exprs.at(e).kind = .EnumLiteral(ast.EnumLiteralExpr{
+            name: self.a.enum_members.at(mi).name,
+            payload: 0,
+          });
+          let want: ast.Type;
+          want.kind = .Enum;
+          want.name = ename;
+          return self.checkExpr(e, want);
+        }
+
+        self.a.exprs.at(e).kind = .Number(intText(self.a.arena, self.a.enum_members.at(mi).value));
+        let fr: ExprTy;
+        fr.ty.kind = .Enum;
+        fr.ty.name = ename;
+        fr.ok = true;
+        return fr;
+      }
+    }
+
+    let base = self.checkExpr(fx.base, unknownTy());
+    if !base.ok {
+      return fail();
+    }
+    if base.ty.kind == .Pointer && base.ty.elem != 0 {
+      let nbase: ExprTy;
+      nbase.ty = self.typeCopy(base.ty.elem);
+      nbase.ok = true;
+      base = nbase;
+    }
+    if base.ty.kind == .Str {
+      if fx.name == "ptr" {
+        return okKind(.Cstr);
+      }
+      if fx.name == "len" {
+        return okKind(.I64);
+      }
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "str has no field '", fx.name, "'")));
+      return fail();
+    }
+    if base.ty.kind == .Array {
+      if fx.name == "len" {
+        return okKind(.I64);
+      }
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "array has no field '", fx.name, "'")));
+      return fail();
+    }
+    if base.ty.kind == .Slice {
+      if fx.name == "len" {
+        return okKind(.I64);
+      }
+      if fx.name == "ptr" {
+        return okKind(.Cstr);
+      }
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "slice has no field '", fx.name, "'")));
+      return fail();
+    }
+    if base.ty.kind != .Struct {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot access field '", fx.name, "' of non-struct type ", base.ty.kind.toString())));
+      return fail();
+    }
+
+    const sd = self.types.lookup(base.ty.name);
+    let fidx: u32 = 0;
+    if sd != 0 {
+      match self.a.decls.at(sd).kind {
+        .Struct(sdd) => { fidx = self.findFieldIn(sdd.fields, fx.name); },
+        _ => {},
+      };
+    }
+    if fidx == 0 {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "struct '", base.ty.name, "' has no field '", fx.name, "'")));
+      return fail();
+    }
+    if lastDot(base.ty.name) >= 0 && self.a.fields.at(fidx).visibility != .Public {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "field '", fx.name, "' of struct '", bareTypeName(base.ty.name), "' is not public")));
+      return fail();
+    }
+    let fty = copyOf(&self.a.fields.at(fidx).ty);
+    const bdot = lastDot(base.ty.name);
+    if bdot >= 0 {
+      fty = self.qualifyParamType(fty, base.ty.name[0..bdot]);
+    }
+    let r: ExprTy;
+    r.ty.kind = fty.kind;
+    r.ty.name = fty.name;
+    r.ty.elem = fty.elem;
+    r.ty.array_length = fty.array_length;
+    r.ok = true;
+    return r;
+  }
+
+  fn checkStructLiteral(self, e: u32, sl: ast.StructLiteralExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    let nsl = sl;
+    if nsl.type_name.len == 0 {
+      let want = expected;
+      if want.kind == .Optional && want.elem != 0 {
+        want = self.typeCopy(want.elem);
+      }
+      if want.kind == .Struct && want.name.len > 0 {
+        nsl.type_name = want.name;
+      } else {
+        diag.error(span, .Message("cannot infer struct type for literal"));
+        return fail();
+      }
+    }
+    if nsl.module.len > 0 {
+      const mod = self.resolveModuleAlias(nsl.module);
+      if mod == 0 {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "'", nsl.module, "' is not a module")));
+        return fail();
+      }
+      if self.modulePubType(mod, nsl.type_name, false) == 0 {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "module '", nsl.module, "' has no public struct '", nsl.type_name, "'")));
+        return fail();
+      }
+      nsl.type_name = utils.concat(self.a.arena,
+        moduleStem(self.a.arena, self.a.modules.at(mod).path), ".", nsl.type_name);
+      nsl.module = "";
+    }
+    self.a.exprs.at(e).kind = .StructLiteral(nsl);
+
+    const sd = self.types.lookup(nsl.type_name);
+    if sd == 0 {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "unknown type '", nsl.type_name, "'")));
+      return fail();
+    }
+    let fields = ast.Range.empty();
+    let is_struct = false;
+    match self.a.decls.at(sd).kind {
+      .Struct(sdd) => { is_struct = true; fields = sdd.fields; },
+      _ => {},
+    };
+    if !is_struct {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "'", nsl.type_name, "' is not a struct")));
+      return fail();
+    }
+    const sname = self.a.decls.at(sd).name;
+    const imported = lastDot(nsl.type_name) >= 0;
+
+    let all_ok = true;
+    let i: u32 = 0;
+    while i < nsl.inits.len {
+      const init_i = self.a.extra.get(nsl.inits.start + i);
+      const iname = self.a.field_inits.at(init_i).name;
+      const ival = self.a.field_inits.at(init_i).value;
+      const ispan = self.a.field_inits.at(init_i).span;
+      const fidx = self.findFieldIn(fields, iname);
+      let fty = unknownTy();
+      if fidx != 0 {
+        fty = copyOf(&self.a.fields.at(fidx).ty);
+      }
+      const value = self.checkExpr(ival, fty);
+      if fidx == 0 {
+        diag.error(ispan, .Message(utils.concat(self.a.arena,
+          "struct '", sname, "' has no field '", iname, "'")));
+        all_ok = false;
+      } else if imported && self.a.fields.at(fidx).visibility != .Public {
+        diag.error(ispan, .Message(utils.concat(self.a.arena,
+          "field '", iname, "' of struct '", bareTypeName(nsl.type_name), "' is not public")));
+        all_ok = false;
+      } else if value.ok && !self.assignable(fty, value.ty) {
+        diag.error(self.a.exprs.at(ival).span, .Message(utils.concat(self.a.arena,
+          "cannot assign ", value.ty.kind.toString(), " to field '", iname,
+          "' of type ", self.typeText(fty))));
+        all_ok = false;
+      }
+      i += 1;
+    }
+
+    let j: u32 = 0;
+    while j < fields.len {
+      const fd = self.a.extra.get(fields.start + j);
+      const fname = self.a.fields.at(fd).name;
+      let found = false;
+      let k: u32 = 0;
+      while k < nsl.inits.len {
+        const init_k = self.a.extra.get(nsl.inits.start + k);
+        if self.a.field_inits.at(init_k).name == fname {
+          found = true;
+          k = nsl.inits.len;
+        } else {
+          k += 1;
+        }
+      }
+      if !found && self.a.fields.at(fd).default_value == 0 {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "missing field '", fname, "' in initializer for '", sname, "'")));
+        all_ok = false;
+      }
+      j += 1;
+    }
+
+    let r: ExprTy;
+    r.ty.kind = .Struct;
+    r.ty.name = nsl.type_name;
+    r.ok = all_ok;
+    return r;
+  }
+
+  fn checkArray(self, e: u32, elements: ast.Range, expected: ast.Type): ExprTy {
+    let elem_hint = unknownTy();
+    if (expected.kind == .Array || expected.kind == .Slice) && expected.elem != 0 {
+      elem_hint = self.typeCopy(expected.elem);
+    }
+    let elem = unknownTy();
+    let all_ok = true;
+    let i: u32 = 0;
+    while i < elements.len {
+      const ei = self.a.extra.get(elements.start + i);
+      const et = self.checkExpr(ei, elem_hint);
+      if i == 0 {
+        elem = et.ty;
+      } else if et.ok && !self.typeEq(elem, et.ty) {
+        diag.error(self.a.exprs.at(ei).span, .Message(utils.concat(self.a.arena,
+          "array element has type ", self.typeText(et.ty), ", expected ", self.typeText(elem))));
+        all_ok = false;
+      }
+      if !et.ok {
+        all_ok = false;
+      }
+      i += 1;
+    }
+    let r: ExprTy;
+    r.ty.kind = .Array;
+    r.ty.elem = self.a.types.push(elem);
+    r.ty.array_length = elements.len as i64;
+    r.ok = all_ok;
+    return r;
+  }
+
+  fn checkIndex(self, e: u32, ix: ast.IndexExpr): ExprTy {
+    const base = self.checkExpr(ix.base, unknownTy());
+    const idx = self.checkExpr(ix.index, kindTy(.I32));
+    if !base.ok {
+      return fail();
+    }
+    if base.ty.kind != .Array && base.ty.kind != .Slice && base.ty.kind != .Str {
+      diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
+        "cannot index non-array type ", base.ty.kind.toString())));
+      return fail();
+    }
+    if idx.ok && !idx.ty.kind.isInteger() {
+      diag.error(self.a.exprs.at(ix.index).span, .Message(utils.concat(self.a.arena,
+        "array index must be an integer, got ", idx.ty.kind.toString())));
+    }
+    if base.ty.kind == .Str {
+      return okKind(.U8);
+    }
+    let r: ExprTy;
+    r.ty = self.typeCopy(base.ty.elem);
+    r.ok = true;
+    return r;
+  }
+
+  fn checkSliceRange(self, e: u32, sr: ast.SliceRangeExpr): ExprTy {
+    const base = self.checkExpr(sr.base, unknownTy());
+    const first = self.checkExpr(sr.start, kindTy(.I64));
+    const last = self.checkExpr(sr.end, kindTy(.I64));
+    if !base.ok {
+      return fail();
+    }
+    if base.ty.kind != .Array && base.ty.kind != .Slice
+      && base.ty.kind != .Str && base.ty.kind != .Cstr {
+      diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
+        "cannot slice ", self.typeText(base.ty))));
+      return fail();
+    }
+    if first.ok && !first.ty.kind.isInteger() {
+      diag.error(self.a.exprs.at(sr.start).span, .Message(utils.concat(self.a.arena,
+        "slice bound must be an integer, got ", first.ty.kind.toString())));
+    }
+    if last.ok && !last.ty.kind.isInteger() {
+      diag.error(self.a.exprs.at(sr.end).span, .Message(utils.concat(self.a.arena,
+        "slice bound must be an integer, got ", last.ty.kind.toString())));
+    }
+    if base.ty.kind == .Str {
+      let r: ExprTy;
+      r.ty.kind = .Str;
+      r.ok = first.ok && last.ok;
+      return r;
+    }
+    if base.ty.kind == .Cstr {
+      let r2: ExprTy;
+      r2.ty.kind = .Slice;
+      r2.ty.elem = self.a.types.push(kindTy(.U8));
+      r2.ok = first.ok && last.ok;
+      return r2;
+    }
+    let r3: ExprTy;
+    r3.ty.kind = .Slice;
+    r3.ty.elem = base.ty.elem;
+    r3.ok = first.ok && last.ok;
+    return r3;
+  }
+
+  fn checkEnumLiteral(self, e: u32, el: ast.EnumLiteralExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    let want = expected;
+    while want.kind == .Optional && want.elem != 0 {
+      want = self.typeCopy(want.elem);
+    }
+    self.resolveType(&want);
+    let enm: u32 = 0;
+    if want.name.len > 0 {
+      enm = self.types.lookup(want.name);
+      if enm == 0 && want.kind == .Enum {
+        enm = self.importsPubEnum(want.name);
+      }
+    }
+    let enm_is_enum = false;
+    if enm != 0 {
+      enm_is_enum = match self.a.decls.at(enm).kind {
+        .Enum(ed) => true,
+        _ => false,
+      };
+    }
+    if want.kind != .Enum || enm == 0 || !enm_is_enum {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot infer enum type for '.", el.name, "'")));
+      return fail();
+    }
+    const mi = self.enumMemberOf(enm, el.name);
+    if mi == 0 {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "enum '", self.a.decls.at(enm).name, "' has no member '", el.name, "'")));
+      return fail();
+    }
+    if self.a.enum_members.at(mi).has_payload {
+      if el.payload == 0 {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "variant '", el.name, "' of '", bareTypeName(want.name),
+          "' requires a payload of type ", self.typeText(copyOf(&self.a.enum_members.at(mi).payload)))));
+        return fail();
+      }
+      const pty = copyOf(&self.a.enum_members.at(mi).payload);
+      const pl = self.checkExpr(el.payload, pty);
+      if pl.ok && !self.assignable(pty, pl.ty) {
+        diag.error(self.a.exprs.at(el.payload).span, .Message(utils.concat(self.a.arena,
+          "cannot pass ", self.typeText(pl.ty), " as payload of variant '", el.name,
+          "' (expected ", self.typeText(pty), ")")));
+      }
+    } else if el.payload != 0 {
+      diag.error(self.a.exprs.at(el.payload).span, .Message(utils.concat(self.a.arena,
+        "variant '", el.name, "' of '", bareTypeName(want.name), "' takes no payload")));
+    }
+    const is_tagged = match self.a.decls.at(enm).kind {
+      .Enum(ed2) => ed2.tagged,
+      _ => false,
+    };
+    if !is_tagged {
+      self.a.exprs.at(e).kind = .Number(intText(self.a.arena, self.a.enum_members.at(mi).value));
+    }
+    let r: ExprTy;
+    r.ty.kind = .Enum;
+    r.ty.name = want.name;
+    r.ok = true;
+    return r;
+  }
+
+  fn patternIntValue(self, e: u32): PatInt {
+    const num_text = match self.a.exprs.at(e).kind {
+      .Number(n) => n,
+      _ => "",
+    };
+    if num_text.len > 0 {
+      return PatInt{v: parseI64Text(num_text), ok: true};
+    }
+    let neg_operand: u32 = 0;
+    match self.a.exprs.at(e).kind {
+      .Unary(u) => {
+        if u.op == .Neg {
+          neg_operand = u.operand;
+        }
+      },
+      _ => {},
+    };
+    if neg_operand != 0 {
+      const inner_text = match self.a.exprs.at(neg_operand).kind {
+        .Number(n2) => n2,
+        _ => "",
+      };
+      if inner_text.len > 0 {
+        return PatInt{v: -parseI64Text(inner_text), ok: true};
+      }
+    }
+    return PatInt{v: 0, ok: false};
+  }
+
+  fn checkMatch(self, e: u32, m: ast.MatchExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    const scrut = self.checkExpr(m.scrutinee, unknownTy());
+    if !scrut.ok {
+      return fail();
+    }
+    const opt_scrut = scrut.ty.kind == .Optional && scrut.ty.elem != 0;
+    let inner = scrut.ty;
+    if opt_scrut {
+      inner = self.typeCopy(scrut.ty.elem);
+    }
+    let enm: u32 = 0;
+    if inner.kind == .Enum && inner.name.len > 0 {
+      enm = self.types.lookup(inner.name);
+      if enm == 0 {
+        enm = self.importsPubEnum(inner.name);
+      }
+      if enm == 0 {
+        diag.error(self.a.exprs.at(m.scrutinee).span, .Message(utils.concat(self.a.arena,
+          "unknown enum '", inner.name, "'")));
+        return fail();
+      }
+    } else if inner.kind != .Bool && !inner.kind.isInteger() {
+      diag.error(self.a.exprs.at(m.scrutinee).span, .Message(utils.concat(self.a.arena,
+        "match requires an enum, bool, or integer value, got ", self.typeText(scrut.ty))));
+      return fail();
+    }
+    const int_scrut = inner.kind.isInteger();
+    let tagged = false;
+    let members = ast.Range.empty();
+    if enm != 0 {
+      match self.a.decls.at(enm).kind {
+        .Enum(ed) => { tagged = ed.tagged; members = ed.members; },
+        _ => {},
+      };
+    }
+    if m.arms.len == 0 {
+      diag.error(span, .Message("match must have at least one arm"));
+      return fail();
+    }
+
+    let cc: i64 = 2;
+    if enm != 0 {
+      cc = members.len as i64;
+    }
+    if cc == 0 {
+      cc = 1;
+    }
+    let covered = self.a.arena.alloc(cc * sizeof(bool)) as []bool;
+    let zi: i64 = 0;
+    while zi < cc {
+      covered[zi] = false;
+      zi += 1;
+    }
+    let seen = self.a.arena.alloc((m.arms.len as i64) * sizeof(i64)) as []i64;
+    let seen_count: i64 = 0;
+    let seen_null = false;
+    let has_wildcard = false;
+    let has_condition = false;
+    let has_block = false;
+    let have_rtype = false;
+    let all_ok = true;
+    let rtype: ExprTy;
+
+    let ai: u32 = 0;
+    while ai < m.arms.len {
+      const arm = self.a.extra.get(m.arms.start + ai);
+      const aspan = self.a.match_arms.at(arm).span;
+      const pattern = self.a.match_arms.at(arm).pattern;
+      const pattern_end = self.a.match_arms.at(arm).pattern_end;
+      const binding = self.a.match_arms.at(arm).binding;
+      const or_next = self.a.match_arms.at(arm).or_next;
+      const is_block = self.a.match_arms.at(arm).is_block;
+      const avalue = self.a.match_arms.at(arm).value;
+      const abody = self.a.match_arms.at(arm).body;
+
+      let bind_name = "";
+      let bind_type = unknownTy();
+
+      if pattern == 0 {
+        has_wildcard = true;
+        if ai + 1 < m.arms.len {
+          diag.error(aspan, .Message("'_' must be the last match arm"));
+          all_ok = false;
+        }
+      } else if tagged {
+        const pspan = self.a.exprs.at(pattern).span;
+        let pat_variant = "";
+        let pat_is_enumlit = false;
+        match self.a.exprs.at(pattern).kind {
+          .EnumLiteral(pel) => { pat_is_enumlit = true; pat_variant = pel.name; },
+          _ => {},
+        };
+        if !pat_is_enumlit {
+          diag.error(pspan, .Message(utils.concat(self.a.arena,
+            "match pattern must be a variant of enum '", bareTypeName(inner.name), "'")));
+          all_ok = false;
+        } else {
+          let member: u32 = 0;
+          let midx: i64 = 0;
+          let mi: u32 = 0;
+          while mi < members.len {
+            const mm = self.a.extra.get(members.start + mi);
+            if self.a.enum_members.at(mm).name == pat_variant {
+              member = mm;
+              midx = mi as i64;
+              mi = members.len;
+            } else {
+              mi += 1;
+            }
+          }
+          if member == 0 {
+            diag.error(pspan, .Message(utils.concat(self.a.arena,
+              "enum '", bareTypeName(inner.name), "' has no member '", pat_variant, "'")));
+            all_ok = false;
+          } else {
+            if covered[midx] {
+              diag.error(pspan, .Message(utils.concat(self.a.arena,
+                "duplicate match arm for '", pat_variant, "'")));
+              all_ok = false;
+            }
+            covered[midx] = true;
+            if or_next && binding.len > 0 {
+              diag.error(pspan, .Message("grouped variant patterns cannot bind a payload"));
+              all_ok = false;
+            } else if self.a.enum_members.at(member).has_payload {
+              if binding.len == 0 {
+                diag.error(pspan, .Message(utils.concat(self.a.arena,
+                  "variant '", pat_variant, "' binds its payload: write .", pat_variant, "(name)")));
+                all_ok = false;
+              } else {
+                bind_name = binding;
+                bind_type = copyOf(&self.a.enum_members.at(member).payload);
+                const idot = lastDot(inner.name);
+                if idot >= 0 {
+                  bind_type = self.qualifyParamType(bind_type, inner.name[0..idot]);
+                }
+              }
+            } else if binding.len > 0 {
+              diag.error(pspan, .Message(utils.concat(self.a.arena,
+                "variant '", pat_variant, "' has no payload to bind")));
+              all_ok = false;
+            }
+          }
+        }
+      } else if self.isNullExpr(pattern) {
+        const nspan = self.a.exprs.at(pattern).span;
+        if !opt_scrut {
+          diag.error(nspan, .Message("a 'null' pattern requires an optional scrutinee"));
+          all_ok = false;
+        } else {
+          self.checkExpr(pattern, scrut.ty);
+          if seen_null {
+            diag.error(nspan, .Message("duplicate match arm for 'null'"));
+            all_ok = false;
+          }
+          seen_null = true;
+        }
+      } else {
+        const qspan = self.a.exprs.at(pattern).span;
+        const pat = self.checkExpr(pattern, inner);
+        const pat_num_text = match self.a.exprs.at(pattern).kind {
+          .Number(pnt) => pnt,
+          _ => "",
+        };
+        if pattern_end != 0 && !int_scrut {
+          diag.error(self.a.exprs.at(pattern_end).span,
+            .Message("range patterns require an integer scrutinee"));
+          all_ok = false;
+        } else if !pat.ok {
+          all_ok = false;
+        } else if int_scrut {
+          const lov = self.patternIntValue(pattern);
+          if !lov.ok {
+            diag.error(qspan, .Message("match pattern must be an integer constant"));
+            all_ok = false;
+          } else if pattern_end != 0 {
+            const pe = self.checkExpr(pattern_end, inner);
+            if !pe.ok {
+              all_ok = false;
+            } else {
+              const hiv = self.patternIntValue(pattern_end);
+              if !hiv.ok {
+                diag.error(self.a.exprs.at(pattern_end).span,
+                  .Message("match pattern must be an integer constant"));
+                all_ok = false;
+              } else if lov.v > hiv.v {
+                diag.error(qspan, .Message("range pattern is empty"));
+                all_ok = false;
+              }
+            }
+          } else {
+            let si: i64 = 0;
+            while si < seen_count {
+              if seen[si] == lov.v {
+                diag.error(qspan, .Message(utils.concat(self.a.arena,
+                  "duplicate match arm for ", intText(self.a.arena, lov.v))));
+                all_ok = false;
+                si = seen_count;
+              } else {
+                si += 1;
+              }
+            }
+            seen[seen_count] = lov.v;
+            seen_count += 1;
+          }
+        } else if enm == 0 {
+          let is_bool_lit = false;
+          let bool_val = false;
+          match self.a.exprs.at(pattern).kind {
+            .Boolean(bl) => { is_bool_lit = true; bool_val = bl; },
+            _ => {},
+          };
+          if is_bool_lit {
+            let bidx: i64 = 0;
+            if bool_val {
+              bidx = 1;
+            }
+            if covered[bidx] {
+              const which: str = bool_val ? "true" : "false";
+              diag.error(qspan, .Message(utils.concat(self.a.arena,
+                "duplicate match arm for '", which, "'")));
+              all_ok = false;
+            }
+            covered[bidx] = true;
+          } else if pat.ty.kind != .Bool {
+            diag.error(qspan, .Message(utils.concat(self.a.arena,
+              "match pattern must be a bool expression, got ", self.typeText(pat.ty))));
+            all_ok = false;
+          } else {
+            has_condition = true;
+          }
+        } else if pat.ty.kind != .Enum || pat.ty.name.len == 0
+          || pat.ty.name != inner.name || pat_num_text.len == 0 {
+          diag.error(qspan, .Message(utils.concat(self.a.arena,
+            "match pattern must be a member of enum '", bareTypeName(inner.name), "'")));
+          all_ok = false;
+        } else {
+          const pval = parseI64Text(pat_num_text);
+          let vi: u32 = 0;
+          while vi < members.len {
+            const vm = self.a.extra.get(members.start + vi);
+            if self.a.enum_members.at(vm).value == pval {
+              if covered[vi as i64] {
+                diag.error(qspan, .Message(utils.concat(self.a.arena,
+                  "duplicate match arm for '", self.a.enum_members.at(vm).name, "'")));
+                all_ok = false;
+              }
+              covered[vi as i64] = true;
+              vi = members.len;
+            } else {
+              vi += 1;
+            }
+          }
+        }
+      }
+
+      if or_next {
+        ai += 1;
+        continue;
+      }
+
+      const bind_saved = self.scope.len;
+      if bind_name.len > 0 && self.has_scope {
+        self.scope.push(Local{name: bind_name, ty: bind_type, mutable: false, is_loop_var: false});
+      }
+
+      if is_block {
+        has_block = true;
+        if self.cur_fn == 0 {
+          diag.error(aspan, .Message("a match arm block is only allowed inside a function"));
+          all_ok = false;
+        } else {
+          self.checkBlock(abody, self.cur_fn);
+        }
+        if self.has_scope {
+          self.scope.len = bind_saved;
+        }
+        ai += 1;
+        continue;
+      }
+
+      let hint = expected;
+      if expected.kind == .Unknown && have_rtype {
+        hint = rtype.ty;
+      }
+      if self.isNullExpr(avalue) && hint.kind != .Optional && hint.kind != .Cstr
+        && have_rtype && rtype.ty.kind != .Optional && rtype.ty.kind != .Void {
+        let opt_t: ast.Type;
+        opt_t.kind = .Optional;
+        opt_t.elem = self.a.types.push(rtype.ty);
+        hint = opt_t;
+      }
+      const value = self.checkExpr(avalue, hint);
+      if self.has_scope {
+        self.scope.len = bind_saved;
+      }
+      if !value.ok {
+        all_ok = false;
+      } else if !have_rtype {
+        rtype = value;
+        have_rtype = true;
+      } else if !self.assignable(rtype.ty, value.ty) {
+        let promoted = false;
+        if value.ty.kind == .Optional && rtype.ty.kind != .Optional && value.ty.elem != 0
+          && self.typeEq(self.typeCopy(value.ty.elem), rtype.ty) {
+          rtype = value;
+          promoted = true;
+        }
+        if !promoted {
+          diag.error(self.a.exprs.at(avalue).span, .Message(utils.concat(self.a.arena,
+            "match arm has type ", self.typeText(value.ty), ", expected ", self.typeText(rtype.ty))));
+          all_ok = false;
+        }
+      }
+      ai += 1;
+    }
+
+    if !has_wildcard {
+      if opt_scrut || int_scrut {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "match on ", self.typeText(scrut.ty), " must have a '_' arm")));
+        all_ok = false;
+      } else if enm == 0 {
+        if has_condition {
+          if !(covered[0] && covered[1]) {
+            diag.error(span, .Message("match with condition arms must end with a '_' arm"));
+            all_ok = false;
+          }
+        } else {
+          if !covered[1] {
+            diag.error(span, .Message("match does not cover 'true'"));
+            all_ok = false;
+          }
+          if !covered[0] {
+            diag.error(span, .Message("match does not cover 'false'"));
+            all_ok = false;
+          }
+        }
+      } else {
+        let ci: u32 = 0;
+        while ci < members.len {
+          if !covered[ci as i64] {
+            const cm = self.a.extra.get(members.start + ci);
+            diag.error(span, .Message(utils.concat(self.a.arena,
+              "match does not cover enum member '", self.a.enum_members.at(cm).name, "'")));
+            all_ok = false;
+          }
+          ci += 1;
+        }
+      }
+    }
+
+    if has_block {
+      let rb: ExprTy;
+      rb.ty.kind = .Void;
+      rb.ok = all_ok;
+      return rb;
+    }
+    if !have_rtype {
+      return fail();
+    }
+    let rr: ExprTy;
+    rr.ty = rtype.ty;
+    rr.ok = all_ok;
+    return rr;
+  }
+
+  fn checkBlock(self, body: ast.Range, d: u32) {
+    let i: u32 = 0;
+    while i < body.len {
+      self.checkStmt(self.a.extra.get(body.start + i), d);
+      i += 1;
+    }
+  }
+
+  fn checkStmt(self, s: u32, d: u32) {
+    match self.a.stmts.at(s).kind {
+      .Return(rv) => { self.checkReturn(s, rv, d); },
+      .ExprStmt(ex) => { self.checkExpr(ex, unknownTy()); },
+      .If(iff) => { self.checkIf(s, iff, d); },
+      .Binding(bnd) => { self.checkBinding(s, bnd); },
+      .Assign(asg) => { self.checkAssign(s, asg); },
+      .While(wh) => { self.checkWhile(s, wh, d); },
+      .For(fr) => { self.checkFor(s, fr, d); },
+      .Break => { self.checkLoopCtl(s, "break outside of loop"); },
+      .Continue => { self.checkLoopCtl(s, "continue outside of loop"); },
+      .Defer(df) => { self.checkDefer(df); },
+    };
+  }
+
+  fn checkReturn(self, s: u32, v: u32, d: u32) {
+    const span = self.a.stmts.at(s).span;
+    const rt = self.fnReturnType(d);
+    const fname = self.a.decls.at(d).name;
+
+    if v == 0 {
+      if rt.kind != .Void {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "non-void function '", fname, "' must return a value")));
+      }
+      return;
+    }
+
+    const value = self.checkExpr(v, rt);
+
+    if rt.kind == .Void {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "void function '", fname, "' cannot return a value")));
+      return;
+    }
+
+    if value.ok && !self.assignable(rt, value.ty) {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot return ", self.typeText(value.ty), " from function returning ", self.typeText(rt))));
+    }
+  }
+
+  fn checkIf(self, s: u32, iff: ast.IfStmt, d: u32) {
+    const cond = self.checkExpr(iff.cond, kindTy(.Bool));
+    if cond.ok && cond.ty.kind != .Bool {
+      diag.error(self.a.exprs.at(iff.cond).span, .Message(utils.concat(self.a.arena,
+        "if condition must be bool, got ", cond.ty.kind.toString())));
+    }
+    self.checkBlock(iff.then_body, d);
+    self.checkBlock(iff.else_body, d);
+  }
+
+  fn checkBinding(self, s: u32, b: ast.BindingStmt) {
+    const span = self.a.stmts.at(s).span;
+    let nb = b;
+    self.resolveType(&nb.ty);
+    if nb.init == 0 && nb.ty.kind == .Unknown {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "binding '", nb.name, "' without an initializer needs a type")));
+    }
+    if nb.init != 0 {
+      const init = self.checkExpr(nb.init, nb.ty);
+      if nb.ty.kind == .Unknown {
+        nb.ty.kind = init.ty.kind;
+        nb.ty.name = init.ty.name;
+        nb.ty.elem = init.ty.elem;
+        nb.ty.array_length = init.ty.array_length;
+      } else {
+        if nb.ty.kind == .Array && nb.ty.array_length == 0 && init.ty.kind == .Array {
+          nb.ty.array_length = init.ty.array_length;
+        }
+        if init.ok && !self.assignable(nb.ty, init.ty) {
+          diag.error(span, .Message(utils.concat(self.a.arena,
+            "cannot assign ", self.typeText(init.ty), " to variable '", nb.name,
+            "' of type ", self.typeText(nb.ty))));
+        }
+      }
+    }
+    if self.scope.lookup(nb.name) >= 0 {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "redeclaration of '", nb.name, "'")));
+    } else {
+      self.scope.push(Local{name: nb.name, ty: nb.ty, mutable: nb.mutable, is_loop_var: false});
+    }
+    self.a.stmts.at(s).kind = .Binding(nb);
+  }
+
+  fn checkAssign(self, s: u32, asg: ast.AssignStmt) {
+    const span = self.a.stmts.at(s).span;
+    const lhs = self.checkExpr(asg.target, unknownTy());
+
+    const str_index = match self.a.exprs.at(asg.target).kind {
+      .Index(ix) => self.a.exprs.at(ix.base).ty.kind == .Str,
+      _ => false,
+    };
+    if str_index {
+      diag.error(span, .Message("cannot assign through index into str (strings are immutable)"));
+      self.checkExpr(asg.value, unknownTy());
+      return;
+    }
+
+    const root = self.lvalueRoot(asg.target);
+    let found = false;
+    let is_mut = true;
+    let is_lv = false;
+    if root.len > 0 {
+      if self.has_scope {
+        const si = self.scope.lookup(root);
+        if si >= 0 {
+          found = true;
+          is_mut = self.scope.isMutable(si);
+          is_lv = self.scope.isLoopVar(si);
+        }
+      }
+      if !found {
+        const gi = self.gscope.lookup(root);
+        if gi >= 0 {
+          found = true;
+          is_mut = self.gscope.isMutable(gi);
+          is_lv = self.gscope.isLoopVar(gi);
+        }
+      }
+    }
+
+    if found && !is_mut && !self.lvalueThroughPointer(asg.target) {
+      if is_lv {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot assign to loop variable '", root, "'")));
+      } else {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot assign to const '", root, "'")));
+      }
+      self.checkExpr(asg.value, unknownTy());
+      return;
+    }
+
+    if asg.coalesce {
+      if lhs.ok && (lhs.ty.kind != .Optional || lhs.ty.elem == 0) {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "left side of '??=' must be an optional, got ", self.typeText(lhs.ty))));
+        self.checkExpr(asg.value, unknownTy());
+        return;
+      }
+      let el = unknownTy();
+      if lhs.ok {
+        el = self.typeCopy(lhs.ty.elem);
+      }
+      const fallback = self.checkExpr(asg.value, el);
+      if lhs.ok && fallback.ok && !self.assignable(el, fallback.ty) {
+        diag.error(self.a.exprs.at(asg.value).span, .Message(utils.concat(self.a.arena,
+          "'??=' fallback has type ", self.typeText(fallback.ty), ", expected ", self.typeText(el))));
+      }
+      return;
+    }
+
+    const value = self.checkExpr(asg.value, lhs.ty);
+    if asg.compound {
+      const bitwise = !asg.op.isArithmetic();
+      let valid = lhs.ty.kind == value.ty.kind && lhs.ty.kind.isNumeric();
+      if bitwise {
+        valid = lhs.ty.kind == value.ty.kind && lhs.ty.kind.isInteger();
+      }
+      if lhs.ok && value.ok && !valid {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot apply '", asg.op.toString(), "=' to ", self.typeText(lhs.ty),
+          " and ", self.typeText(value.ty))));
+      }
+      return;
+    }
+
+    if lhs.ok && value.ok && !self.assignable(lhs.ty, value.ty) {
+      const field_name = match self.a.exprs.at(asg.target).kind {
+        .Field(fx) => fx.name,
+        _ => "",
+      };
+      if field_name.len > 0 {
+        diag.error(self.a.exprs.at(asg.value).span, .Message(utils.concat(self.a.arena,
+          "cannot assign ", value.ty.kind.toString(), " to field '", field_name,
+          "' of type ", self.typeText(lhs.ty))));
+      } else {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot assign ", value.ty.kind.toString(), " to variable '", root,
+          "' of type ", self.typeText(lhs.ty))));
+      }
+    }
+  }
+
+  fn checkWhile(self, s: u32, wh: ast.WhileStmt, d: u32) {
+    const cond = self.checkExpr(wh.cond, kindTy(.Bool));
+    if cond.ok && cond.ty.kind != .Bool {
+      diag.error(self.a.exprs.at(wh.cond).span, .Message(utils.concat(self.a.arena,
+        "while condition must be bool, got ", cond.ty.kind.toString())));
+    }
+    self.loop_depth += 1;
+    self.checkBlock(wh.body, d);
+    self.loop_depth -= 1;
+  }
+
+  fn checkFor(self, s: u32, fr: ast.ForStmt, d: u32) {
+    let var_type = kindTy(.I32);
+    if fr.iterable != 0 {
+      const iter = self.checkExpr(fr.iterable, unknownTy());
+      if iter.ok && iter.ty.kind != .Slice && iter.ty.kind != .Array {
+        diag.error(self.a.exprs.at(fr.iterable).span, .Message(utils.concat(self.a.arena,
+          "for-in loop requires a slice or array, got ", iter.ty.kind.toString())));
+        var_type = kindTy(.I32);
+      } else if iter.ty.elem != 0 {
+        var_type = self.typeCopy(iter.ty.elem);
+      } else {
+        var_type = kindTy(.I32);
+      }
+    } else {
+      const first = self.checkExpr(fr.start, unknownTy());
+      const last = self.checkExpr(fr.end, unknownTy());
+
+      let k: ast.TypeKind = .I32;
+      if first.ok && !first.ty.kind.isInteger() {
+        diag.error(self.a.exprs.at(fr.start).span, .Message(utils.concat(self.a.arena,
+          "range bound must be an integer, got ", first.ty.kind.toString())));
+      } else if last.ok && !last.ty.kind.isInteger() {
+        diag.error(self.a.exprs.at(fr.end).span, .Message(utils.concat(self.a.arena,
+          "range bound must be an integer, got ", last.ty.kind.toString())));
+      } else if first.ok && last.ok && first.ty.kind != last.ty.kind {
+        diag.error(self.a.exprs.at(fr.start).span, .Message(utils.concat(self.a.arena,
+          "range bounds must have the same type, got ", first.ty.kind.toString(),
+          " and ", last.ty.kind.toString())));
+      } else if first.ok {
+        k = first.ty.kind;
+      }
+      var_type = kindTy(k);
+    }
+
+    const saved = self.scope.len;
+    self.scope.push(Local{name: fr.variable, ty: var_type, mutable: false, is_loop_var: true});
+
+    self.loop_depth += 1;
+    self.checkBlock(fr.body, d);
+    self.loop_depth -= 1;
+
+    self.scope.len = saved;
+  }
+
+  fn checkLoopCtl(self, s: u32, msg: str) {
+    if self.loop_depth == 0 {
+      diag.error(self.a.stmts.at(s).span, .Message(msg));
+    }
+  }
+
+  fn checkDefer(self, e: u32) {
+    const is_call = match self.a.exprs.at(e).kind {
+      .Call(c) => true,
+      _ => false,
+    };
+    if !is_call {
+      diag.error(self.a.exprs.at(e).span, .Message("defer expects a function or method call"));
+      return;
+    }
+    self.checkExpr(e, unknownTy());
+  }
+
+  fn stmtReturns(self, s: u32): bool {
+    return match self.a.stmts.at(s).kind {
+      .Return(rv) => true,
+      .If(iff) => iff.else_body.len > 0 && self.blockReturns(iff.then_body) && self.blockReturns(iff.else_body),
+      _ => false,
+    };
+  }
+
+  fn blockReturns(self, body: ast.Range): bool {
+    if body.len == 0 {
+      return false;
+    }
+    return self.stmtReturns(self.a.extra.get(body.start + body.len - 1));
+  }
+
+  fn checkFn(self, d: u32) {
+    match self.a.decls.at(d).kind {
+      .Fn(f) => { self.checkFnInner(d, f); },
+      _ => {},
+    };
+  }
+
+  fn checkFnInner(self, d: u32, f: ast.FnDecl) {
+    const dspan = self.a.decls.at(d).span;
+    const dname = self.a.decls.at(d).name;
+    let seen_default = false;
+    let i: u32 = 0;
+    while i < f.params.len {
+      const pi = self.a.extra.get(f.params.start + i);
+      self.resolveType(&self.a.params.at(pi).ty);
+      self.checkTypeExists(&self.a.params.at(pi).ty);
+
+      const dv = self.a.params.at(pi).default_value;
+      const pname = self.a.params.at(pi).name;
+      if dv != 0 {
+        if f.variadic {
+          diag.error(dspan, .Message("default parameters cannot be combined with variadic '...'"));
+        }
+        const dv_struct_lit = match self.a.exprs.at(dv).kind {
+          .StructLiteral(sl) => true,
+          _ => false,
+        };
+        if !self.isConstInit(dv) && !dv_struct_lit {
+          diag.error(self.a.exprs.at(dv).span, .Message("parameter default must be a constant"));
+        } else {
+          const pty = copyOf(&self.a.params.at(pi).ty);
+          const dty = self.checkExpr(dv, pty);
+          if dty.ok && !self.assignable(pty, dty.ty) {
+            diag.error(self.a.exprs.at(dv).span, .Message(utils.concat(self.a.arena,
+              "cannot assign ", dty.ty.kind.toString(), " to parameter '", pname,
+              "' of type ", self.typeText(pty))));
+          }
+          if self.stem.len > 0 {
+            match self.a.exprs.at(dv).kind {
+              .StructLiteral(sl) => {
+                if sl.type_name.len > 0 && lastDot(sl.type_name) < 0 {
+                  const qualified = utils.concat(self.a.arena, self.stem, ".", sl.type_name);
+                  let nsl = sl;
+                  nsl.type_name = qualified;
+                  self.a.exprs.at(dv).kind = .StructLiteral(nsl);
+                  self.a.exprs.at(dv).ty.name = qualified;
+                }
+              },
+              _ => {},
+            };
+          }
+        }
+        seen_default = true;
+      } else if seen_default && !self.a.params.at(pi).is_self {
+        diag.error(dspan, .Message(utils.concat(self.a.arena,
+          "parameter '", pname, "' without a default cannot follow a defaulted parameter")));
+      }
+      i += 1;
+    }
+
+    let nf = f;
+    self.checkTypeExists(&nf.return_type);
+    self.a.decls.at(d).kind = .Fn(nf);
+
+    if nf.is_extern {
+      return;
+    }
+
+    self.scope = Scope.init(self.a.arena);
+    self.has_scope = true;
+    self.cur_fn = d;
+
+    i = 0;
+    while i < f.params.len {
+      const pj = self.a.extra.get(f.params.start + i);
+      const pjname = self.a.params.at(pj).name;
+      if self.scope.lookup(pjname) >= 0 {
+        diag.error(dspan, .Message(utils.concat(self.a.arena,
+          "duplicate parameter name '", pjname, "'")));
+      } else {
+        self.scope.push(Local{
+          name: pjname,
+          ty: copyOf(&self.a.params.at(pj).ty),
+          mutable: self.a.params.at(pj).mutable,
+          is_loop_var: false,
+        });
+      }
+      i += 1;
+    }
+
+    self.checkBlock(f.body, d);
+
+    if nf.return_type.kind != .Void && !self.blockReturns(f.body) {
+      diag.error(dspan, .Message(utils.concat(self.a.arena,
+        "non-void function '", dname, "' must return a value")));
+    }
+
+    self.has_scope = false;
+    self.cur_fn = 0;
+  }
+
+  fn checkMemberBodies(self, members: ast.Range) {
+    let i: u32 = 0;
+    while i < members.len {
+      const di = self.a.extra.get(members.start + i);
+      match self.a.decls.at(di).kind {
+        .Fn(f) => { self.checkFn(di); },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn checkMethodBodies(self) {
+    let i: i64 = 0;
+    while i < self.local_types {
+      const di = self.types.items[i].decl;
+      match self.a.decls.at(di).kind {
+        .Struct(sd) => { self.checkMemberBodies(sd.members); },
+        .Enum(ed) => { self.checkMemberBodies(ed.methods); },
+        _ => {},
+      };
+      i += 1;
+    }
+  }
+
+  fn checkFnBodies(self) {
+    let i: i64 = 0;
+    while i < self.fns.len {
+      self.checkFn(self.fns.items[i].decl);
+      i += 1;
+    }
+  }
+}
+
+pub fn check(a: *ast.Ast, module: u32, require_main: bool) {
+  const stem: str = require_main ? "" : moduleStem(a.arena, a.modules.at(module).path);
+  let s = Sema{
+    a: a,
+    types: Tab.init(a.arena),
+    local_types: 0,
+    fns: Tab.init(a.arena),
+    globals: Tab.init(a.arena),
+    reachable: ast.ModuleList.init(a.arena),
+    module: module,
+    gscope: Scope.init(a.arena),
+    scope: Scope.init(a.arena),
+    has_scope: false,
+    cur_fn: 0,
+    loop_depth: 0,
+    stem: stem,
+  };
+
+  s.registerLocals();
+  s.registerImports();
+
+  if require_main {
+    s.checkEntryPoint();
+  }
+
+  s.resolveSignatures();
+  s.checkGlobals();
+  s.checkTypes();
+  s.checkMethodBodies();
+  s.checkFnBodies();
+}
+
+fn moduleStem(arena: *std.mem.Arena, path: str): str {
+  let start: i64 = 0;
+  let i: i64 = path.len - 1;
+  while i >= 0 {
+    if path[i] == '/' {
+      start = i + 1;
+      i = -1;
+    } else {
+      i -= 1;
+    }
+  }
+  let end: i64 = path.len;
+  i = path.len - 1;
+  while i >= start {
+    if path[i] == '.' {
+      end = i;
+      i = start - 1;
+    } else {
+      i -= 1;
+    }
+  }
+  return path[start..end];
+}
+
+const U64_MAX: u64 = 18446744073709551615;
+
+fn copyOf(t: *ast.Type): ast.Type {
+  let r: ast.Type;
+  r.kind = t.kind;
+  r.name = t.name;
+  r.module = t.module;
+  r.elem = t.elem;
+  r.array_length = t.array_length;
+  r.span = t.span;
+  return r;
+}
+
+fn lastDot(s: str): i64 {
+  let i: i64 = s.len - 1;
+  while i >= 0 {
+    if s[i] == '.' {
+      return i;
+    }
+    i -= 1;
+  }
+  return -1;
+}
+
+fn enumNameEq(a: str, b: str): bool {
+  if a.len == 0 || b.len == 0 {
+    return false;
+  }
+  if a == b {
+    return true;
+  }
+  const ad = lastDot(a);
+  const bd = lastDot(b);
+  if (ad >= 0 && bd >= 0) || (ad < 0 && bd < 0) {
+    return false;
+  }
+  let abare = a;
+  if ad >= 0 {
+    abare = a[ad + 1..a.len];
+  }
+  let bbare = b;
+  if bd >= 0 {
+    bbare = b[bd + 1..b.len];
+  }
+  return abare == bbare;
+}
+
+fn bareTypeName(name: str): str {
+  const d = lastDot(name);
+  if d >= 0 {
+    return name[d + 1..name.len];
+  }
+  return name;
+}
+
+struct PatInt {
+  v: i64,
+  ok: bool,
+}
+
+fn parseI64Text(text: str): i64 {
+  let v: i64 = 0;
+  let base: i64 = 10;
+  let i: i64 = 0;
+  if text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+    base = 16;
+    i = 2;
+  }
+  while i < text.len {
+    const ch = text[i];
+    let d: i64 = 99;
+    if ch >= '0' && ch <= '9' {
+      d = (ch - '0') as i64;
+    } else if base == 16 && ch >= 'a' && ch <= 'f' {
+      d = (ch - 'a') as i64 + 10;
+    } else if base == 16 && ch >= 'A' && ch <= 'F' {
+      d = (ch - 'A') as i64 + 10;
+    }
+    if d >= base {
+      break;
+    }
+    v = v * base + d;
+    i += 1;
+  }
+  return v;
+}
+
+fn varargBoxable(kind: ast.TypeKind): bool {
+  let k = kind;
+  return k.isInteger() || k.isFloat() || k == .Bool || k == .Str || k == .Enum;
+}
+
+fn numberIsFloat(text: str): bool {
+  if text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+    return false;
+  }
+  let i: i64 = 0;
+  while i < text.len {
+    if text[i] == '.' || text[i] == 'e' || text[i] == 'E' {
+      return true;
+    }
+    i += 1;
+  }
+  return false;
+}
+
+fn intMax(kind: ast.TypeKind): u64 {
+  return match kind {
+    .I8 => 127,
+    .U8 => 255,
+    .I16 => 32767,
+    .U16 => 65535,
+    .I32 => 2147483647,
+    .U32 => 4294967295,
+    .I64 => 9223372036854775807,
+    .U64 => 18446744073709551615,
+    _ => 0,
+  };
+}
+
+fn intText(arena: *std.mem.Arena, v: i64): str {
+  if v == 0 {
+    return "0";
+  }
+  let buf = arena.alloc(20);
+  let n: i64 = 20;
+  let neg = v < 0;
+  let x: i64 = neg ? -v : v;
+  while x > 0 {
+    n -= 1;
+    buf[n] = (x % 10) as u8 + '0';
+    x /= 10;
+  }
+  if neg {
+    n -= 1;
+    buf[n] = '-';
+  }
+  return buf[n..20] as str;
+}

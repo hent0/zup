@@ -9,9 +9,9 @@ pub struct Lexer {
   col: u32,
   cursor: u32,
   current: u8,
-  arena: std.mem.Arena,
+  arena: *std.mem.Arena,
 
-  pub fn init(src: source.Source, arena: std.mem.Arena): Lexer {
+  pub fn init(src: source.Source, arena: *std.mem.Arena): Lexer {
     return {
       src: src.src,
       line: 1,
@@ -26,7 +26,7 @@ pub struct Lexer {
     self.skipComments();
 
     if self.atEof() {
-      return token.Token.init(.Eof);
+      return token.Token.init(.Eof, self.line, self.col);
     }
 
     if self.isIdStart() {
@@ -264,6 +264,7 @@ pub struct Lexer {
       text == "true" => token.Token.init(.True, line, col),
       text == "false" => token.Token.init(.False, line, col),
       text == "cstr" => token.Token.init(.Cstr, line, col),
+      text == "sizeof" => token.Token.init(.Sizeof, line, col),
       text == "str" => token.Token.init(.Str, line, col),
       text == "struct" => token.Token.init(.Struct, line, col),
       _ => token.Token.initWithValue(.Id, line, col, .Text(self.arena.copyStr(text))),

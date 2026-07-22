@@ -1,0 +1,39 @@
+--TEST--
+sizeof of an imported struct resolves nested member types against the declaring module: it matches an identical local struct, and arena allocations sized with it do not overlap subsequent allocations
+--PREPARE--
+printf 'pub struct Inner {\n  pub a: i64,\n  pub b: i64,\n  pub c: i64,\n}\n\npub struct Node {\n  pub inner: Inner,\n  pub tag: i64,\n}\n' > "${TMPDIR:-/tmp}/zup_szmod.zup"
+--FILE--
+const std = import("std");
+const m = import("zup_szmod.zup");
+
+struct LocalInner {
+  a: i64,
+  b: i64,
+  c: i64,
+}
+
+struct LocalNode {
+  inner: LocalInner,
+  tag: i64,
+}
+
+pub fn main(): i32 {
+  const eq = sizeof(m.Node) == sizeof(LocalNode);
+
+  const arena = std.mem.Arena.init();
+  let nodes: []m.Node = arena.alloc(4 * sizeof(m.Node)) as []m.Node;
+  nodes[3].tag = 41;
+  // with an undersized element, this allocation used to overlap nodes[3]
+  // and its zeroing wiped the value written above
+  let other: []u8 = arena.alloc(64);
+  other[0] = 9;
+
+  std.io.println("eq={} tag={} other={}", eq, nodes[3].tag, other[0]);
+  return nodes[3].tag as i32;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}/zup_szmod.zup"
+--EXPECT--
+eq=true tag=41 other=9
+--EXIT--
+41

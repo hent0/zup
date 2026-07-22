@@ -1,0 +1,123 @@
+const std = import("std");
+const diag = import("diag.zup");
+const source = import("source.zup");
+const parser = import("parser.zup");
+const ast = import("ast.zup");
+const sema = import("sema.zup");
+const utils = import("utils.zup");
+
+pub const std_root = "std";
+
+pub fn load(a: *ast.Ast, path: str): u32 {
+  return loadModule(a, path, diag.Span{line: 0, col: 0}, "");
+}
+
+fn lookup(a: *ast.Ast, path: str): u32 {
+  let i: u32 = 1;
+  while (i as i64) < a.modules.len {
+    if a.modules.at(i).path == path {
+      return i;
+    }
+
+    i += 1;
+  }
+  return 0;
+}
+
+fn loadModule(a: *ast.Ast, path: str, imp_span: diag.Span, imp_path: str): u32 {
+  const cached = lookup(a, path);
+  if cached != 0 { return cached; }
+
+  match source.Source.init(path, a.arena) {
+    .Ok(src) => {
+      let p = parser.Parser.init(src, a);
+      const root = p.parse();
+      if diag.hadErrors() {
+        diag.report(src.path, src.src);
+        std.exit(1);
+      }
+
+      const idx = a.modules.push(ast.Module{
+        path: path,
+        root: root,
+        loading: true,
+      });
+      const dir = dirname(path);
+
+      match a.decls.at(root).kind {
+        .Container(members) => {
+          let i: u32 = 0;
+          while i < members.len {
+            const di = a.extra.get(members.start + i);
+            match a.decls.at(di).kind {
+              .Import(imp) => {
+                const child_path = resolveModule(a.arena, imp.path, dir);
+                const hit = lookup(a, child_path);
+                if hit != 0 && a.modules.at(hit).loading {
+                  diag.error(a.decls.at(di).span, .Message(utils.concat(a.arena, "circular import '", imp.path, "'")));
+                  diag.report(src.path, src.src);
+                  std.exit(1);
+                }
+
+                const child = loadModule(a, child_path, a.decls.at(di).span, imp.path);
+                if child == 0 {
+                  diag.report(src.path, src.src);
+                  std.exit(1);
+                }
+
+                a.decls.at(di).kind = .Import(ast.ImportDecl{
+                  alias: imp.alias,
+                  path: imp.path,
+                  resolved: child,
+                });
+              },
+              _ => {},
+            }
+            i += 1;
+          }
+        },
+        _ => {},
+      }
+
+      sema.check(a, idx, imp_path.len == 0);
+      if diag.hadErrors() {
+        diag.report(src.path, src.src);
+        std.exit(1);
+      }
+
+      a.modules.at(idx).loading = false;
+      return idx;
+    },
+    .Err(e) => {
+      if imp_path.len > 0 {
+        diag.error(imp_span, .Message(utils.concat(a.arena, "cannot find module '", imp_path, "'")));
+        return 0;
+      }
+
+      std.io.printerrln("zup: error: cannot read '{}'", path);
+      std.exit(1);
+      return 0;
+    },
+  }
+  return 0;
+}
+
+fn dirname(path: str): str {
+  let i: i64 = path.len - 1;
+  while i >= 0 {
+    if path[i] == '/' {
+      return path[0..i];
+    }
+    i -= 1;
+  }
+
+  return ".";
+}
+
+fn resolveModule(arena: *std.mem.Arena, spec: str, dir: str): str {
+  if std.ascii.endsWith(".zup", spec) {
+    return utils.concat(arena, dir, "/", spec);
+  }
+
+  return utils.concat(arena, std_root, "/", spec, ".zup");
+}

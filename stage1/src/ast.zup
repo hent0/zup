@@ -1,0 +1,1607 @@
+const std = import("std");
+const diag = import("diag.zup");
+const token = import("token.zup");
+
+pub enum TypeKind {
+  Unknown,
+  Void,
+  Bool,
+  I8,
+  U8,
+  I16,
+  U16,
+  I32,
+  U32,
+  I64,
+  U64,
+  F32,
+  F64,
+  Cstr,
+  Str,
+  Struct,
+  Array,
+  Slice,
+  Enum,
+  Optional,
+  Pointer,
+
+  pub fn toString(self): str {
+    return match self {
+      .Void => "void",
+      .Bool => "bool",
+      .I8 => "i8",
+      .U8 => "u8",
+      .I16 => "i16",
+      .U16 => "u16",
+      .I32 => "i32",
+      .U32 => "u32",
+      .I64 => "i64",
+      .U64 => "u64",
+      .F32 => "f32",
+      .F64 => "f64",
+      .Cstr => "cstr",
+      .Str => "str",
+      .Slice => "[]str",
+      .Enum => "enum",
+      .Optional => "optional",
+      .Pointer => "pointer",
+      _ => "?",
+    };
+  }
+
+  pub fn toIr(self): str {
+    return match self {
+      .Void => "void",
+      .Bool => "i1",
+      .I8, .U8 => "i8",
+      .I16, .U16 => "i16",
+      .I32, .U32 => "i32",
+      .I64, .U64 => "i64",
+      .F32 => "float",
+      .F64 => "double",
+      .Cstr, .Pointer => "ptr",
+      .Str, .Slice => "{ ptr, i64 }",
+      .Enum => "",
+      _ => "?",
+    };
+  }
+
+  pub fn isInteger(self): bool {
+    return self.isSignedInteger() || self.isUnsignedInteger();
+  }
+
+  pub fn isSignedInteger(self): bool {
+    return match self {
+      .I8, .I16, .I32, .I64 => true,
+      _ => false,
+    };
+  }
+
+  pub fn isUnsignedInteger(self): bool {
+    return match self {
+      .U8, .U16, .U32, .U64 => true,
+      _ => false,
+    };
+  }
+
+  pub fn isFloat(self): bool {
+    return match self {
+      .F32, .F64 => true,
+      _ => false,
+    };
+  }
+
+  pub fn isNumeric(self): bool {
+    return self.isInteger() || self.isFloat();
+  }
+}
+
+pub struct Type {
+  pub kind: TypeKind,
+  pub name: str,
+  pub module: str,
+  pub elem: u32,
+  pub array_length: i64,
+  pub span: diag.Span,
+
+  pub fn write(self, a: *Ast, out: std.io.File) {
+    match self.kind {
+      .Struct, .Enum => out.write(self.name),
+      .Array => {
+        if self.elem == 0 {
+          out.write(self.kind.toString());
+        } else {
+          out.write("[");
+          out.writeInt(self.array_length);
+          out.write("]");
+          a.types.at(self.elem).write(a, out);
+        }
+      },
+      .Slice => {
+        if self.elem == 0 {
+          out.write(self.kind.toString());
+        } else {
+          out.write("[]");
+          a.types.at(self.elem).write(a, out);
+        }
+      },
+      .Optional => {
+        if self.elem == 0 {
+          out.write(self.kind.toString());
+        } else {
+          out.write("?");
+          a.types.at(self.elem).write(a, out);
+        }
+      },
+      .Pointer => {
+        if self.elem == 0 {
+          out.write(self.kind.toString());
+        } else {
+          out.write("*");
+          a.types.at(self.elem).write(a, out);
+        }
+      },
+      _ => out.write(self.kind.toString()),
+    };
+  }
+}
+
+pub enum BinaryOp{
+  Add,
+  Sub,
+  Mul,
+  Div,
+  Rem,
+  Eq,
+  Ne,
+  Lt,
+  Le,
+  Gt,
+  Ge,
+  And,
+  Or,
+  Bitand,
+  Bitor,
+  Bitxor,
+  Shl,
+  Shr,
+
+  pub fn toString(self): str {
+    return match self {
+      .Add => "+",
+      .Sub => "-",
+      .Mul => "*",
+      .Div => "/",
+      .Rem => "%",
+      .Eq => "=",
+      .Ne => "!=",
+      .Lt => "<",
+      .Le => "<=",
+      .Gt => ">",
+      .Ge => ">=",
+      .And => "&&",
+      .Or => "||",
+      .Bitand => "&",
+      .Bitor => "|",
+      .Bitxor => "^",
+      .Shl => "<<",
+      .Shr => ">>",
+    };
+  }
+
+  pub fn toIr(self, is_signed: bool): str {
+    return match self {
+      .Add => "add",
+      .Sub => "sub",
+      .Mul => "mul",
+      .Div => is_signed ? "sdiv" : "udiv",
+      .Rem => is_signed ? "srem" : "urem",
+      .Eq => "icmp eq",
+      .Ne => "icmp ne",
+      .Lt => is_signed ? "icmp slt" : "icmp ult",
+      .Le => is_signed ? "icmp sle" : "icmp ule",
+      .Gt => is_signed ? "icmp sgt" : "icmp ugt",
+      .Ge => is_signed ? "icmp sge" : "icmp uge",
+      .And, .Bitand => "and",
+      .Or, .Bitor => "or",
+      .Bitxor => "xor",
+      .Shl => "shl",
+      .Shr => is_signed ? "ashr" : "lshr",
+    };
+  }
+
+  pub fn toIrFloat(self): str {
+    return match self {
+      .Add => "fadd",
+      .Sub => "fsub",
+      .Mul => "fmul",
+      .Div => "fdiv",
+      .Rem => "frem",
+      .Eq => "fcmp oeq",
+      .Ne => "fcmp une",
+      .Lt => "fcmp olt",
+      .Le => "fcmp ole",
+      .Gt => "fcmp ogt",
+      .Ge => "fcmp oge",
+      _ => "?",
+    };
+  }
+
+  pub fn isArithmetic(self): bool {
+    return match self {
+      .Add, .Sub, .Mul, .Div, .Rem => true,
+      _ => false,
+    };
+  }
+
+  pub fn isComparison(self): bool {
+    return match self {
+      .Eq, .Ne, .Lt, .Gt, .Le, .Ge => true,
+      _ => false,
+    };
+  }
+
+  pub fn isLogical(self): bool {
+    return match self {
+      .And, .Or => true,
+      _ => false,
+    };
+  }
+}
+
+pub enum UnaryOp {
+  Not,
+  Neg,
+  Addr,
+
+  pub fn toString(self): str {
+    return match self {
+      .Not => "!",
+      .Neg => "-",
+      _ => "?",
+    };
+  }
+
+  pub fn toIr(self): str {
+    return match self {
+      .Not => "xor",
+      .Neg => "sub",
+      _ => "?",
+    };
+  }
+}
+
+pub enum ExprKind {
+  Boolean: bool,
+  Number: str,
+  String: str,
+  Id: str,
+  Call: CallExpr,
+  Cast: CastExpr,
+  Sizeof: Type,
+  Binary: BinaryExpr,
+  Unary: UnaryExpr,
+  StructLiteral: StructLiteralExpr,
+  Field: FieldExpr,
+  EnumLiteral: EnumLiteralExpr,
+  Array: Range,
+  Index: IndexExpr,
+  SliceRange: SliceRangeExpr,
+  Match: MatchExpr,
+  Null,
+  Coalesce: PairExpr,
+  Unwrap: u32,
+  Propagate: u32,
+  Ternary: TernaryExpr,
+  Import: str,
+}
+
+pub enum Visibility {
+  Public,
+  Private,
+
+  pub fn toString(self): str {
+    return match self {
+      .Public => "pub",
+      .Private => "priv",
+    };
+  }
+}
+
+fn printIndent(out: std.io.File, depth: i32) {
+  for i in 0..depth {
+    out.write("  ");
+  }
+}
+
+fn dumpBlock(a: *Ast, out: std.io.File, body: Range, depth: i32) {
+  let i: u32 = 0;
+  while i < body.len {
+    a.stmts.at(a.extra.get(body.start + i)).dump(a, out, depth + 1);
+    i += 1;
+  }
+}
+
+pub struct Expr {
+  pub span: diag.Span,
+  pub ty: Type,
+  pub kind: ExprKind,
+
+  pub fn init(span: diag.Span, kind: ExprKind): Expr {
+    let e: Expr;
+    e.span = span;
+    e.kind = kind;
+    return e;
+  }
+
+  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+    printIndent(out, depth);
+    match self.kind {
+      .Boolean(b) => {
+        out.write("Boolean literal ");
+        out.writeln(b ? "true" : "false");
+      },
+      .Number(n) => {
+        out.write("Number literal ");
+        out.writeln(n);
+      },
+      .String(s) => {
+        out.write("String literal \"");
+        token.writeEscaped(out, s);
+        out.writeln("\"");
+      },
+      .Id(name) => {
+        out.write("Id ");
+        out.writeln(name);
+      },
+      .Call(c) => {
+        match a.exprs.at(c.callee).kind {
+          .Field(f) => {
+            out.write("MethodCall '");
+            out.write(f.name);
+            out.write("' (");
+            out.writeInt(c.args.len as i64);
+            out.writeln(" args)");
+            a.exprs.at(f.base).dump(a, out, depth + 1);
+          },
+          .Id(name) => {
+            out.write("Call '");
+            out.write(name);
+            out.write("' (");
+            out.writeInt(c.args.len as i64);
+            out.writeln(" args)");
+          },
+          _ => {},
+        };
+
+        let i: u32 = 0;
+        while i < c.args.len {
+          a.exprs.at(a.extra.get(c.args.start + i)).dump(a, out, depth + 1);
+          i += 1;
+        }
+      },
+      .Cast(c) => {
+        out.write("Cast to ");
+        out.writeln(c.target.kind.toString());
+        a.exprs.at(c.operand).dump(a, out, depth + 1);
+      },
+      .Sizeof(t) => {
+        out.write("Sizeof ");
+        out.writeln(t.kind.toString());
+      },
+      .Binary(b) => {
+        out.write("Binary ");
+        out.writeln(b.op.toString());
+        a.exprs.at(b.lhs).dump(a, out, depth + 1);
+        a.exprs.at(b.rhs).dump(a, out, depth + 1);
+      },
+      .Unary(u) => {
+        out.write("Unary ");
+        out.writeln(u.op.toString());
+        a.exprs.at(u.operand).dump(a, out, depth + 1);
+      },
+      .StructLiteral(s) => {
+        out.write("StructLit '");
+        out.write(s.type_name);
+        out.writeln("'");
+        let i: u32 = 0;
+        while i < s.inits.len {
+          const init = a.field_inits.at(a.extra.get(s.inits.start + i));
+          printIndent(out, depth + 1);
+          out.write("field ");
+          out.writeln(init.name);
+          a.exprs.at(init.value).dump(a, out, depth + 2);
+          i += 1;
+        }
+      },
+      .Field(f) => {
+        out.write("Field ");
+        out.writeln(f.name);
+        a.exprs.at(f.base).dump(a, out, depth + 1);
+      },
+      .EnumLiteral(e) => {
+        out.write("EnumLiteral .");
+        out.writeln(e.name);
+        if e.payload != 0 {
+          a.exprs.at(e.payload).dump(a, out, depth + 1);
+        }
+      },
+      .Array(r) => {
+        out.write("Array (");
+        out.writeInt(r.len as i64);
+        out.writeln(" elements)");
+        let i: u32 = 0;
+        while i < r.len {
+          a.exprs.at(a.extra.get(r.start + i)).dump(a, out, depth + 1);
+          i += 1;
+        }
+      },
+      .Index(x) => {
+        out.writeln("Index");
+        a.exprs.at(x.base).dump(a, out, depth + 1);
+        a.exprs.at(x.index).dump(a, out, depth + 1);
+      },
+      .SliceRange(s) => {
+        out.writeln("SliceRange");
+        a.exprs.at(s.base).dump(a, out, depth + 1);
+        a.exprs.at(s.start).dump(a, out, depth + 1);
+        a.exprs.at(s.end).dump(a, out, depth + 1);
+      },
+      .Match(m) => {
+        out.writeln("Match");
+        a.exprs.at(m.scrutinee).dump(a, out, depth + 1);
+        let i: u32 = 0;
+        while i < m.arms.len {
+          const arm = a.match_arms.at(a.extra.get(m.arms.start + i));
+          printIndent(out, depth + 1);
+          out.writeln(arm.pattern == 0 ? "Arm _" : "Arm");
+          if arm.pattern != 0 {
+            a.exprs.at(arm.pattern).dump(a, out, depth + 2);
+          }
+          if arm.binding.len > 0 {
+            printIndent(out, depth + 2);
+            out.write("bind ");
+            out.writeln(arm.binding);
+          }
+          if arm.pattern_end != 0 {
+            a.exprs.at(arm.pattern_end).dump(a, out, depth + 2);
+          }
+          if arm.value != 0 {
+            a.exprs.at(arm.value).dump(a, out, depth + 2);
+          }
+          let j: u32 = 0;
+          while j < arm.body.len {
+            a.stmts.at(a.extra.get(arm.body.start + j)).dump(a, out, depth + 2);
+            j += 1;
+          }
+          i += 1;
+        }
+      },
+      .Null => out.writeln("Null"),
+      .Coalesce(p) => {
+        out.writeln("Coalesce");
+        a.exprs.at(p.lhs).dump(a, out, depth + 1);
+        a.exprs.at(p.rhs).dump(a, out, depth + 1);
+      },
+      .Unwrap(operand) => {
+        out.writeln("Unwrap");
+        a.exprs.at(operand).dump(a, out, depth + 1);
+      },
+      .Propagate(operand) => {
+        out.writeln("Propagate");
+        a.exprs.at(operand).dump(a, out, depth + 1);
+      },
+      .Ternary(t) => {
+        out.writeln("Ternary");
+        a.exprs.at(t.cond).dump(a, out, depth + 1);
+        a.exprs.at(t.then).dump(a, out, depth + 1);
+        a.exprs.at(t.els).dump(a, out, depth + 1);
+      },
+      .Import(path) => {
+        out.write("Import \"");
+        out.write(path);
+        out.writeln("\"");
+      },
+    };
+  }
+}
+
+pub struct Range {
+  pub start: u32,
+  pub len: u32,
+
+  pub fn empty(): Range {
+    return Range{start: 0, len: 0};
+  }
+}
+
+pub struct BinaryExpr {
+  pub op: BinaryOp,
+  pub lhs: u32,
+  pub rhs: u32,
+}
+
+pub struct UnaryExpr {
+  pub op: UnaryOp,
+  pub operand: u32,
+}
+
+pub struct CallExpr {
+  pub callee: u32,
+  pub args: Range,
+  pub type_scoped: bool,
+}
+
+pub struct CastExpr {
+  pub operand: u32,
+  pub target: Type,
+}
+
+pub struct StructLiteralExpr{
+  pub type_name: str,
+  pub module: str,
+  pub inits: Range,
+}
+
+pub struct FieldExpr {
+  pub base: u32,
+  pub name: str,
+}
+
+pub struct FieldInit {
+  pub span: diag.Span,
+  pub name: str,
+  pub value: u32,
+}
+
+pub struct EnumLiteralExpr {
+  pub name: str,
+  pub payload: u32,
+}
+
+pub struct IndexExpr {
+  pub base: u32,
+  pub index: u32,
+}
+
+pub struct SliceRangeExpr {
+  pub base: u32,
+  pub start: u32,
+  pub end: u32,
+}
+
+pub struct MatchExpr {
+  pub scrutinee: u32,
+  pub arms: Range,
+}
+
+pub struct MatchArm {
+  pub span: diag.Span,
+  pub pattern: u32,
+  pub pattern_end: u32,
+  pub binding: str,
+  pub value: u32,
+  pub body: Range,
+  pub is_block: bool,
+  pub or_next: bool,
+
+  pub fn init(): MatchArm {
+    let a: MatchArm;
+    return a;
+  }
+}
+
+pub struct PairExpr {
+  pub lhs: u32,
+  pub rhs: u32,
+}
+
+pub struct TernaryExpr {
+  pub cond: u32,
+  pub then: u32,
+  pub els: u32,
+}
+
+pub struct IfStmt {
+  pub cond: u32,
+  pub then_body: Range,
+  pub else_body: Range,
+}
+
+pub struct BindingStmt {
+  pub name: str,
+  pub ty: Type,
+  pub mutable: bool,
+  pub init: u32,
+}
+
+pub struct AssignStmt {
+  pub target: u32,
+  pub value: u32,
+  pub compound: bool,
+  pub coalesce: bool,
+  pub op: BinaryOp,
+}
+
+pub struct WhileStmt {
+  pub cond: u32,
+  pub body: Range,
+}
+
+pub struct ForStmt {
+  pub variable: str,
+  pub start: u32,
+  pub end: u32,
+  pub iterable: u32,
+  pub body: Range,
+}
+
+pub enum StmtKind {
+  Return: u32,
+  ExprStmt: u32,
+  If: IfStmt,
+  Binding: BindingStmt,
+  Assign: AssignStmt,
+  While: WhileStmt,
+  For: ForStmt,
+  Break,
+  Continue,
+  Defer: u32,
+}
+
+pub struct Stmt {
+  pub span: diag.Span,
+  pub kind: StmtKind,
+
+  pub fn init(span: diag.Span, kind: StmtKind): Stmt {
+    let s: Stmt;
+    s.span = span;
+    s.kind = kind;
+    return s;
+  }
+
+  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+    printIndent(out, depth);
+    match self.kind {
+      .Return(v) => {
+        out.writeln("Return");
+        if v != 0 {
+          a.exprs.at(v).dump(a, out, depth + 1);
+        }
+      },
+      .ExprStmt(v) => {
+        out.writeln("ExprStmt");
+        a.exprs.at(v).dump(a, out, depth + 1);
+      },
+      .If(s) => {
+        out.writeln("If");
+        a.exprs.at(s.cond).dump(a, out, depth + 1);
+        printIndent(out, depth + 1);
+        out.writeln("Then");
+        dumpBlock(a, out, s.then_body, depth + 1);
+        if s.else_body.len > 0 {
+          printIndent(out, depth + 1);
+          out.writeln("Else");
+          dumpBlock(a, out, s.else_body, depth + 1);
+        }
+      },
+      .Binding(b) => {
+        out.write(b.mutable ? "Let " : "Const ");
+        out.write(b.name);
+        out.write(": ");
+        b.ty.write(a, out);
+        out.writeln("");
+        if b.init != 0 {
+          a.exprs.at(b.init).dump(a, out, depth + 1);
+        }
+      },
+      .Assign(s) => {
+        match a.exprs.at(s.target).kind {
+          .Id(name) => {
+            out.write("Assign ");
+            out.writeln(name);
+          },
+          _ => {
+            out.writeln("Assign");
+            a.exprs.at(s.target).dump(a, out, depth + 1);
+          },
+        };
+        a.exprs.at(s.value).dump(a, out, depth + 1);
+      },
+      .While(s) => {
+        out.writeln("While");
+        a.exprs.at(s.cond).dump(a, out, depth + 1);
+        printIndent(out, depth + 1);
+        out.writeln("Do");
+        dumpBlock(a, out, s.body, depth + 1);
+      },
+      .For(s) => {
+        out.write("For ");
+        out.writeln(s.variable);
+        printIndent(out, depth + 1);
+        if s.iterable != 0 {
+          out.writeln("Iter");
+          a.exprs.at(s.iterable).dump(a, out, depth + 2);
+        } else {
+          out.writeln("Range");
+          a.exprs.at(s.start).dump(a, out, depth + 2);
+          a.exprs.at(s.end).dump(a, out, depth + 2);
+        }
+        printIndent(out, depth + 1);
+        out.writeln("Do");
+        dumpBlock(a, out, s.body, depth + 1);
+      },
+      .Break => out.writeln("Break"),
+      .Continue => out.writeln("Continue"),
+      .Defer(v) => {
+        out.writeln("Defer");
+        a.exprs.at(v).dump(a, out, depth + 1);
+      },
+    };
+  }
+}
+
+pub struct Param {
+  pub name: str,
+  pub ty: Type,
+  pub mutable: bool,
+  pub is_self: bool,
+  pub default_value: u32,
+
+  pub fn init(): Param {
+    let p: Param;
+    p.mutable = true;
+    return p;
+  }
+}
+
+pub struct Field {
+  pub span: diag.Span,
+  pub name: str,
+  pub ty: Type,
+  pub default_value: u32,
+  pub visibility: Visibility,
+
+  pub fn init(): Field {
+    let f: Field;
+    return f;
+  }
+}
+
+pub struct FnDecl {
+  pub params: Range,
+  pub return_type: Type,
+  pub body: Range,
+  pub is_extern: bool,
+  pub variadic: bool,
+}
+
+pub struct GlobalDecl {
+  pub ty: Type,
+  pub mutable: bool,
+  pub init: u32,
+}
+
+pub struct StructDecl {
+  pub fields: Range,
+  pub members: Range,
+}
+
+pub struct ImportDecl {
+  pub alias: str,
+  pub path: str,
+  pub resolved: u32 = 0,
+}
+
+pub struct EnumMember {
+  pub span: diag.Span,
+  pub name: str,
+  pub value: i64,
+  pub payload: Type,
+  pub has_payload: bool,
+
+  pub fn init(): EnumMember {
+    let m: EnumMember;
+    return m;
+  }
+}
+
+pub struct EnumDecl {
+  pub members: Range,
+  pub methods: Range,
+  pub tagged: bool = false,
+}
+
+pub enum DeclKind {
+  Fn: FnDecl,
+  Container: Range,
+  Global: GlobalDecl,
+  Struct: StructDecl,
+  Import: ImportDecl,
+  Enum: EnumDecl,
+}
+
+pub struct Decl {
+  pub span: diag.Span,
+  pub visibility: Visibility,
+  pub name: str,
+  pub kind: DeclKind,
+
+  pub fn init(span: diag.Span, visibility: Visibility, name: str, kind: DeclKind): Decl {
+    let d: Decl;
+    d.span = span;
+    d.visibility = visibility;
+    d.name = name;
+    d.kind = kind;
+    return d;
+  }
+
+  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+    printIndent(out, depth);
+    match self.kind {
+      .Fn(f) => {
+        if f.is_extern {
+          out.write("ExternFn '");
+          out.write(self.name);
+          out.write("' -> ");
+          f.return_type.write(a, out);
+          out.writeln(f.variadic ? " (variadic)" : "");
+        } else {
+          out.write("FnDecl ");
+          out.write(self.visibility.toString());
+          out.write(" '");
+          out.write(self.name.len > 0 ? self.name : "(anonymous)");
+          out.write("' -> ");
+          f.return_type.write(a, out);
+          out.writeln("");
+        }
+        let i: u32 = 0;
+        while i < f.params.len {
+          const param = a.params.at(a.extra.get(f.params.start + i));
+          printIndent(out, depth + 1);
+          out.write("param ");
+          out.write(param.mutable ? "" : "const ");
+          out.write(param.name);
+          out.write(": ");
+          param.ty.write(a, out);
+          out.writeln("");
+          if param.default_value != 0 {
+            a.exprs.at(param.default_value).dump(a, out, depth + 2);
+          }
+          i += 1;
+        }
+        if !f.is_extern {
+          dumpBlock(a, out, f.body, depth);
+        }
+      },
+      .Container(members) => {
+        out.write("Container ");
+        out.write(self.name.len > 0 ? self.name : "(file)");
+        out.write(" (");
+        out.writeInt(members.len as i64);
+        out.writeln(" members)");
+        let i: u32 = 0;
+        while i < members.len {
+          a.decls.at(a.extra.get(members.start + i)).dump(a, out, depth + 1);
+          i += 1;
+        }
+      },
+      .Struct(s) => {
+        out.write("Struct ");
+        out.write(self.visibility.toString());
+        out.write(" '");
+        out.write(self.name);
+        out.writeln("'");
+        let i: u32 = 0;
+        while i < s.fields.len {
+          const field = a.fields.at(a.extra.get(s.fields.start + i));
+          printIndent(out, depth + 1);
+          out.write("field ");
+          out.write(field.name);
+          out.write(": ");
+          field.ty.write(a, out);
+          out.writeln("");
+          if field.default_value != 0 {
+            a.exprs.at(field.default_value).dump(a, out, depth + 2);
+          }
+          i += 1;
+        }
+        let j: u32 = 0;
+        while j < s.members.len {
+          a.decls.at(a.extra.get(s.members.start + j)).dump(a, out, depth + 1);
+          j += 1;
+        }
+      },
+      .Enum(e) => {
+        out.write("Enum ");
+        out.write(self.visibility.toString());
+        out.write(" '");
+        out.write(self.name);
+        out.writeln("'");
+        let i: u32 = 0;
+        while i < e.members.len {
+          const member = a.enum_members.at(a.extra.get(e.members.start + i));
+          printIndent(out, depth + 1);
+          out.write("member ");
+          out.write(member.name);
+          out.write(" = ");
+          out.writeInt(member.value);
+          if member.has_payload {
+            out.write(": ");
+            member.payload.write(a, out);
+          }
+          out.writeln("");
+          i += 1;
+        }
+        let j: u32 = 0;
+        while j < e.methods.len {
+          a.decls.at(a.extra.get(e.methods.start + j)).dump(a, out, depth + 1);
+          j += 1;
+        }
+      },
+      .Global(g) => {
+        out.write("GlobalDecl ");
+        out.write(self.visibility.toString());
+        out.write(g.mutable ? " let '" : " const '");
+        out.write(self.name);
+        out.write("': ");
+        g.ty.write(a, out);
+        out.writeln("");
+        if g.init != 0 {
+          a.exprs.at(g.init).dump(a, out, depth + 1);
+        }
+      },
+      .Import(im) => {
+        out.write("Import '");
+        out.write(im.alias);
+        out.write("' \"");
+        out.write(im.path);
+        out.writeln("\"");
+      },
+    };
+  }
+}
+
+// =============== Pools ===============
+// TODO: Generics or marcros would make this much easier
+// TODO: ModuleList also has same shape
+pub struct ExprPool {
+  arena: *std.mem.Arena,
+  items: []Expr,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): ExprPool {
+    let p: ExprPool;
+    p.arena = arena;
+    let e: Expr;
+    p.push(e);
+    return p;
+  }
+
+  pub fn push(self, expr: Expr): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Expr)) as []Expr;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = expr;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Expr {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct StmtPool {
+  arena: *std.mem.Arena,
+  items: []Stmt,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): StmtPool {
+    let p: StmtPool;
+    p.arena = arena;
+    let s: Stmt;
+    p.push(s);
+    return p;
+  }
+
+  pub fn push(self, stmt: Stmt): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Stmt)) as []Stmt;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = stmt;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Stmt {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct DeclPool {
+  arena: *std.mem.Arena,
+  items: []Decl,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): DeclPool {
+    let p: DeclPool;
+    p.arena = arena;
+    let d: Decl;
+    p.push(d);
+    return p;
+  }
+
+  pub fn push(self, decl: Decl): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Decl)) as []Decl;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = decl;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Decl {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct TypePool {
+  arena: *std.mem.Arena,
+  items: []Type,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): TypePool {
+    let p: TypePool;
+    p.arena = arena;
+    let t: Type;
+    p.push(t);
+    return p;
+  }
+
+  pub fn push(self, ty: Type): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Type)) as []Type;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = ty;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Type {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct ParamPool {
+  arena: *std.mem.Arena,
+  items: []Param,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): ParamPool {
+    let p: ParamPool;
+    p.arena = arena;
+    let x: Param;
+    p.push(x);
+    return p;
+  }
+
+  pub fn push(self, param: Param): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Param)) as []Param;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = param;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Param {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct FieldPool {
+  arena: *std.mem.Arena,
+  items: []Field,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): FieldPool {
+    let p: FieldPool;
+    p.arena = arena;
+    let f: Field;
+    p.push(f);
+    return p;
+  }
+
+  pub fn push(self, field: Field): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Field)) as []Field;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = field;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Field {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct EnumMemberPool {
+  arena: *std.mem.Arena,
+  items: []EnumMember,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): EnumMemberPool {
+    let p: EnumMemberPool;
+    p.arena = arena;
+    let m: EnumMember;
+    p.push(m);
+    return p;
+  }
+
+  pub fn push(self, member: EnumMember): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(EnumMember)) as []EnumMember;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = member;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *EnumMember {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct MatchArmPool {
+  arena: *std.mem.Arena,
+  items: []MatchArm,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): MatchArmPool {
+    let p: MatchArmPool;
+    p.arena = arena;
+    let a: MatchArm;
+    p.push(a);
+    return p;
+  }
+
+  pub fn push(self, arm: MatchArm): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(MatchArm)) as []MatchArm;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = arm;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *MatchArm {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct FieldInitPool {
+  arena: *std.mem.Arena,
+  items: []FieldInit,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): FieldInitPool {
+    let p: FieldInitPool;
+    p.arena = arena;
+    let f: FieldInit;
+    p.push(f);
+    return p;
+  }
+
+  pub fn push(self, init: FieldInit): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(FieldInit)) as []FieldInit;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = init;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *FieldInit {
+    return &self.items[idx as i64];
+  }
+}
+
+pub struct U32List {
+  arena: *std.mem.Arena,
+  items: []u32,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): U32List {
+    let l: U32List;
+    l.arena = arena;
+    return l;
+  }
+
+  pub fn push(self, idx: u32) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(u32)) as []u32;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+    self.items[self.len] = idx;
+    self.len += 1;
+  }
+}
+
+pub struct U32Pool {
+  arena: *std.mem.Arena,
+  items: []u32,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): U32Pool {
+    let p: U32Pool;
+    p.arena = arena;
+    p.push(0);
+    return p;
+  }
+
+  pub fn push(self, extra: u32): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(u32)) as []u32;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = extra;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn get(self, idx: u32): u32 {
+    return self.items[idx as i64];
+  }
+
+  pub fn append(self, list: U32List): Range {
+    const start = self.len as u32;
+    let i: i64 = 0;
+    while i < list.len {
+      self.push(list.items[i]);
+      i += 1;
+    }
+    return Range{start: start, len: list.len as u32};
+  }
+}
+
+// =============== Module ===============
+
+pub struct Module {
+  pub path: str,
+  pub root: u32,
+  pub loading: bool,
+}
+
+pub struct ModuleList {
+  arena: *std.mem.Arena,
+  items: []Module,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): ModuleList {
+    let l: ModuleList;
+    l.arena = arena;
+    let nil: Module;
+    l.push(nil);
+    return l;
+  }
+
+  pub fn push(self, m: Module): u32 {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 8 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Module)) as []Module;
+      let i: i64 = 0;
+      while i < self.len {
+        bigger[i] = self.items[i];
+        i += 1;
+      }
+      self.items = bigger;
+    }
+
+    self.items[self.len] = m;
+    self.len += 1;
+    return (self.len - 1) as u32;
+  }
+
+  pub fn at(self, idx: u32): *Module {
+    return &self.items[idx as i64];
+  }
+}
+
+// =============== Ast ===============
+
+pub struct Ast {
+  pub arena: *std.mem.Arena,
+  pub exprs: ExprPool,
+  pub stmts: StmtPool,
+  pub decls: DeclPool,
+  pub types: TypePool,
+  pub params: ParamPool,
+  pub fields: FieldPool,
+  pub enum_members: EnumMemberPool,
+  pub match_arms: MatchArmPool,
+  pub field_inits: FieldInitPool,
+  pub extra: U32Pool,
+  pub modules: ModuleList,
+
+  pub fn init(arena: *std.mem.Arena): Ast {
+    return {
+      arena: arena,
+      exprs: ExprPool.init(arena),
+      stmts: StmtPool.init(arena),
+      decls: DeclPool.init(arena),
+      types: TypePool.init(arena),
+      params: ParamPool.init(arena),
+      fields: FieldPool.init(arena),
+      enum_members: EnumMemberPool.init(arena),
+      match_arms: MatchArmPool.init(arena),
+      field_inits: FieldInitPool.init(arena),
+      extra: U32Pool.init(arena),
+      modules: ModuleList.init(arena),
+    };
+  }
+
+  // =============== Expressions ===============
+
+  fn pushExpr(self, span: diag.Span, kind: ExprKind): u32 {
+    return self.exprs.push(Expr.init(span, kind));
+  }
+
+  pub fn binary(self, op: BinaryOp, lhs: u32, rhs: u32): u32 {
+    return self.pushExpr(self.exprs.at(lhs).span, .Binary(BinaryExpr{op: op, lhs: lhs, rhs: rhs}));
+  }
+
+  pub fn unary(self, op: UnaryOp, operand: u32): u32 {
+    return self.pushExpr(self.exprs.at(operand).span, .Unary(UnaryExpr{op: op, operand: operand}));
+  }
+
+  pub fn boolean(self, value: bool, span: diag.Span): u32 {
+    let e = Expr.init(span, .Boolean(value));
+    e.ty.kind = .Bool;
+    return self.exprs.push(e);
+  }
+
+  pub fn number(self, span: diag.Span, value: str): u32 {
+    return self.pushExpr(span, .Number(value));
+  }
+
+  pub fn string(self, span: diag.Span, value: str): u32 {
+    return self.pushExpr(span, .String(value));
+  }
+
+  pub fn id(self, span: diag.Span, name: str): u32 {
+    return self.pushExpr(span, .Id(name));
+  }
+
+  pub fn call(self, callee: u32, args: Range, type_scoped: bool): u32 {
+    return self.pushExpr(self.exprs.at(callee).span, .Call(CallExpr{callee: callee, args: args, type_scoped: type_scoped}));
+  }
+
+  pub fn cast(self, operand: u32, target: Type): u32 {
+    return self.pushExpr(self.exprs.at(operand).span, .Cast(CastExpr{operand: operand, target: target}));
+  }
+
+  pub fn sizeofExpr(self, span: diag.Span, target: Type): u32 {
+    return self.pushExpr(span, .Sizeof(target));
+  }
+
+  pub fn structLiteral(self, span: diag.Span, type_name: str, module: str, inits: Range): u32 {
+    return self.pushExpr(span, .StructLiteral(StructLiteralExpr{type_name: type_name, module: module, inits: inits}));
+  }
+
+  pub fn fieldAccess(self, base: u32, span: diag.Span, name: str): u32 {
+    return self.pushExpr(span, .Field(FieldExpr{base: base, name: name}));
+  }
+
+  pub fn enumLiteral(self, span: diag.Span, name: str, payload: u32): u32 {
+    return self.pushExpr(span, .EnumLiteral(EnumLiteralExpr{name: name, payload: payload}));
+  }
+
+  pub fn array(self, span: diag.Span, elements: Range): u32 {
+    return self.pushExpr(span, .Array(elements));
+  }
+
+  pub fn index(self, base: u32, idx: u32): u32 {
+    return self.pushExpr(self.exprs.at(base).span, .Index(IndexExpr{base: base, index: idx}));
+  }
+
+  pub fn sliceRange(self, base: u32, start: u32, end: u32): u32 {
+    return self.pushExpr(self.exprs.at(base).span, .SliceRange(SliceRangeExpr{base: base, start: start, end: end}));
+  }
+
+  pub fn matchExpr(self, span: diag.Span, scrutinee: u32, arms: Range): u32 {
+    return self.pushExpr(span, .Match(MatchExpr{scrutinee: scrutinee, arms: arms}));
+  }
+
+  pub fn nullExpr(self, span: diag.Span): u32 {
+    return self.pushExpr(span, .Null);
+  }
+
+  pub fn coalesce(self, lhs: u32, rhs: u32): u32 {
+    return self.pushExpr(self.exprs.at(lhs).span, .Coalesce(PairExpr{lhs: lhs, rhs: rhs}));
+  }
+
+  pub fn unwrap(self, operand: u32): u32 {
+    return self.pushExpr(self.exprs.at(operand).span, .Unwrap(operand));
+  }
+
+  pub fn propagate(self, operand: u32): u32 {
+    return self.pushExpr(self.exprs.at(operand).span, .Propagate(operand));
+  }
+
+  pub fn ternary(self, cond: u32, then: u32, els: u32): u32 {
+    return self.pushExpr(self.exprs.at(cond).span, .Ternary(TernaryExpr{cond: cond, then: then, els: els}));
+  }
+
+  pub fn importExpr(self, span: diag.Span, path: str): u32 {
+    return self.pushExpr(span, .Import(path));
+  }
+
+  // =============== Statements ===============
+
+  fn pushStmt(self, span: diag.Span, kind: StmtKind): u32 {
+    return self.stmts.push(Stmt.init(span, kind));
+  }
+
+  pub fn returnStmt(self, span: diag.Span, value: u32): u32 {
+    return self.pushStmt(span, .Return(value));
+  }
+
+  pub fn exprStmt(self, span: diag.Span, value: u32): u32 {
+    return self.pushStmt(span, .ExprStmt(value));
+  }
+
+  pub fn ifStmt(self, span: diag.Span, cond: u32, then_body: Range, else_body: Range): u32 {
+    return self.pushStmt(span, .If(IfStmt{cond: cond, then_body: then_body, else_body: else_body}));
+  }
+
+  pub fn bindingStmt(self, span: diag.Span, name: str, ty: Type, mutable: bool, init: u32): u32 {
+    return self.pushStmt(span, .Binding(BindingStmt{name: name, ty: ty, mutable: mutable, init: init}));
+  }
+
+  pub fn assignStmt(self, span: diag.Span, target: u32, value: u32, compound: bool, is_coalesce: bool, op: BinaryOp): u32 {
+    return self.pushStmt(span, .Assign(AssignStmt{target: target, value: value, compound: compound, coalesce: is_coalesce, op: op}));
+  }
+
+  pub fn whileStmt(self, span: diag.Span, cond: u32, body: Range): u32 {
+    return self.pushStmt(span, .While(WhileStmt{cond: cond, body: body}));
+  }
+
+  pub fn forStmt(self, span: diag.Span, variable: str, start: u32, end: u32, body: Range): u32 {
+    return self.pushStmt(span, .For(ForStmt{variable: variable, start: start, end: end, iterable: 0, body: body}));
+  }
+
+  pub fn foreachStmt(self, span: diag.Span, variable: str, iterable: u32, body: Range): u32 {
+    return self.pushStmt(span, .For(ForStmt{variable: variable, start: 0, end: 0, iterable: iterable, body: body}));
+  }
+
+  pub fn breakStmt(self, span: diag.Span): u32 {
+    return self.pushStmt(span, .Break);
+  }
+
+  pub fn continueStmt(self, span: diag.Span): u32 {
+    return self.pushStmt(span, .Continue);
+  }
+
+  pub fn deferStmt(self, span: diag.Span, value: u32): u32 {
+    return self.pushStmt(span, .Defer(value));
+  }
+
+  // =============== Declarations ===============
+
+  fn pushDecl(self, span: diag.Span, visibility: Visibility, name: str, kind: DeclKind): u32 {
+    return self.decls.push(Decl.init(span, visibility, name, kind));
+  }
+
+  pub fn fnDecl(self, span: diag.Span, visibility: Visibility, name: str, params: Range, return_type: Type, body: Range, is_extern: bool, variadic: bool): u32 {
+    return self.pushDecl(span, visibility, name, .Fn(FnDecl{params: params, return_type: return_type, body: body, is_extern: is_extern, variadic: variadic}));
+  }
+
+  pub fn containerDecl(self, name: str, members: Range): u32 {
+    let span: diag.Span;
+    return self.pushDecl(span, .Private, name, .Container(members));
+  }
+
+  pub fn structDecl(self, span: diag.Span, visibility: Visibility, name: str, field_range: Range, members: Range): u32 {
+    return self.pushDecl(span, visibility, name, .Struct(StructDecl{fields: field_range, members: members}));
+  }
+
+  pub fn enumDecl(self, span: diag.Span, visibility: Visibility, name: str, members: Range, methods: Range): u32 {
+    return self.pushDecl(span, visibility, name, .Enum(EnumDecl{members: members, methods: methods}));
+  }
+
+  pub fn globalDecl(self, span: diag.Span, visibility: Visibility, name: str, ty: Type, mutable: bool, init: u32): u32 {
+    return self.pushDecl(span, visibility, name, .Global(GlobalDecl{ty: ty, mutable: mutable, init: init}));
+  }
+
+  pub fn importDecl(self, span: diag.Span, vis: Visibility, alias: str, path: str): u32 {
+    return self.pushDecl(span, vis, alias, .Import(ImportDecl{alias: alias, path: path}));
+  }
+}
+

@@ -1,0 +1,24 @@
+--TEST--
+str equality works when an operand is a function-call rvalue (not just a named binding)
+--FILE--
+const std = import("std");
+
+fn label(): str {
+  return "ready";
+}
+
+pub fn main(): i32 {
+  // rvalue on the left, literal on the right
+  if label() == "ready" {
+    // rvalue on the right too
+    if "ready" == label() {
+      // both operands rvalues
+      if label() == label() {
+        return 7;
+      }
+    }
+  }
+  return 0;
+}
+--EXIT--
+7
