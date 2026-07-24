@@ -61,7 +61,7 @@ pub enum TypeKind {
       .F64 => "double",
       .Cstr, .Pointer => "ptr",
       .Str, .Slice => "{ ptr, i64 }",
-      .Enum => "",
+      .Enum => "i32",
       _ => "?",
     };
   }
@@ -104,7 +104,7 @@ pub struct Type {
   pub array_length: i64,
   pub span: diag.Span,
 
-  pub fn write(self, a: *Ast, out: std.io.File) {
+  pub fn write(self, a: *Ast, out: *std.io.BufWriter) {
     match self.kind {
       .Struct, .Enum => out.write(self.name),
       .Array => {
@@ -294,6 +294,7 @@ pub enum ExprKind {
   Propagate: u32,
   Ternary: TernaryExpr,
   Import: str,
+  PostIncr: PostIncrExpr,
 }
 
 pub enum Visibility {
@@ -308,13 +309,13 @@ pub enum Visibility {
   }
 }
 
-fn printIndent(out: std.io.File, depth: i32) {
+fn printIndent(out: *std.io.BufWriter, depth: i32) {
   for i in 0..depth {
     out.write("  ");
   }
 }
 
-fn dumpBlock(a: *Ast, out: std.io.File, body: Range, depth: i32) {
+fn dumpBlock(a: *Ast, out: *std.io.BufWriter, body: Range, depth: i32) {
   let i: u32 = 0;
   while i < body.len {
     a.stmts.at(a.extra.get(body.start + i)).dump(a, out, depth + 1);
@@ -334,7 +335,7 @@ pub struct Expr {
     return e;
   }
 
-  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+  pub fn dump(self, a: *Ast, out: *std.io.BufWriter, depth: i32) {
     printIndent(out, depth);
     match self.kind {
       .Boolean(b) => {
@@ -502,6 +503,11 @@ pub struct Expr {
         out.write(path);
         out.writeln("\"");
       },
+      .PostIncr(p) => {
+        out.write("PostIncr ");
+        out.writeln(p.increment ? "++" : "--");
+        a.exprs.at(p.operand).dump(a, out, depth + 1);
+      },
     };
   }
 }
@@ -524,6 +530,11 @@ pub struct BinaryExpr {
 pub struct UnaryExpr {
   pub op: UnaryOp,
   pub operand: u32,
+}
+
+pub struct PostIncrExpr {
+  pub operand: u32,
+  pub increment: bool,
 }
 
 pub struct CallExpr {
@@ -660,7 +671,7 @@ pub struct Stmt {
     return s;
   }
 
-  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+  pub fn dump(self, a: *Ast, out: *std.io.BufWriter, depth: i32) {
     printIndent(out, depth);
     match self.kind {
       .Return(v) => {
@@ -836,7 +847,7 @@ pub struct Decl {
     return d;
   }
 
-  pub fn dump(self, a: *Ast, out: std.io.File, depth: i32) {
+  pub fn dump(self, a: *Ast, out: *std.io.BufWriter, depth: i32) {
     printIndent(out, depth);
     match self.kind {
       .Fn(f) => {
@@ -1305,6 +1316,10 @@ pub struct U32List {
     self.items[self.len] = idx;
     self.len += 1;
   }
+
+  pub fn get(self, i: i64): u32 {
+    return self.items[i];
+  }
 }
 
 pub struct U32Pool {
@@ -1513,6 +1528,10 @@ pub struct Ast {
 
   pub fn propagate(self, operand: u32): u32 {
     return self.pushExpr(self.exprs.at(operand).span, .Propagate(operand));
+  }
+
+  pub fn postIncr(self, operand: u32, increment: bool): u32 {
+    return self.pushExpr(self.exprs.at(operand).span, .PostIncr(PostIncrExpr{operand: operand, increment: increment}));
   }
 
   pub fn ternary(self, cond: u32, then: u32, els: u32): u32 {

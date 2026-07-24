@@ -2,9 +2,10 @@
 flag: a StrList flag collects every occurrence in order, from both = and space forms; unset lists are empty
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let fs = std.flag.FlagSet.init("prog");
+  let fs = flag.FlagSet.init("prog");
   fs.addStrList("l", "link library");
   fs.addStrList("L", "library path");
   const argv: []str = ["prog", "-l", "m", "-l=pthread", "-l", "c"];

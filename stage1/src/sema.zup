@@ -181,8 +181,7 @@ pub struct Sema {
 
   fn registerLocals(self) {
     const members = self.rootMembers();
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       const name = self.a.decls.at(di).name;
       match self.a.decls.at(di).kind {
@@ -211,9 +210,9 @@ pub struct Sema {
           }
         },
         _ => {},
-      };
-      i += 1;
+      }
     }
+
     self.local_types = self.types.len;
   }
 
@@ -232,8 +231,7 @@ pub struct Sema {
     });
 
     const members = self.moduleMembers(module);
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       if self.a.decls.at(di).visibility == .Public {
         match self.a.decls.at(di).kind {
@@ -245,7 +243,6 @@ pub struct Sema {
           _ => {},
         };
       }
-      i += 1;
     }
   }
 
@@ -265,8 +262,7 @@ pub struct Sema {
 
   fn registerImports(self) {
     const members = self.rootMembers();
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       match self.a.decls.at(di).kind {
         .Import(imp) => {
@@ -276,15 +272,13 @@ pub struct Sema {
         },
         _ => {},
       };
-      i += 1;
     }
 
-    let r: i64 = 1;
-    while r < self.reachable.len {
-      const stem = moduleStem(self.a.arena, self.reachable.at(r as u32).path);
-      const mmembers = self.membersOfRoot(self.reachable.at(r as u32).root);
-      let j: u32 = 0;
-      while j < mmembers.len {
+    for i in (0 as u32)..(self.reachable.len as u32) {
+      const stem = utils.moduleStem(self.reachable.at(i).path);
+      const mmembers = self.membersOfRoot(self.reachable.at(i).root);
+
+      for j in (0 as u32)..mmembers.len {
         const dj = self.a.extra.get(mmembers.start + j);
         if self.a.decls.at(dj).visibility == .Public {
           match self.a.decls.at(dj).kind {
@@ -293,37 +287,31 @@ pub struct Sema {
             _ => {},
           };
         }
-        j += 1;
       }
-      r += 1;
     }
   }
 
   fn resolveModuleAlias(self, path: str): u32 {
     let mod: u32 = 0;
     let seg_start: i64 = 0;
-    let i: i64 = 0;
-    while i <= path.len {
+    for i in (0 as i64)..path.len + 1 {
       if i == path.len || path[i] == '.' {
         const seg = path[seg_start..i];
-        if mod == 0 {
-          mod = self.lookupImportAlias(self.rootMembers(), seg, false);
-        } else {
-          mod = self.lookupImportAlias(self.moduleMembers(mod), seg, true);
-        }
-        if mod == 0 {
-          return 0;
-        }
+        mod = match mod {
+          0 => self.lookupImportAlias(self.rootMembers(), seg, false),
+          _ => self.lookupImportAlias(self.moduleMembers(mod), seg, true),
+        };
+
+        if mod == 0 { return 0; }
         seg_start = i + 1;
       }
-      i += 1;
     }
+
     return mod;
   }
 
   fn lookupImportAlias(self, members: ast.Range, name: str, pub_only: bool): u32 {
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       if !pub_only || self.a.decls.at(di).visibility == .Public {
         match self.a.decls.at(di).kind {
@@ -335,15 +323,14 @@ pub struct Sema {
           _ => {},
         };
       }
-      i += 1;
     }
+
     return 0;
   }
 
   fn modulePubType(self, module: u32, name: str, want_enum: bool): u32 {
     const members = self.moduleMembers(module);
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
         match self.a.decls.at(di).kind {
@@ -360,7 +347,6 @@ pub struct Sema {
           _ => {},
         };
       }
-      i += 1;
     }
     return 0;
   }
@@ -372,6 +358,7 @@ pub struct Sema {
       }
       return;
     }
+
     if t.kind != .Struct {
       return;
     }
@@ -384,18 +371,21 @@ pub struct Sema {
         t.module = "";
         return;
       }
-      const stem = moduleStem(self.a.arena, self.a.modules.at(mod).path);
+
+      const stem = utils.moduleStem(self.a.modules.at(mod).path);
       if self.modulePubType(mod, t.name, false) != 0 {
         t.name = utils.concat(self.a.arena, stem, ".", t.name);
         t.module = "";
         return;
       }
+
       if self.modulePubType(mod, t.name, true) != 0 {
         t.kind = .Enum;
         t.name = utils.concat(self.a.arena, stem, ".", t.name);
         t.module = "";
         return;
       }
+
       diag.error(t.span, .Message(utils.concat(self.a.arena, "module '", t.module, "' has no public struct '", t.name, "'")));
       t.kind = .Unknown;
       t.module = "";
@@ -416,32 +406,39 @@ pub struct Sema {
       if t.elem != 0 {
         return self.checkTypeExists(self.a.types.at(t.elem));
       }
+
       return true;
     }
+
     if t.kind != .Struct {
       return true;
     }
+
     const decl = self.types.lookup(t.name);
     if decl == 0 {
       diag.error(t.span, .Message(utils.concat(self.a.arena, "unknown type '", t.name, "'")));
       return false;
     }
+
     match self.a.decls.at(decl).kind {
       .Enum(e) => { t.kind = .Enum; },
       _ => {},
-    };
+    }
+
     return true;
   }
 
+  // TODO: Refactor under ast.Type (same method mirrored elsewhere)
   fn typeCopy(self, idx: u32): ast.Type {
-    let t: ast.Type;
-    t.kind = self.a.types.at(idx).kind;
-    t.name = self.a.types.at(idx).name;
-    t.module = self.a.types.at(idx).module;
-    t.elem = self.a.types.at(idx).elem;
-    t.array_length = self.a.types.at(idx).array_length;
-    t.span = self.a.types.at(idx).span;
-    return t;
+    const t = self.a.types.at(idx);
+    return {
+      kind: t.kind,
+      name: t.name,
+      module: t.module,
+      elem: t.elem,
+      array_length: t.array_length,
+      span: t.span,
+    };
   }
 
   fn reachesByValue(self, start: str, t: ast.Type, v: *Visited): bool {
@@ -449,44 +446,46 @@ pub struct Sema {
       if t.elem == 0 {
         return false;
       }
+
       return self.reachesByValue(start, self.typeCopy(t.elem), v);
     }
+
     if t.kind != .Struct && t.kind != .Enum {
       return false;
     }
+
     if t.name == start {
       return true;
     }
+
     if v.contains(t.name) {
       return false;
     }
+
     const decl = self.types.lookup(t.name);
     if decl == 0 {
       return false;
     }
+
     v.add(t.name);
 
     match self.a.decls.at(decl).kind {
       .Struct(s) => {
-        let i: u32 = 0;
-        while i < s.fields.len {
+        for i in (0 as u32)..s.fields.len {
           const fi = self.a.extra.get(s.fields.start + i);
           if self.reachesByValue(start, self.a.fields.at(fi).ty, v) {
             return true;
           }
-          i += 1;
         }
       },
       .Enum(e) => {
-        let i: u32 = 0;
-        while i < e.members.len {
+        for i in (0 as u32)..e.members.len {
           const mi = self.a.extra.get(e.members.start + i);
           if self.a.enum_members.at(mi).has_payload {
             if self.reachesByValue(start, self.a.enum_members.at(mi).payload, v) {
               return true;
             }
           }
-          i += 1;
         }
       },
       _ => {},
@@ -503,8 +502,7 @@ pub struct Sema {
     const sname = self.a.decls.at(d).name;
     match self.a.decls.at(d).kind {
       .Struct(s) => {
-        let i: u32 = 0;
-        while i < s.fields.len {
+        for i in (0 as u32)..s.fields.len {
           const fi = self.a.extra.get(s.fields.start + i);
           self.resolveType(&self.a.fields.at(fi).ty);
           self.checkTypeExists(&self.a.fields.at(fi).ty);
@@ -515,15 +513,13 @@ pub struct Sema {
                 "' makes struct '", sname, "' recursive by value and infinitely sized; break the cycle with a slice")));
           }
 
-          let j: u32 = 0;
-          while j < i {
+          for j in (0 as u32)..i {
             const pj = self.a.extra.get(s.fields.start + j);
             if self.a.fields.at(pj).name == self.a.fields.at(fi).name {
               diag.error(self.a.fields.at(fi).span,
                 .Message(utils.concat(self.a.arena, "duplicate field '", self.a.fields.at(fi).name, "'")));
-              j = i;
+              break;
             }
-            j += 1;
           }
 
           const dv = self.a.fields.at(fi).default_value;
@@ -542,7 +538,6 @@ pub struct Sema {
               }
             }
           }
-          i += 1;
         }
       },
       _ => {},
@@ -554,8 +549,7 @@ pub struct Sema {
     match self.a.decls.at(d).kind {
       .Enum(e) => {
         let tagged = false;
-        let i: u32 = 0;
-        while i < e.members.len {
+        for i in (0 as u32)..e.members.len {
           const mi = self.a.extra.get(e.members.start + i);
           if self.a.enum_members.at(mi).has_payload {
             tagged = true;
@@ -567,29 +561,24 @@ pub struct Sema {
                   "' makes enum '", ename, "' recursive by value and infinitely sized; break the cycle with a slice")));
             }
           }
-          i += 1;
         }
 
-        i = 0;
-        while i < e.members.len {
+        for i in (0 as u32)..e.members.len {
           const mj = self.a.extra.get(e.members.start + i);
-          let j: u32 = 0;
-          while j < i {
+          for j in (0 as u32)..i {
             const pj = self.a.extra.get(e.members.start + j);
             if self.a.enum_members.at(pj).name == self.a.enum_members.at(mj).name {
               diag.error(self.a.enum_members.at(mj).span,
                 .Message(utils.concat(self.a.arena, "duplicate enum member '", self.a.enum_members.at(mj).name, "'")));
-              j = i;
+              break;
             } else if self.a.enum_members.at(pj).value == self.a.enum_members.at(mj).value {
               diag.error(self.a.enum_members.at(mj).span,
-                .Message(utils.concat(self.a.arena, "duplicate enum value ", intText(self.a.arena, self.a.enum_members.at(mj).value),
+                .Message(utils.concat(self.a.arena, "duplicate enum value ", utils.intText(self.a.arena, self.a.enum_members.at(mj).value),
                   " for member '", self.a.enum_members.at(mj).name,
                   "' (already used by '", self.a.enum_members.at(pj).name, "')")));
-              j = i;
+              break;
             }
-            j += 1;
           }
-          i += 1;
         }
 
         let ne = e;
@@ -602,8 +591,7 @@ pub struct Sema {
 
   fn checkGlobals(self) {
     const members = self.rootMembers();
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       const name = self.a.decls.at(di).name;
       match self.a.decls.at(di).kind {
@@ -639,14 +627,12 @@ pub struct Sema {
         },
         _ => {},
       };
-      i += 1;
     }
   }
 
   fn resolveSignatures(self) {
     const members = self.rootMembers();
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       match self.a.decls.at(di).kind {
         .Fn(f) => { self.resolveSignature(di, f); },
@@ -654,44 +640,76 @@ pub struct Sema {
         .Enum(e) => { self.resolveMemberSignatures(e.methods); },
         _ => {},
       };
-      i += 1;
     }
   }
 
   fn resolveMemberSignatures(self, methods: ast.Range) {
-    let i: u32 = 0;
-    while i < methods.len {
+    for i in (0 as u32)..methods.len {
       const di = self.a.extra.get(methods.start + i);
       match self.a.decls.at(di).kind {
         .Fn(f) => { self.resolveSignature(di, f); },
         _ => {},
       };
-      i += 1;
     }
   }
 
   fn resolveSignature(self, d: u32, f: ast.FnDecl) {
-    let i: u32 = 0;
-    while i < f.params.len {
+    for i in (0 as u32)..f.params.len {
       const pi = self.a.extra.get(f.params.start + i);
       self.resolveType(&self.a.params.at(pi).ty);
-      i += 1;
+      if f.variadic && !f.is_extern && i == f.params.len - 1 {
+        self.qualifyVariadicArg(pi);
+      }
     }
+
     let nf = f;
     self.resolveType(&nf.return_type);
     self.a.decls.at(d).kind = .Fn(nf);
   }
 
+  fn qualifyVariadicArg(self, pi: u32) {
+    const ty = copyOf(&self.a.params.at(pi).ty);
+    if ty.kind != .Slice || ty.elem == 0 {
+      return;
+    }
+
+    const ename = self.a.types.at(ty.elem).name;
+    if self.a.types.at(ty.elem).kind != .Struct || self.types.lookup(ename) != 0 {
+      return;
+    }
+
+    let r: i64 = self.reachable.len - 1;
+    while r >= 1 {
+      const members = self.membersOfRoot(self.reachable.at(r as u32).root);
+      let mi: u32 = 0;
+      while mi < members.len {
+        const di = self.a.extra.get(members.start + mi);
+        if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == ename {
+          const is_type = match self.a.decls.at(di).kind {
+            .Struct(sd) => true,
+            .Enum(ed) => true,
+            _ => false,
+          };
+          if is_type {
+            const stem = utils.moduleStem(self.reachable.at(r as u32).path);
+            self.a.types.at(ty.elem).name = utils.concat(self.a.arena, stem, ".", ename);
+            return;
+          }
+        }
+        mi += 1;
+      }
+      r -= 1;
+    }
+  }
+
   fn checkTypes(self) {
-    let i: i64 = 0;
-    while i < self.local_types {
+    for i in (0 as i64)..self.local_types {
       const di = self.types.items[i].decl;
       match self.a.decls.at(di).kind {
         .Struct(s) => { self.checkStruct(di); },
         .Enum(e) => { self.checkEnum(di); },
         _ => {},
       };
-      i += 1;
     }
   }
 
@@ -701,10 +719,12 @@ pub struct Sema {
       std.io.printerrln("zup: error: no entry point: 'main' function is required");
       std.exit(1);
     }
+
     if self.a.decls.at(main_decl).visibility != .Public {
       diag.error(self.a.decls.at(main_decl).span,
         .Message("'main' must be public (declared with 'pub')"));
     }
+
     match self.a.decls.at(main_decl).kind {
       .Fn(f) => {
         if f.return_type.kind != .I32 {
@@ -716,8 +736,7 @@ pub struct Sema {
         } else if f.params.len == 1 {
           const pi = self.a.extra.get(f.params.start);
           const pty = copyOf(&self.a.params.at(pi).ty);
-          const slice_of_str = pty.kind == .Slice && pty.elem != 0
-            && self.a.types.at(pty.elem).kind == .Str;
+          const slice_of_str = pty.kind == .Slice && pty.elem != 0 && self.a.types.at(pty.elem).kind == .Str;
           if !slice_of_str {
             diag.error(self.a.decls.at(main_decl).span,
               .Message("'main' parameter must be of type '[]str'"));
@@ -732,16 +751,20 @@ pub struct Sema {
     if x.kind != y.kind {
       return false;
     }
+
     if x.kind == .Enum || x.kind == .Struct {
       return enumNameEq(x.name, y.name);
     }
+
     if x.kind == .Array {
       return x.array_length == y.array_length
         && self.typeEq(self.typeCopy(x.elem), self.typeCopy(y.elem));
     }
+
     if x.kind == .Slice || x.kind == .Optional || x.kind == .Pointer {
       return self.typeEq(self.typeCopy(x.elem), self.typeCopy(y.elem));
     }
+
     return true;
   }
 
@@ -749,28 +772,35 @@ pub struct Sema {
     if to.kind == .Cstr && from.kind == .Str {
       return true;
     }
+
     if to.kind == .Optional && from.kind != .Optional {
       return self.assignable(self.typeCopy(to.elem), from);
     }
+
     if to.kind == .Optional && from.kind == .Optional {
       return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
     }
+
     if to.kind == .Slice && (from.kind == .Array || from.kind == .Slice) {
       return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
     }
+
     if to.kind != from.kind {
       return false;
     }
+
     if to.kind == .Enum || to.kind == .Struct {
       return enumNameEq(to.name, from.name);
     }
+
     if to.kind == .Array {
-      return from.elem != 0 && to.array_length == from.array_length
-        && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
+      return from.elem != 0 && to.array_length == from.array_length && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
     }
+
     if to.kind == .Pointer {
       return from.elem != 0 && self.typeEq(self.typeCopy(to.elem), self.typeCopy(from.elem));
     }
+
     return true;
   }
 
@@ -778,22 +808,28 @@ pub struct Sema {
     if t.kind == .Struct || t.kind == .Enum {
       return t.name;
     }
+
     if t.kind == .Array || t.kind == .Slice || t.kind == .Optional || t.kind == .Pointer {
       if t.elem == 0 {
         return t.kind.toString();
       }
+
       const inner = self.typeText(self.typeCopy(t.elem));
       if t.kind == .Slice {
         return utils.concat(self.a.arena, "[]", inner);
       }
+
       if t.kind == .Optional {
         return utils.concat(self.a.arena, "?", inner);
       }
+
       if t.kind == .Pointer {
         return utils.concat(self.a.arena, "*", inner);
       }
-      return utils.concat(self.a.arena, "[", intText(self.a.arena, t.array_length), "]", inner);
+
+      return utils.concat(self.a.arena, "[", utils.intText(self.a.arena, t.array_length), "]", inner);
     }
+
     return t.kind.toString();
   }
 
@@ -821,13 +857,16 @@ pub struct Sema {
     if name.len == 0 {
       return false;
     }
+
     let d = self.types.lookup(name);
     if d == 0 {
       d = self.importsPubEnum(name);
     }
+
     if d == 0 {
       return false;
     }
+
     return match self.a.decls.at(d).kind {
       .Enum(e) => e.tagged,
       _ => false,
@@ -843,6 +882,7 @@ pub struct Sema {
       base = 16;
       i = 2;
     }
+
     while i < text.len {
       const ch = text[i];
       let d: u64 = 255;
@@ -865,11 +905,11 @@ pub struct Sema {
     }
 
     if overflow || v > intMax(kind) {
-      let k = kind;
       diag.error(span, .Message(utils.concat(self.a.arena,
-        "integer literal ", text, " out of range for ", k.toString())));
+        "integer literal ", text, " out of range for ", kind.toString())));
       return true;
     }
+
     return false;
   }
 
@@ -877,6 +917,7 @@ pub struct Sema {
     if e == 0 {
       return false;
     }
+
     return match self.a.exprs.at(e).kind {
       .Number(n) => true,
       .Boolean(b) => true,
@@ -911,14 +952,14 @@ pub struct Sema {
 
   fn lvalueRoot(self, e: u32): str {
     let cur = e;
-    let walking = true;
-    while walking {
+    while true {
       match self.a.exprs.at(cur).kind {
         .Field(fx) => { cur = fx.base; },
         .Index(ix) => { cur = ix.base; },
-        _ => { walking = false; },
+        _ => { break; },
       };
     }
+
     return match self.a.exprs.at(cur).kind {
       .Id(n) => n,
       _ => "",
@@ -934,21 +975,20 @@ pub struct Sema {
         .Field(fx) => { base = fx.base; },
         .Index(ix) => { base = ix.base; },
         _ => { walking = false; },
-      };
+      }
+
       if walking {
-        if self.a.exprs.at(base).ty.kind == .Pointer {
-          return true;
-        }
+        if self.a.exprs.at(base).ty.kind == .Pointer { return true; }
         cur = base;
       }
     }
+
     return false;
   }
 
   fn checkExpr(self, e: u32, expected: ast.Type): ExprTy {
-    if e == 0 {
-      return fail();
-    }
+    if e == 0 { return fail(); }
+
     const result: ExprTy = match self.a.exprs.at(e).kind {
       .Boolean(bv) => okKind(.Bool),
       .Number(nv) => self.checkNumber(e, nv, expected),
@@ -971,8 +1011,10 @@ pub struct Sema {
       .SliceRange(slr) => self.checkSliceRange(e, slr),
       .EnumLiteral(enl) => self.checkEnumLiteral(e, enl, expected),
       .Match(mtc) => self.checkMatch(e, mtc, expected),
+      .PostIncr(pi) => self.checkPostIncr(e, pi, expected),
       _ => fail(),
     };
+
     self.a.exprs.at(e).ty.kind = result.ty.kind;
     self.a.exprs.at(e).ty.name = result.ty.name;
     self.a.exprs.at(e).ty.elem = result.ty.elem;
@@ -985,6 +1027,7 @@ pub struct Sema {
     while want.kind == .Optional && want.elem != 0 {
       want = self.typeCopy(want.elem);
     }
+
     if numberIsFloat(text) {
       let fk: ast.TypeKind = .F64;
       if want.kind.isFloat() {
@@ -992,13 +1035,16 @@ pub struct Sema {
       }
       return okKind(fk);
     }
+
     let ik: ast.TypeKind = .I32;
     if want.kind.isInteger() {
       ik = want.kind;
     }
+
     if self.literalOutOfRange(self.a.exprs.at(e).span, text, ik) {
       return fail();
     }
+
     return okKind(ik);
   }
 
@@ -1010,9 +1056,11 @@ pub struct Sema {
       r.ok = true;
       return r;
     }
+
     if expected.kind == .Cstr {
       return okKind(.Cstr);
     }
+
     diag.error(self.a.exprs.at(e).span, .Message("cannot infer a type for 'null'"));
     return fail();
   }
@@ -1027,6 +1075,7 @@ pub struct Sema {
         lt = self.scope.ty(si);
       }
     }
+
     if !found {
       const gi = self.gscope.lookup(name);
       if gi >= 0 {
@@ -1034,6 +1083,7 @@ pub struct Sema {
         lt = self.gscope.ty(gi);
       }
     }
+
     if !found {
       if self.lookupImportAlias(self.rootMembers(), name, false) != 0 {
         diag.error(self.a.exprs.at(e).span,
@@ -1047,10 +1097,11 @@ pub struct Sema {
       }
       return fail();
     }
-    let r: ExprTy;
-    r.ty = lt;
-    r.ok = true;
-    return r;
+
+    return {
+      ty: lt,
+      ok: true,
+    };
   }
 
   fn checkBinaryExpr(self, e: u32, b: ast.BinaryExpr, expected: ast.Type): ExprTy {
@@ -1092,6 +1143,7 @@ pub struct Sema {
           " and ", rhs.ty.kind.toString())));
         return fail();
       }
+
       return okKind(.Bool);
     }
 
@@ -1106,13 +1158,11 @@ pub struct Sema {
           "' with '==' or '!='; use match")));
         return fail();
       }
+
       return okKind(.Bool);
     }
 
-    if (self.isNullExpr(b.lhs) || self.isNullExpr(b.rhs))
-      && lhs.ty.kind == rhs.ty.kind
-      && (lhs.ty.kind == .Optional || lhs.ty.kind == .Cstr)
-      && is_eqne {
+    if (self.isNullExpr(b.lhs) || self.isNullExpr(b.rhs)) && lhs.ty.kind == rhs.ty.kind && (lhs.ty.kind == .Optional || lhs.ty.kind == .Cstr) && is_eqne {
       return okKind(.Bool);
     }
 
@@ -1125,15 +1175,13 @@ pub struct Sema {
         opt = rhs;
         oth = lhs;
       }
-      if opt.ty.elem != 0
-        && (oth.ty.kind.isNumeric() || oth.ty.kind == .Enum || oth.ty.kind == .Bool)
-        && self.typeEq(self.typeCopy(opt.ty.elem), oth.ty) {
+
+      if opt.ty.elem != 0 && (oth.ty.kind.isNumeric() || oth.ty.kind == .Enum || oth.ty.kind == .Bool) && self.typeEq(self.typeCopy(opt.ty.elem), oth.ty) {
         return okKind(.Bool);
       }
     }
 
-    if !lhs.ty.kind.isNumeric() || lhs.ty.kind != rhs.ty.kind
-      || (lhs.ty.kind.isFloat() && !b.op.isArithmetic() && !b.op.isComparison()) {
+    if !lhs.ty.kind.isNumeric() || lhs.ty.kind != rhs.ty.kind || (lhs.ty.kind.isFloat() && !b.op.isArithmetic() && !b.op.isComparison()) {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "cannot apply '", b.op.toString(), "' to ", lhs.ty.kind.toString(),
         " and ", rhs.ty.kind.toString())));
@@ -1144,6 +1192,7 @@ pub struct Sema {
     if b.op.isComparison() {
       rk = .Bool;
     }
+
     return okKind(rk);
   }
 
@@ -1154,20 +1203,24 @@ pub struct Sema {
       if expected.kind == .Pointer && expected.elem != 0 {
         inner = self.typeCopy(expected.elem);
       }
+
       const aop = self.checkExpr(un.operand, inner);
       if !aop.ok {
         return fail();
       }
+
       const addressable = match self.a.exprs.at(un.operand).kind {
         .Id(n) => true,
         .Field(fx) => true,
         .Index(ix) => true,
         _ => false,
       };
+
       if !addressable {
         diag.error(span, .Message("cannot take the address of a temporary; '&' requires a variable, field, or element"));
         return fail();
       }
+
       let r: ExprTy;
       r.ty.kind = .Pointer;
       r.ty.elem = self.a.types.push(aop.ty);
@@ -1180,22 +1233,93 @@ pub struct Sema {
     if is_not {
       want = kindTy(.Bool);
     }
+
     const operand = self.checkExpr(un.operand, want);
     let valid = operand.ty.kind.isSignedInteger() || operand.ty.kind.isFloat();
     if is_not {
       valid = operand.ty.kind == .Bool;
     }
+
     if !operand.ok {
       return fail();
     }
+
     if !valid {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "cannot apply '", un.op.toString(), "' to ", operand.ty.kind.toString())));
       return fail();
     }
+
     if is_not {
       return okKind(.Bool);
     }
+
+    return okKind(operand.ty.kind);
+  }
+
+  fn checkPostIncr(self, e: u32, pi: ast.PostIncrExpr, expected: ast.Type): ExprTy {
+    const span = self.a.exprs.at(e).span;
+    const op: str = pi.increment ? "++" : "--";
+    const operand = self.checkExpr(pi.operand, expected);
+    const target_ok = match self.a.exprs.at(pi.operand).kind {
+      .Id(n) => true,
+      .Field(fx) => true,
+      .Index(ix) => true,
+      _ => false,
+    };
+
+    if !target_ok {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "'", op, "' requires a variable, field, or element")));
+      return fail();
+    }
+
+    const root = self.lvalueRoot(pi.operand);
+    let found = false;
+    let is_mut = true;
+    let is_lv = false;
+
+    if root.len > 0 {
+      if self.has_scope {
+        const si = self.scope.lookup(root);
+        if si >= 0 {
+          found = true;
+          is_mut = self.scope.isMutable(si);
+          is_lv = self.scope.isLoopVar(si);
+        }
+      }
+
+      if !found {
+        const gi = self.gscope.lookup(root);
+        if gi >= 0 {
+          found = true;
+          is_mut = self.gscope.isMutable(gi);
+          is_lv = self.gscope.isLoopVar(gi);
+        }
+      }
+    }
+
+    if found && !is_mut && !self.lvalueThroughPointer(pi.operand) {
+      if is_lv {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot assign to loop variable '", root, "'")));
+      } else {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "cannot assign to const '", root, "'")));
+      }
+      return fail();
+    }
+
+    if !operand.ok {
+      return fail();
+    }
+
+    if !operand.ty.kind.isInteger() {
+      diag.error(span, .Message(utils.concat(self.a.arena,
+        "cannot apply '", op, "' to ", operand.ty.kind.toString())));
+      return fail();
+    }
+
     return okKind(operand.ty.kind);
   }
 
@@ -1206,21 +1330,17 @@ pub struct Sema {
     self.a.exprs.at(e).kind = .Cast(nc);
 
     const target = nc.target.kind;
-    const bytes_to_str = operand.ty.kind == .Slice && operand.ty.elem != 0
-      && self.a.types.at(operand.ty.elem).kind == .U8 && target == .Str;
-    const str_to_bytes = operand.ty.kind == .Str && target == .Slice
-      && nc.target.elem != 0 && self.a.types.at(nc.target.elem).kind == .U8;
+    const bytes_to_str = operand.ty.kind == .Slice && operand.ty.elem != 0 && self.a.types.at(operand.ty.elem).kind == .U8 && target == .Str;
+    const str_to_bytes = operand.ty.kind == .Str && target == .Slice && nc.target.elem != 0 && self.a.types.at(nc.target.elem).kind == .U8;
     const slice_reinterpret = operand.ty.kind == .Slice && target == .Slice;
-    const valid = (operand.ty.kind.isNumeric() && target.isNumeric())
-      || (operand.ty.kind == .Enum && target.isInteger())
-      || (operand.ty.kind.isInteger() && target == .Enum)
-      || bytes_to_str || str_to_bytes || slice_reinterpret;
+    const valid = (operand.ty.kind.isNumeric() && target.isNumeric()) || (operand.ty.kind == .Enum && target.isInteger()) || (operand.ty.kind.isInteger() && target == .Enum) || bytes_to_str || str_to_bytes || slice_reinterpret;
 
     if operand.ok && !valid {
       diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
         "cannot cast ", self.typeText(operand.ty), " to ", self.typeText(nc.target))));
       return fail();
     }
+
     let r: ExprTy;
     r.ty.kind = target;
     r.ty.name = nc.target.name;
@@ -1243,11 +1363,13 @@ pub struct Sema {
       diag.error(self.a.exprs.at(t.cond).span, .Message(utils.concat(self.a.arena,
         "ternary condition must be bool, got ", cond.ty.kind.toString())));
     }
+
     const then = self.checkExpr(t.then, expected);
     let hint = expected;
     if then.ok {
       hint = then.ty;
     }
+
     const els = self.checkExpr(t.els, hint);
     let all_ok = cond.ok && cond.ty.kind == .Bool && then.ok && els.ok;
     if then.ok && els.ok && !self.assignable(then.ty, els.ty) {
@@ -1256,6 +1378,7 @@ pub struct Sema {
         " and ", self.typeText(els.ty))));
       all_ok = false;
     }
+
     let r: ExprTy;
     r.ty = then.ty;
     r.ok = all_ok;
@@ -1267,11 +1390,13 @@ pub struct Sema {
     if !lhs.ok {
       return fail();
     }
+
     if lhs.ty.kind != .Optional || lhs.ty.elem == 0 {
       diag.error(self.a.exprs.at(co.lhs).span, .Message(utils.concat(self.a.arena,
         "left side of '??' must be an optional, got ", self.typeText(lhs.ty))));
       return fail();
     }
+
     const el = self.typeCopy(lhs.ty.elem);
     const rhs = self.checkExpr(co.rhs, el);
     let all_ok = rhs.ok;
@@ -1280,6 +1405,7 @@ pub struct Sema {
         "'??' fallback has type ", self.typeText(rhs.ty), ", expected ", self.typeText(el))));
       all_ok = false;
     }
+
     let r: ExprTy;
     r.ty = el;
     r.ok = all_ok;
@@ -1291,11 +1417,13 @@ pub struct Sema {
     if !op.ok {
       return fail();
     }
+
     if op.ty.kind != .Optional || op.ty.elem == 0 {
       diag.error(self.a.exprs.at(operand).span, .Message(utils.concat(self.a.arena,
         "operand of '!' must be an optional, got ", self.typeText(op.ty))));
       return fail();
     }
+
     let r: ExprTy;
     r.ty = self.typeCopy(op.ty.elem);
     r.ok = true;
@@ -1307,16 +1435,19 @@ pub struct Sema {
     if !op.ok {
       return fail();
     }
+
     if op.ty.kind != .Optional || op.ty.elem == 0 {
       diag.error(self.a.exprs.at(operand).span, .Message(utils.concat(self.a.arena,
         "operand of '?' must be an optional, got ", self.typeText(op.ty))));
       return fail();
     }
+
     if self.cur_fn == 0 || self.fnReturnType(self.cur_fn).kind != .Optional {
       diag.error(self.a.exprs.at(e).span,
         .Message("'?' can only be used in a function returning an optional"));
       return fail();
     }
+
     let r: ExprTy;
     r.ty = self.typeCopy(op.ty.elem);
     r.ok = true;
@@ -1328,22 +1459,25 @@ pub struct Sema {
       .Id(n) => n,
       _ => "",
     };
+
     if id_name.len > 0 {
       return self.lookupImportAlias(self.rootMembers(), id_name, false);
     }
+
     let fbase: u32 = 0;
     let fname = "";
     match self.a.exprs.at(e).kind {
       .Field(fx) => { fbase = fx.base; fname = fx.name; },
       _ => {},
     };
+
     if fbase == 0 {
       return 0;
     }
+
     const base = self.resolveModulePath(fbase);
-    if base == 0 {
-      return 0;
-    }
+    if base == 0 { return 0; }
+
     return self.lookupImportAlias(self.moduleMembers(base), fname, true);
   }
 
@@ -1359,13 +1493,13 @@ pub struct Sema {
     if self.has_scope && self.scope.lookup(name) >= 0 {
       return true;
     }
+
     return self.gscope.lookup(name) >= 0;
   }
 
   fn modulePubFn(self, module: u32, name: str): u32 {
     const members = self.moduleMembers(module);
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
         match self.a.decls.at(di).kind {
@@ -1373,14 +1507,13 @@ pub struct Sema {
           _ => {},
         };
       }
-      i += 1;
     }
+
     return 0;
   }
 
   fn findFnIn(self, members: ast.Range, name: str): u32 {
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       if self.a.decls.at(di).name == name {
         match self.a.decls.at(di).kind {
@@ -1388,33 +1521,30 @@ pub struct Sema {
           _ => {},
         };
       }
-      i += 1;
     }
+
     return 0;
   }
 
   fn findFieldIn(self, fields: ast.Range, name: str): u32 {
-    let i: u32 = 0;
-    while i < fields.len {
+    for i in (0 as u32)..fields.len {
       const fi = self.a.extra.get(fields.start + i);
       if self.a.fields.at(fi).name == name {
         return fi;
       }
-      i += 1;
     }
+
     return 0;
   }
 
   fn enumMemberOf(self, enum_d: u32, name: str): u32 {
     match self.a.decls.at(enum_d).kind {
       .Enum(en) => {
-        let i: u32 = 0;
-        while i < en.members.len {
+        for i in (0 as u32)..en.members.len {
           const mi = self.a.extra.get(en.members.start + i);
           if self.a.enum_members.at(mi).name == name {
             return mi;
           }
-          i += 1;
         }
       },
       _ => {},
@@ -1426,15 +1556,18 @@ pub struct Sema {
     if stem.len == 0 {
       return t;
     }
+
     let nt = t;
-    if (nt.kind == .Struct || nt.kind == .Enum) && nt.name.len > 0 && lastDot(nt.name) < 0 {
+    if (nt.kind == .Struct || nt.kind == .Enum) && nt.name.len > 0 && utils.lastDot(nt.name) < 0 {
       nt.name = utils.concat(self.a.arena, stem, ".", nt.name);
       return nt;
     }
+
     if (nt.kind == .Slice || nt.kind == .Array || nt.kind == .Optional || nt.kind == .Pointer)
       && nt.elem != 0 {
       nt.elem = self.a.types.push(self.qualifyParamType(self.typeCopy(nt.elem), stem));
     }
+
     return nt;
   }
 
@@ -1442,6 +1575,7 @@ pub struct Sema {
     if stem.len == 0 || !r.ok {
       return r;
     }
+
     const t = self.qualifyParamType(r.ty, stem);
     let nr = r;
     nr.ty.name = t.name;
@@ -1467,38 +1601,36 @@ pub struct Sema {
       if c.args.len < fixed {
         const argword: str = fixed == 1 ? " argument" : " arguments";
         diag.error(span, .Message(utils.concat(self.a.arena,
-          "'", name, "' expects at least ", intText(self.a.arena, fixed as i64), argword,
-          " but got ", intText(self.a.arena, c.args.len as i64))));
+          "'", name, "' expects at least ", utils.intText(self.a.arena, fixed as i64), argword,
+          " but got ", utils.intText(self.a.arena, c.args.len as i64))));
       }
     } else {
       let required: u32 = 0;
-      let ri: u32 = 0;
-      while ri < fd.params.len {
-        const rp = self.a.extra.get(fd.params.start + ri);
+      for i in (0 as u32)..fd.params.len {
+        const rp = self.a.extra.get(fd.params.start + i);
         if self.a.params.at(rp).default_value == 0 {
           required += 1;
         }
-        ri += 1;
       }
+
       if required == fd.params.len {
         if c.args.len != fd.params.len {
           const argword2: str = fd.params.len == 1 ? " argument" : " arguments";
           diag.error(span, .Message(utils.concat(self.a.arena,
-            "'", name, "' expects ", intText(self.a.arena, fd.params.len as i64), argword2,
-            " but got ", intText(self.a.arena, c.args.len as i64))));
+            "'", name, "' expects ", utils.intText(self.a.arena, fd.params.len as i64), argword2,
+            " but got ", utils.intText(self.a.arena, c.args.len as i64))));
         }
       } else if c.args.len < required || c.args.len > fd.params.len {
         diag.error(span, .Message(utils.concat(self.a.arena,
-          "'", name, "' expects between ", intText(self.a.arena, required as i64),
-          " and ", intText(self.a.arena, fd.params.len as i64),
-          " arguments but got ", intText(self.a.arena, c.args.len as i64))));
+          "'", name, "' expects between ", utils.intText(self.a.arena, required as i64),
+          " and ", utils.intText(self.a.arena, fd.params.len as i64),
+          " arguments but got ", utils.intText(self.a.arena, c.args.len as i64))));
       }
     }
 
-    let ai: u32 = 0;
-    while ai < c.args.len {
-      const arg = self.a.extra.get(c.args.start + ai);
-      if boxed_variadic && ai >= fixed {
+    for i in (0 as u32)..c.args.len {
+      const arg = self.a.extra.get(c.args.start + i);
+      if boxed_variadic && i >= fixed {
         const vt = self.checkExpr(arg, unknownTy());
         if vt.ok && !varargBoxable(vt.ty.kind) {
           diag.error(self.a.exprs.at(arg).span, .Message(utils.concat(self.a.arena,
@@ -1507,19 +1639,19 @@ pub struct Sema {
       } else {
         let ptype = unknownTy();
         let pname = "";
-        if ai < fd.params.len {
-          const pd = self.a.extra.get(fd.params.start + ai);
+        if i < fd.params.len {
+          const pd = self.a.extra.get(fd.params.start + i);
           ptype = self.qualifyParamType(copyOf(&self.a.params.at(pd).ty), stem);
           pname = self.a.params.at(pd).name;
         }
+
         const at = self.checkExpr(arg, ptype);
-        if ai < fd.params.len && at.ok && !self.assignable(ptype, at.ty) {
+        if i < fd.params.len && at.ok && !self.assignable(ptype, at.ty) {
           diag.error(span, .Message(utils.concat(self.a.arena,
             "cannot pass ", self.typeText(at.ty), " as argument '", pname,
             "' of '", name, "' (expected ", self.typeText(ptype), ")")));
         }
       }
-      ai += 1;
     }
 
     let r: ExprTy;
@@ -1536,9 +1668,11 @@ pub struct Sema {
       .Field(fx) => true,
       _ => false,
     };
+
     if is_field {
       return self.checkMethodCall(e, c);
     }
+
     return self.checkCall(e, c);
   }
 
@@ -1547,12 +1681,14 @@ pub struct Sema {
       .Id(n) => n,
       _ => "",
     };
+
     const fn_d = self.fns.lookup(name);
     if fn_d == 0 {
       diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
         "call to undefined function '", name, "'")));
       return fail();
     }
+
     return self.checkFnCall(e, c, fn_d, name, "");
   }
 
@@ -1561,13 +1697,15 @@ pub struct Sema {
       .Field(fx) => fx.name,
       _ => "",
     };
+
     const fn_d = self.modulePubFn(mod, fname);
     if fn_d == 0 {
       diag.error(self.a.exprs.at(c.callee).span, .Message(utils.concat(self.a.arena,
         "module '", display, "' has no public function '", fname, "'")));
       return fail();
     }
-    const stem = moduleStem(self.a.arena, self.a.modules.at(mod).path);
+
+    const stem = utils.moduleStem(self.a.modules.at(mod).path);
     const r = self.checkFnCall(e, c, fn_d, fname, stem);
     return self.qualifyResult(r, stem);
   }
@@ -1593,12 +1731,14 @@ pub struct Sema {
       .Id(n2) => n2,
       _ => "",
     };
+
     let bb: u32 = 0;
     let bname = "";
     match self.a.exprs.at(fbase).kind {
       .Field(fx2) => { bb = fx2.base; bname = fx2.name; },
       _ => {},
-    };
+    }
+
     if base_id.len > 0 {
       if !self.isValueName(base_id) {
         ts_owner = self.types.lookup(base_id);
@@ -1611,7 +1751,7 @@ pub struct Sema {
           ts_owner = self.modulePubType(owner_mod, bname, true);
         }
         if ts_owner != 0 {
-          ts_stem = moduleStem(self.a.arena, self.a.modules.at(owner_mod).path);
+          ts_stem = utils.moduleStem(self.a.modules.at(owner_mod).path);
         }
       }
     }
@@ -1651,7 +1791,8 @@ pub struct Sema {
         .Struct(sd) => { members = sd.members; },
         .Enum(en2) => { is_enum_owner = true; members = en2.methods; },
         _ => {},
-      };
+      }
+
       const kind_str: str = is_enum_owner ? "enum" : "struct";
       const owner_name = self.a.decls.at(ts_owner).name;
 
@@ -1661,6 +1802,7 @@ pub struct Sema {
           kind_str, " '", owner_name, "' has no function '", mname, "'")));
         return fail();
       }
+
       let has_self0 = false;
       match self.a.decls.at(fn_d).kind {
         .Fn(f2) => {
@@ -1670,32 +1812,29 @@ pub struct Sema {
           }
         },
         _ => {},
-      };
+      }
+
       if has_self0 {
         diag.error(fspan, .Message(utils.concat(self.a.arena,
           "method '", mname, "' of ", kind_str, " '", owner_name, "' requires an instance")));
         return fail();
       }
+
       if ts_stem.len > 0 && self.a.decls.at(fn_d).visibility != .Public {
         diag.error(fspan, .Message(utils.concat(self.a.arena,
           "method '", mname, "' of ", kind_str, " '", owner_name, "' is not public")));
         return fail();
       }
-      let qualified = owner_name;
-      if ts_stem.len > 0 {
-        qualified = utils.concat(self.a.arena, ts_stem, ".", owner_name);
-      }
-      let bk: ast.TypeKind = .Struct;
-      if is_enum_owner {
-        bk = .Enum;
-      }
-      self.a.exprs.at(fbase).ty.kind = bk;
-      self.a.exprs.at(fbase).ty.name = qualified;
+
+      self.a.exprs.at(fbase).ty.kind = is_enum_owner ? .Enum : .Struct;
+      self.a.exprs.at(fbase).ty.name = ts_stem.len > 0 ? utils.concat(self.a.arena, ts_stem, ".", owner_name) : owner_name;
       self.a.exprs.at(fbase).ty.elem = 0;
       self.a.exprs.at(fbase).ty.array_length = 0;
+
       let nc = c;
       nc.type_scoped = true;
       self.a.exprs.at(e).kind = .Call(nc);
+
       const tr = self.checkFnCall(e, nc, fn_d, mname, ts_stem);
       return self.qualifyResult(tr, ts_stem);
     }
@@ -1707,9 +1846,8 @@ pub struct Sema {
     }
 
     let recv = self.checkExpr(fbase, unknownTy());
-    if !recv.ok {
-      return fail();
-    }
+    if !recv.ok { return fail(); }
+
     if recv.ty.kind == .Pointer && recv.ty.elem != 0 {
       let nrecv: ExprTy;
       nrecv.ty = self.typeCopy(recv.ty.elem);
@@ -1718,15 +1856,16 @@ pub struct Sema {
     }
 
     let method: u32 = 0;
-    let imported = lastDot(recv.ty.name) >= 0;
+    let imported = utils.lastDot(recv.ty.name) >= 0;
     if recv.ty.kind == .Struct {
       const sd2 = self.types.lookup(recv.ty.name);
       if sd2 != 0 {
         match self.a.decls.at(sd2).kind {
           .Struct(sdd) => { method = self.findFnIn(sdd.members, mname); },
           _ => {},
-        };
+        }
       }
+
       if method == 0 {
         diag.error(fspan, .Message(utils.concat(self.a.arena,
           "struct '", recv.ty.name, "' has no method '", mname, "'")));
@@ -1740,12 +1879,14 @@ pub struct Sema {
           imported = true;
         }
       }
+
       if en_d != 0 {
         match self.a.decls.at(en_d).kind {
           .Enum(edd) => { method = self.findFnIn(edd.methods, mname); },
           _ => {},
         };
       }
+
       if method == 0 {
         diag.error(fspan, .Message(utils.concat(self.a.arena,
           "enum '", recv.ty.name, "' has no method '", mname, "'")));
@@ -1759,6 +1900,7 @@ pub struct Sema {
         "cannot call method '", mname, "' on non-struct type ", self.typeText(nt2))));
       return fail();
     }
+
     if imported && self.a.decls.at(method).visibility != .Public {
       const rk_str: str = recv.ty.kind == .Enum ? "enum" : "struct";
       diag.error(fspan, .Message(utils.concat(self.a.arena,
@@ -1770,12 +1912,14 @@ pub struct Sema {
     match self.a.decls.at(method).kind {
       .Fn(f3) => { mf = f3; },
       _ => { return fail(); },
-    };
+    }
+
     let has_self = false;
     if mf.params.len > 0 {
       const p1 = self.a.extra.get(mf.params.start);
       has_self = self.a.params.at(p1).is_self;
     }
+
     if !has_self {
       diag.error(fspan, .Message(utils.concat(self.a.arena,
         "'", mname, "' does not take 'self'; call it through the type")));
@@ -1783,32 +1927,56 @@ pub struct Sema {
     }
 
     const expected_n: u32 = mf.params.len - 1;
-    let required2: u32 = 0;
-    let qi: u32 = 1;
-    while qi < mf.params.len {
-      const pq = self.a.extra.get(mf.params.start + qi);
-      if self.a.params.at(pq).default_value == 0 {
-        required2 += 1;
-      }
-      qi += 1;
+    const boxed_variadic2 = mf.variadic && !mf.is_extern;
+    let fixed2: u32 = expected_n;
+    if boxed_variadic2 && fixed2 > 0 {
+      fixed2 -= 1;
     }
-    if required2 == expected_n {
-      if c.args.len != expected_n {
-        const argword3: str = expected_n == 1 ? " argument" : " arguments";
+
+    if mf.variadic {
+      if c.args.len < fixed2 {
+        const argword_v: str = fixed2 == 1 ? " argument" : " arguments";
         diag.error(span, .Message(utils.concat(self.a.arena,
-          "'", mname, "' expects ", intText(self.a.arena, expected_n as i64), argword3,
-          " but got ", intText(self.a.arena, c.args.len as i64))));
+          "'", mname, "' expects at least ", utils.intText(self.a.arena, fixed2 as i64), argword_v,
+          " but got ", utils.intText(self.a.arena, c.args.len as i64))));
       }
-    } else if c.args.len < required2 || c.args.len > expected_n {
-      diag.error(span, .Message(utils.concat(self.a.arena,
-        "'", mname, "' expects between ", intText(self.a.arena, required2 as i64),
-        " and ", intText(self.a.arena, expected_n as i64),
-        " arguments but got ", intText(self.a.arena, c.args.len as i64))));
+    } else {
+      let required2: u32 = 0;
+      let qi: u32 = 1;
+      while qi < mf.params.len {
+        const pq = self.a.extra.get(mf.params.start + qi);
+        if self.a.params.at(pq).default_value == 0 {
+          required2 += 1;
+        }
+        qi += 1;
+      }
+      if required2 == expected_n {
+        if c.args.len != expected_n {
+          const argword3: str = expected_n == 1 ? " argument" : " arguments";
+          diag.error(span, .Message(utils.concat(self.a.arena,
+            "'", mname, "' expects ", utils.intText(self.a.arena, expected_n as i64), argword3,
+            " but got ", utils.intText(self.a.arena, c.args.len as i64))));
+        }
+      } else if c.args.len < required2 || c.args.len > expected_n {
+        diag.error(span, .Message(utils.concat(self.a.arena,
+          "'", mname, "' expects between ", utils.intText(self.a.arena, required2 as i64),
+          " and ", utils.intText(self.a.arena, expected_n as i64),
+          " arguments but got ", utils.intText(self.a.arena, c.args.len as i64))));
+      }
     }
 
     let ai2: u32 = 0;
     while ai2 < c.args.len {
       const arg2 = self.a.extra.get(c.args.start + ai2);
+      if boxed_variadic2 && ai2 >= fixed2 {
+        const vt2 = self.checkExpr(arg2, unknownTy());
+        if vt2.ok && !varargBoxable(vt2.ty.kind) {
+          diag.error(self.a.exprs.at(arg2).span, .Message(utils.concat(self.a.arena,
+            "cannot pass ", self.typeText(vt2.ty), " as a variadic argument")));
+        }
+        ai2 += 1;
+        continue;
+      }
       let ptype2 = unknownTy();
       let pn2 = "";
       const pslot = ai2 + 1;
@@ -1832,7 +2000,7 @@ pub struct Sema {
     mr.ty.elem = mf.return_type.elem;
     mr.ty.array_length = mf.return_type.array_length;
     mr.ok = true;
-    const rdot = lastDot(recv.ty.name);
+    const rdot = utils.lastDot(recv.ty.name);
     if rdot >= 0 {
       mr = self.qualifyResult(mr, recv.ty.name[0..rdot]);
     }
@@ -1854,6 +2022,7 @@ pub struct Sema {
           _ => false,
         };
       }
+
       if is_enum {
         const ename = self.a.decls.at(en_d).name;
         const mi = self.enumMemberOf(en_d, fx.name);
@@ -1862,10 +2031,12 @@ pub struct Sema {
             "enum '", ename, "' has no member '", fx.name, "'")));
           return fail();
         }
+
         const tagged = match self.a.decls.at(en_d).kind {
           .Enum(en2) => en2.tagged,
           _ => false,
         };
+
         if tagged {
           self.a.exprs.at(e).kind = .EnumLiteral(ast.EnumLiteralExpr{
             name: self.a.enum_members.at(mi).name,
@@ -1877,7 +2048,7 @@ pub struct Sema {
           return self.checkExpr(e, want);
         }
 
-        self.a.exprs.at(e).kind = .Number(intText(self.a.arena, self.a.enum_members.at(mi).value));
+        self.a.exprs.at(e).kind = .Number(utils.intText(self.a.arena, self.a.enum_members.at(mi).value));
         let fr: ExprTy;
         fr.ty.kind = .Enum;
         fr.ty.name = ename;
@@ -1887,26 +2058,29 @@ pub struct Sema {
     }
 
     let base = self.checkExpr(fx.base, unknownTy());
-    if !base.ok {
-      return fail();
-    }
+    if !base.ok { return fail(); }
+
     if base.ty.kind == .Pointer && base.ty.elem != 0 {
       let nbase: ExprTy;
       nbase.ty = self.typeCopy(base.ty.elem);
       nbase.ok = true;
       base = nbase;
     }
+
     if base.ty.kind == .Str {
       if fx.name == "ptr" {
         return okKind(.Cstr);
       }
+
       if fx.name == "len" {
         return okKind(.I64);
       }
+
       diag.error(span, .Message(utils.concat(self.a.arena,
         "str has no field '", fx.name, "'")));
       return fail();
     }
+
     if base.ty.kind == .Array {
       if fx.name == "len" {
         return okKind(.I64);
@@ -1915,6 +2089,7 @@ pub struct Sema {
         "array has no field '", fx.name, "'")));
       return fail();
     }
+
     if base.ty.kind == .Slice {
       if fx.name == "len" {
         return okKind(.I64);
@@ -1926,6 +2101,7 @@ pub struct Sema {
         "slice has no field '", fx.name, "'")));
       return fail();
     }
+
     if base.ty.kind != .Struct {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "cannot access field '", fx.name, "' of non-struct type ", base.ty.kind.toString())));
@@ -1938,23 +2114,27 @@ pub struct Sema {
       match self.a.decls.at(sd).kind {
         .Struct(sdd) => { fidx = self.findFieldIn(sdd.fields, fx.name); },
         _ => {},
-      };
+      }
     }
+
     if fidx == 0 {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "struct '", base.ty.name, "' has no field '", fx.name, "'")));
       return fail();
     }
-    if lastDot(base.ty.name) >= 0 && self.a.fields.at(fidx).visibility != .Public {
+
+    if utils.lastDot(base.ty.name) >= 0 && self.a.fields.at(fidx).visibility != .Public {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "field '", fx.name, "' of struct '", bareTypeName(base.ty.name), "' is not public")));
       return fail();
     }
+
     let fty = copyOf(&self.a.fields.at(fidx).ty);
-    const bdot = lastDot(base.ty.name);
+    const bdot = utils.lastDot(base.ty.name);
     if bdot >= 0 {
       fty = self.qualifyParamType(fty, base.ty.name[0..bdot]);
     }
+
     let r: ExprTy;
     r.ty.kind = fty.kind;
     r.ty.name = fty.name;
@@ -1979,6 +2159,7 @@ pub struct Sema {
         return fail();
       }
     }
+
     if nsl.module.len > 0 {
       const mod = self.resolveModuleAlias(nsl.module);
       if mod == 0 {
@@ -1992,9 +2173,10 @@ pub struct Sema {
         return fail();
       }
       nsl.type_name = utils.concat(self.a.arena,
-        moduleStem(self.a.arena, self.a.modules.at(mod).path), ".", nsl.type_name);
+        utils.moduleStem(self.a.modules.at(mod).path), ".", nsl.type_name);
       nsl.module = "";
     }
+
     self.a.exprs.at(e).kind = .StructLiteral(nsl);
 
     const sd = self.types.lookup(nsl.type_name);
@@ -2003,23 +2185,25 @@ pub struct Sema {
         "unknown type '", nsl.type_name, "'")));
       return fail();
     }
+
     let fields = ast.Range.empty();
     let is_struct = false;
     match self.a.decls.at(sd).kind {
       .Struct(sdd) => { is_struct = true; fields = sdd.fields; },
       _ => {},
-    };
+    }
+
     if !is_struct {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "'", nsl.type_name, "' is not a struct")));
       return fail();
     }
+
     const sname = self.a.decls.at(sd).name;
-    const imported = lastDot(nsl.type_name) >= 0;
+    const imported = utils.lastDot(nsl.type_name) >= 0;
 
     let all_ok = true;
-    let i: u32 = 0;
-    while i < nsl.inits.len {
+    for i in (0 as u32)..nsl.inits.len {
       const init_i = self.a.extra.get(nsl.inits.start + i);
       const iname = self.a.field_inits.at(init_i).name;
       const ival = self.a.field_inits.at(init_i).value;
@@ -2029,7 +2213,9 @@ pub struct Sema {
       if fidx != 0 {
         fty = copyOf(&self.a.fields.at(fidx).ty);
       }
+
       const value = self.checkExpr(ival, fty);
+
       if fidx == 0 {
         diag.error(ispan, .Message(utils.concat(self.a.arena,
           "struct '", sname, "' has no field '", iname, "'")));
@@ -2044,30 +2230,26 @@ pub struct Sema {
           "' of type ", self.typeText(fty))));
         all_ok = false;
       }
-      i += 1;
     }
 
-    let j: u32 = 0;
-    while j < fields.len {
-      const fd = self.a.extra.get(fields.start + j);
+    for i in (0 as u32)..fields.len {
+      const fd = self.a.extra.get(fields.start + i);
       const fname = self.a.fields.at(fd).name;
       let found = false;
-      let k: u32 = 0;
-      while k < nsl.inits.len {
-        const init_k = self.a.extra.get(nsl.inits.start + k);
+
+      for j in (0 as u32)..nsl.inits.len {
+        const init_k = self.a.extra.get(nsl.inits.start + j);
         if self.a.field_inits.at(init_k).name == fname {
           found = true;
-          k = nsl.inits.len;
-        } else {
-          k += 1;
+          break;
         }
       }
+
       if !found && self.a.fields.at(fd).default_value == 0 {
         diag.error(span, .Message(utils.concat(self.a.arena,
           "missing field '", fname, "' in initializer for '", sname, "'")));
         all_ok = false;
       }
-      j += 1;
     }
 
     let r: ExprTy;
@@ -2084,8 +2266,7 @@ pub struct Sema {
     }
     let elem = unknownTy();
     let all_ok = true;
-    let i: u32 = 0;
-    while i < elements.len {
+    for i in (0 as u32)..elements.len {
       const ei = self.a.extra.get(elements.start + i);
       const et = self.checkExpr(ei, elem_hint);
       if i == 0 {
@@ -2098,8 +2279,8 @@ pub struct Sema {
       if !et.ok {
         all_ok = false;
       }
-      i += 1;
     }
+
     let r: ExprTy;
     r.ty.kind = .Array;
     r.ty.elem = self.a.types.push(elem);
@@ -2114,18 +2295,22 @@ pub struct Sema {
     if !base.ok {
       return fail();
     }
+
     if base.ty.kind != .Array && base.ty.kind != .Slice && base.ty.kind != .Str {
       diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
         "cannot index non-array type ", base.ty.kind.toString())));
       return fail();
     }
+
     if idx.ok && !idx.ty.kind.isInteger() {
       diag.error(self.a.exprs.at(ix.index).span, .Message(utils.concat(self.a.arena,
         "array index must be an integer, got ", idx.ty.kind.toString())));
     }
+
     if base.ty.kind == .Str {
       return okKind(.U8);
     }
+
     let r: ExprTy;
     r.ty = self.typeCopy(base.ty.elem);
     r.ok = true;
@@ -2136,29 +2321,32 @@ pub struct Sema {
     const base = self.checkExpr(sr.base, unknownTy());
     const first = self.checkExpr(sr.start, kindTy(.I64));
     const last = self.checkExpr(sr.end, kindTy(.I64));
-    if !base.ok {
-      return fail();
-    }
+    if !base.ok { return fail(); }
+
     if base.ty.kind != .Array && base.ty.kind != .Slice
       && base.ty.kind != .Str && base.ty.kind != .Cstr {
       diag.error(self.a.exprs.at(e).span, .Message(utils.concat(self.a.arena,
         "cannot slice ", self.typeText(base.ty))));
       return fail();
     }
+
     if first.ok && !first.ty.kind.isInteger() {
       diag.error(self.a.exprs.at(sr.start).span, .Message(utils.concat(self.a.arena,
         "slice bound must be an integer, got ", first.ty.kind.toString())));
     }
+
     if last.ok && !last.ty.kind.isInteger() {
       diag.error(self.a.exprs.at(sr.end).span, .Message(utils.concat(self.a.arena,
         "slice bound must be an integer, got ", last.ty.kind.toString())));
     }
+
     if base.ty.kind == .Str {
       let r: ExprTy;
       r.ty.kind = .Str;
       r.ok = first.ok && last.ok;
       return r;
     }
+
     if base.ty.kind == .Cstr {
       let r2: ExprTy;
       r2.ty.kind = .Slice;
@@ -2166,6 +2354,7 @@ pub struct Sema {
       r2.ok = first.ok && last.ok;
       return r2;
     }
+
     let r3: ExprTy;
     r3.ty.kind = .Slice;
     r3.ty.elem = base.ty.elem;
@@ -2179,6 +2368,7 @@ pub struct Sema {
     while want.kind == .Optional && want.elem != 0 {
       want = self.typeCopy(want.elem);
     }
+
     self.resolveType(&want);
     let enm: u32 = 0;
     if want.name.len > 0 {
@@ -2187,6 +2377,7 @@ pub struct Sema {
         enm = self.importsPubEnum(want.name);
       }
     }
+
     let enm_is_enum = false;
     if enm != 0 {
       enm_is_enum = match self.a.decls.at(enm).kind {
@@ -2194,17 +2385,20 @@ pub struct Sema {
         _ => false,
       };
     }
+
     if want.kind != .Enum || enm == 0 || !enm_is_enum {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "cannot infer enum type for '.", el.name, "'")));
       return fail();
     }
+
     const mi = self.enumMemberOf(enm, el.name);
     if mi == 0 {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "enum '", self.a.decls.at(enm).name, "' has no member '", el.name, "'")));
       return fail();
     }
+
     if self.a.enum_members.at(mi).has_payload {
       if el.payload == 0 {
         diag.error(span, .Message(utils.concat(self.a.arena,
@@ -2212,6 +2406,7 @@ pub struct Sema {
           "' requires a payload of type ", self.typeText(copyOf(&self.a.enum_members.at(mi).payload)))));
         return fail();
       }
+
       const pty = copyOf(&self.a.enum_members.at(mi).payload);
       const pl = self.checkExpr(el.payload, pty);
       if pl.ok && !self.assignable(pty, pl.ty) {
@@ -2223,13 +2418,16 @@ pub struct Sema {
       diag.error(self.a.exprs.at(el.payload).span, .Message(utils.concat(self.a.arena,
         "variant '", el.name, "' of '", bareTypeName(want.name), "' takes no payload")));
     }
+
     const is_tagged = match self.a.decls.at(enm).kind {
       .Enum(ed2) => ed2.tagged,
       _ => false,
     };
+
     if !is_tagged {
-      self.a.exprs.at(e).kind = .Number(intText(self.a.arena, self.a.enum_members.at(mi).value));
+      self.a.exprs.at(e).kind = .Number(utils.intText(self.a.arena, self.a.enum_members.at(mi).value));
     }
+
     let r: ExprTy;
     r.ty.kind = .Enum;
     r.ty.name = want.name;
@@ -2242,9 +2440,11 @@ pub struct Sema {
       .Number(n) => n,
       _ => "",
     };
+
     if num_text.len > 0 {
       return PatInt{v: parseI64Text(num_text), ok: true};
     }
+
     let neg_operand: u32 = 0;
     match self.a.exprs.at(e).kind {
       .Unary(u) => {
@@ -2254,15 +2454,18 @@ pub struct Sema {
       },
       _ => {},
     };
+
     if neg_operand != 0 {
       const inner_text = match self.a.exprs.at(neg_operand).kind {
         .Number(n2) => n2,
         _ => "",
       };
+
       if inner_text.len > 0 {
         return PatInt{v: -parseI64Text(inner_text), ok: true};
       }
     }
+
     return PatInt{v: 0, ok: false};
   }
 
@@ -2272,17 +2475,20 @@ pub struct Sema {
     if !scrut.ok {
       return fail();
     }
+
     const opt_scrut = scrut.ty.kind == .Optional && scrut.ty.elem != 0;
     let inner = scrut.ty;
     if opt_scrut {
       inner = self.typeCopy(scrut.ty.elem);
     }
+
     let enm: u32 = 0;
     if inner.kind == .Enum && inner.name.len > 0 {
       enm = self.types.lookup(inner.name);
       if enm == 0 {
         enm = self.importsPubEnum(inner.name);
       }
+
       if enm == 0 {
         diag.error(self.a.exprs.at(m.scrutinee).span, .Message(utils.concat(self.a.arena,
           "unknown enum '", inner.name, "'")));
@@ -2293,6 +2499,7 @@ pub struct Sema {
         "match requires an enum, bool, or integer value, got ", self.typeText(scrut.ty))));
       return fail();
     }
+
     const int_scrut = inner.kind.isInteger();
     let tagged = false;
     let members = ast.Range.empty();
@@ -2302,6 +2509,7 @@ pub struct Sema {
         _ => {},
       };
     }
+
     if m.arms.len == 0 {
       diag.error(span, .Message("match must have at least one arm"));
       return fail();
@@ -2311,15 +2519,16 @@ pub struct Sema {
     if enm != 0 {
       cc = members.len as i64;
     }
+
     if cc == 0 {
       cc = 1;
     }
+
     let covered = self.a.arena.alloc(cc * sizeof(bool)) as []bool;
-    let zi: i64 = 0;
-    while zi < cc {
-      covered[zi] = false;
-      zi += 1;
+    for i in (0 as i64)..cc {
+      covered[i] = false;
     }
+
     let seen = self.a.arena.alloc((m.arms.len as i64) * sizeof(i64)) as []i64;
     let seen_count: i64 = 0;
     let seen_null = false;
@@ -2399,7 +2608,7 @@ pub struct Sema {
               } else {
                 bind_name = binding;
                 bind_type = copyOf(&self.a.enum_members.at(member).payload);
-                const idot = lastDot(inner.name);
+                const idot = utils.lastDot(inner.name);
                 if idot >= 0 {
                   bind_type = self.qualifyParamType(bind_type, inner.name[0..idot]);
                 }
@@ -2462,7 +2671,7 @@ pub struct Sema {
             while si < seen_count {
               if seen[si] == lov.v {
                 diag.error(qspan, .Message(utils.concat(self.a.arena,
-                  "duplicate match arm for ", intText(self.a.arena, lov.v))));
+                  "duplicate match arm for ", utils.intText(self.a.arena, lov.v))));
                 all_ok = false;
                 si = seen_count;
               } else {
@@ -2690,6 +2899,7 @@ pub struct Sema {
       diag.error(self.a.exprs.at(iff.cond).span, .Message(utils.concat(self.a.arena,
         "if condition must be bool, got ", cond.ty.kind.toString())));
     }
+
     self.checkBlock(iff.then_body, d);
     self.checkBlock(iff.else_body, d);
   }
@@ -2702,6 +2912,7 @@ pub struct Sema {
       diag.error(span, .Message(utils.concat(self.a.arena,
         "binding '", nb.name, "' without an initializer needs a type")));
     }
+
     if nb.init != 0 {
       const init = self.checkExpr(nb.init, nb.ty);
       if nb.ty.kind == .Unknown {
@@ -2737,6 +2948,7 @@ pub struct Sema {
       .Index(ix) => self.a.exprs.at(ix.base).ty.kind == .Str,
       _ => false,
     };
+
     if str_index {
       diag.error(span, .Message("cannot assign through index into str (strings are immutable)"));
       self.checkExpr(asg.value, unknownTy());
@@ -2804,6 +3016,7 @@ pub struct Sema {
       if bitwise {
         valid = lhs.ty.kind == value.ty.kind && lhs.ty.kind.isInteger();
       }
+
       if lhs.ok && value.ok && !valid {
         diag.error(span, .Message(utils.concat(self.a.arena,
           "cannot apply '", asg.op.toString(), "=' to ", self.typeText(lhs.ty),
@@ -2817,6 +3030,7 @@ pub struct Sema {
         .Field(fx) => fx.name,
         _ => "",
       };
+
       if field_name.len > 0 {
         diag.error(self.a.exprs.at(asg.value).span, .Message(utils.concat(self.a.arena,
           "cannot assign ", value.ty.kind.toString(), " to field '", field_name,
@@ -2835,6 +3049,7 @@ pub struct Sema {
       diag.error(self.a.exprs.at(wh.cond).span, .Message(utils.concat(self.a.arena,
         "while condition must be bool, got ", cond.ty.kind.toString())));
     }
+
     self.loop_depth += 1;
     self.checkBlock(wh.body, d);
     self.loop_depth -= 1;
@@ -2895,6 +3110,7 @@ pub struct Sema {
       .Call(c) => true,
       _ => false,
     };
+
     if !is_call {
       diag.error(self.a.exprs.at(e).span, .Message("defer expects a function or method call"));
       return;
@@ -2928,8 +3144,7 @@ pub struct Sema {
     const dspan = self.a.decls.at(d).span;
     const dname = self.a.decls.at(d).name;
     let seen_default = false;
-    let i: u32 = 0;
-    while i < f.params.len {
+    for i in (0 as u32)..f.params.len {
       const pi = self.a.extra.get(f.params.start + i);
       self.resolveType(&self.a.params.at(pi).ty);
       self.checkTypeExists(&self.a.params.at(pi).ty);
@@ -2957,7 +3172,7 @@ pub struct Sema {
           if self.stem.len > 0 {
             match self.a.exprs.at(dv).kind {
               .StructLiteral(sl) => {
-                if sl.type_name.len > 0 && lastDot(sl.type_name) < 0 {
+                if sl.type_name.len > 0 && utils.lastDot(sl.type_name) < 0 {
                   const qualified = utils.concat(self.a.arena, self.stem, ".", sl.type_name);
                   let nsl = sl;
                   nsl.type_name = qualified;
@@ -2974,7 +3189,6 @@ pub struct Sema {
         diag.error(dspan, .Message(utils.concat(self.a.arena,
           "parameter '", pname, "' without a default cannot follow a defaulted parameter")));
       }
-      i += 1;
     }
 
     let nf = f;
@@ -2989,8 +3203,7 @@ pub struct Sema {
     self.has_scope = true;
     self.cur_fn = d;
 
-    i = 0;
-    while i < f.params.len {
+    for i in (0 as u32)..f.params.len {
       const pj = self.a.extra.get(f.params.start + i);
       const pjname = self.a.params.at(pj).name;
       if self.scope.lookup(pjname) >= 0 {
@@ -3004,7 +3217,6 @@ pub struct Sema {
           is_loop_var: false,
         });
       }
-      i += 1;
     }
 
     self.checkBlock(f.body, d);
@@ -3019,41 +3231,35 @@ pub struct Sema {
   }
 
   fn checkMemberBodies(self, members: ast.Range) {
-    let i: u32 = 0;
-    while i < members.len {
+    for i in (0 as u32)..members.len {
       const di = self.a.extra.get(members.start + i);
       match self.a.decls.at(di).kind {
         .Fn(f) => { self.checkFn(di); },
         _ => {},
       };
-      i += 1;
     }
   }
 
   fn checkMethodBodies(self) {
-    let i: i64 = 0;
-    while i < self.local_types {
+    for i in (0 as i64)..self.local_types {
       const di = self.types.items[i].decl;
       match self.a.decls.at(di).kind {
         .Struct(sd) => { self.checkMemberBodies(sd.members); },
         .Enum(ed) => { self.checkMemberBodies(ed.methods); },
         _ => {},
       };
-      i += 1;
     }
   }
 
   fn checkFnBodies(self) {
-    let i: i64 = 0;
-    while i < self.fns.len {
+    for i in (0 as i64)..self.fns.len {
       self.checkFn(self.fns.items[i].decl);
-      i += 1;
     }
   }
 }
 
 pub fn check(a: *ast.Ast, module: u32, require_main: bool) {
-  const stem: str = require_main ? "" : moduleStem(a.arena, a.modules.at(module).path);
+  const stem: str = require_main ? "" : utils.moduleStem(a.modules.at(module).path);
   let s = Sema{
     a: a,
     types: Tab.init(a.arena),
@@ -3084,29 +3290,6 @@ pub fn check(a: *ast.Ast, module: u32, require_main: bool) {
   s.checkFnBodies();
 }
 
-fn moduleStem(arena: *std.mem.Arena, path: str): str {
-  let start: i64 = 0;
-  let i: i64 = path.len - 1;
-  while i >= 0 {
-    if path[i] == '/' {
-      start = i + 1;
-      i = -1;
-    } else {
-      i -= 1;
-    }
-  }
-  let end: i64 = path.len;
-  i = path.len - 1;
-  while i >= start {
-    if path[i] == '.' {
-      end = i;
-      i = start - 1;
-    } else {
-      i -= 1;
-    }
-  }
-  return path[start..end];
-}
 
 const U64_MAX: u64 = 18446744073709551615;
 
@@ -3121,46 +3304,31 @@ fn copyOf(t: *ast.Type): ast.Type {
   return r;
 }
 
-fn lastDot(s: str): i64 {
-  let i: i64 = s.len - 1;
-  while i >= 0 {
-    if s[i] == '.' {
-      return i;
-    }
-    i -= 1;
-  }
-  return -1;
-}
 
 fn enumNameEq(a: str, b: str): bool {
-  if a.len == 0 || b.len == 0 {
-    return false;
-  }
-  if a == b {
-    return true;
-  }
-  const ad = lastDot(a);
-  const bd = lastDot(b);
-  if (ad >= 0 && bd >= 0) || (ad < 0 && bd < 0) {
-    return false;
-  }
+  if a.len == 0 || b.len == 0 { return false; }
+  if a == b { return true; }
+
+  const ad = utils.lastDot(a);
+  const bd = utils.lastDot(b);
+  if (ad >= 0 && bd >= 0) || (ad < 0 && bd < 0) { return false; }
+
   let abare = a;
   if ad >= 0 {
     abare = a[ad + 1..a.len];
   }
+
   let bbare = b;
   if bd >= 0 {
     bbare = b[bd + 1..b.len];
   }
+
   return abare == bbare;
 }
 
 fn bareTypeName(name: str): str {
-  const d = lastDot(name);
-  if d >= 0 {
-    return name[d + 1..name.len];
-  }
-  return name;
+  const d = utils.lastDot(name);
+  return d >= 0 ? name[d + 1..name.len] : name;
 }
 
 struct PatInt {
@@ -3171,49 +3339,48 @@ struct PatInt {
 fn parseI64Text(text: str): i64 {
   let v: i64 = 0;
   let base: i64 = 10;
-  let i: i64 = 0;
+  let start: i64 = 0;
+  // FIXME: Meaby std.ascii.startsWith?
   if text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
     base = 16;
-    i = 2;
+    start = 2;
   }
-  while i < text.len {
+
+  for i in start..text.len {
     const ch = text[i];
-    let d: i64 = 99;
-    if ch >= '0' && ch <= '9' {
-      d = (ch - '0') as i64;
-    } else if base == 16 && ch >= 'a' && ch <= 'f' {
-      d = (ch - 'a') as i64 + 10;
-    } else if base == 16 && ch >= 'A' && ch <= 'F' {
-      d = (ch - 'A') as i64 + 10;
-    }
-    if d >= base {
-      break;
-    }
+
+    const d: i64 = match ch {
+      '0'...'9' => (ch - '0') as i64,
+      'a'...'f' => base == 16 ? (ch - 'a') as i64 + 10 : 99,
+      'A'...'F' => base == 16 ? (ch - 'A') as i64 + 10 : 99,
+      _ => 99,
+    };
+
+    if d >= base { break; }
     v = v * base + d;
-    i += 1;
   }
+
   return v;
 }
 
 fn varargBoxable(kind: ast.TypeKind): bool {
-  let k = kind;
-  return k.isInteger() || k.isFloat() || k == .Bool || k == .Str || k == .Enum;
+  return kind.isInteger() || kind.isFloat() || kind == .Bool || kind == .Str || kind == .Enum;
 }
 
 fn numberIsFloat(text: str): bool {
+  // FIXME: Meaby std.ascii.startsWith?
   if text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
     return false;
   }
-  let i: i64 = 0;
-  while i < text.len {
-    if text[i] == '.' || text[i] == 'e' || text[i] == 'E' {
-      return true;
-    }
-    i += 1;
+
+  for i in (0 as i64)..text.len {
+    if text[i] == '.' || text[i] == 'e' || text[i] == 'E' { return true; }
   }
+
   return false;
 }
 
+// FIXME: Move under ast.TypeKind
 fn intMax(kind: ast.TypeKind): u64 {
   return match kind {
     .I8 => 127,
@@ -3228,22 +3395,3 @@ fn intMax(kind: ast.TypeKind): u64 {
   };
 }
 
-fn intText(arena: *std.mem.Arena, v: i64): str {
-  if v == 0 {
-    return "0";
-  }
-  let buf = arena.alloc(20);
-  let n: i64 = 20;
-  let neg = v < 0;
-  let x: i64 = neg ? -v : v;
-  while x > 0 {
-    n -= 1;
-    buf[n] = (x % 10) as u8 + '0';
-    x /= 10;
-  }
-  if neg {
-    n -= 1;
-    buf[n] = '-';
-  }
-  return buf[n..20] as str;
-}

@@ -1,0 +1,32 @@
+--TEST--
+non-boxable values are rejected as variadic method arguments
+--FILE--
+enum Arg {
+  Int: i64,
+  Uint: i64,
+  Float: f64,
+  Str: str,
+  Bool: bool,
+}
+
+struct P {
+  v: i32,
+}
+
+struct S {
+  v: i32,
+
+  pub fn f(self, tag: str, args: ...): i64 {
+    return args.len;
+  }
+}
+
+pub fn main(): i32 {
+  const s = S{v: 1};
+  const p = P{v: 2};
+  return s.f("t", p) as i32;
+}
+--EXPECTERR--
+zup: error: cannot pass P as a variadic argument [24:19]
+--EXIT--
+1

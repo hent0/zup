@@ -18,10 +18,11 @@ pub fn isAlnum(c: u8): bool {
 }
 
 pub fn isHex(c: u8): bool {
-  return isDigit(c) || match c {
-      'a'...'f',
-      'A'...'F' => true,
-      _ => false,
+  return match c {
+    '0'...'9',
+    'a'...'f',
+    'A'...'F' => true,
+    _ => false,
   };
 }
 

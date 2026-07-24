@@ -1,0 +1,25 @@
+--TEST--
+the variadic parameter of a method must be last
+--FILE--
+struct S {
+  v: i32,
+
+  pub fn f(self, args: ..., tag: str): i64 {
+    return args.len;
+  }
+}
+
+pub fn main(): i32 {
+  return 0;
+}
+--EXPECTERR--
+zup: error: the variadic parameter must be last [4:27]
+zup: error: expected ')' after parameters (got TOKEN_COMMA) [4:27]
+zup: error: expected '{' (got TOKEN_COMMA) [4:27]
+zup: error: expected statement (got TOKEN_COMMA) [4:27]
+zup: error: expected '}' (got TOKEN_COMMA) [4:27]
+zup: error: expected field name (got TOKEN_COMMA) [4:27]
+zup: error: expected '}' after struct body (got TOKEN_COMMA) [4:27]
+zup: error: expected a declaration (got TOKEN_COMMA) [4:27]
+--EXIT--
+1

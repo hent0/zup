@@ -33,6 +33,7 @@ pub struct Source {
       .Ok(c) => c,
       .Err(e) => 0,
     };
+
     while n > 0 {
       total += n;
       n = match file.read(buf[total..size]) {

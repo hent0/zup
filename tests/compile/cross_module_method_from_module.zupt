@@ -1,8 +1,8 @@
 --TEST--
 a method on an imported type resolves correctly when the caller is itself a non-entry module
 --PREPARE--
-printf 'pub struct Box {\n  pub v: i32,\n\n  pub fn bump(self): i32 {\n    self.v += 1;\n    return self.v;\n  }\n}\n\npub fn make(v: i32): Box {\n  return Box{v: v};\n}\n' > /tmp/zup_xbox.zup
-printf 'pub const boxes = import("zup_xbox.zup");\n\npub fn twice(): i32 {\n  let b: boxes.Box = boxes.make(5);\n  b.bump();\n  return b.bump();\n}\n' > /tmp/zup_xmid.zup
+printf 'pub struct Box {\n  pub v: i32,\n\n  pub fn bump(self): i32 {\n    self.v += 1;\n    return self.v;\n  }\n}\n\npub fn make(v: i32): Box {\n  return Box{v: v};\n}\n' > "${TMPDIR:-/tmp}"/zup_xbox.zup
+printf 'pub const boxes = import("zup_xbox.zup");\n\npub fn twice(): i32 {\n  let b: boxes.Box = boxes.make(5);\n  b.bump();\n  return b.bump();\n}\n' > "${TMPDIR:-/tmp}"/zup_xmid.zup
 --FILE--
 const mid = import("zup_xmid.zup");
 
@@ -10,6 +10,6 @@ pub fn main(): i32 {
   return mid.twice();
 }
 --CLEANUP--
-rm -f /tmp/zup_xbox.zup /tmp/zup_xmid.zup
+rm -f "${TMPDIR:-/tmp}"/zup_xbox.zup "${TMPDIR:-/tmp}"/zup_xmid.zup
 --EXIT--
 7

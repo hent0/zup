@@ -1,0 +1,78 @@
+--TEST--
+struct and enum methods can take variadic parameters (instance, pointer receiver, and type-scoped calls)
+--FILE--
+const std = import("std");
+
+// No Arg mirror: variadic params resolve against the pub io.Arg because
+// this module (transitively) imports io through std.
+
+struct Logger {
+  prefix: str,
+
+  pub fn count(self, tag: str, args: ...): i64 {
+    return args.len;
+  }
+
+  pub fn logf(self, args: ...) {
+    std.io.print("{}:", self.prefix);
+    let i: i64 = 0;
+    while i < args.len {
+      match args[i] {
+        .Int(v) => { std.io.print(" i={}", v); },
+        .Uint(u) => { std.io.print(" u={}", u); },
+        .Float(x) => { std.io.print(" f={}", x); },
+        .Str(s) => { std.io.print(" s={}", s); },
+        .Bool(b) => { std.io.print(" b={}", b); },
+      };
+      i += 1;
+    }
+    std.io.print("\n");
+  }
+
+  fn kinds(args: ...) {
+    let i: i64 = 0;
+    while i < args.len {
+      const k: str = match args[i] {
+        .Int(v) => "i",
+        .Uint(u) => "u",
+        .Float(x) => "f",
+        .Str(s) => "s",
+        .Bool(b) => "b",
+      };
+      std.io.print("{}", k);
+      i += 1;
+    }
+    std.io.print("\n");
+  }
+}
+
+enum Color {
+  Red,
+  Green,
+
+  pub fn pick(self, args: ...): i64 {
+    return args.len;
+  }
+}
+
+pub fn main(): i32 {
+  const l = Logger{prefix: "log"};
+  std.io.println("{}", l.count("t"));
+  std.io.println("{}", l.count("t", 1, "two", 3.5, true));
+  l.logf(42, "hi", false);
+  Logger.kinds(1, "a", 2.5, true);
+  const c: Color = .Green;
+  std.io.println("{}", c.pick(10, 20, 30));
+  const lp = &l;
+  std.io.println("{}", lp.count("t", 9));
+  return 0;
+}
+--EXPECT--
+0
+4
+log: i=42 s=hi b=false
+isfb
+3
+1
+--EXIT--
+0

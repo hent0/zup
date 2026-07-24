@@ -28,6 +28,11 @@ pub enum DiagKind {
   Expected: str,
 }
 
+pub enum ErrorFormat {
+  Short,
+  Pretty,
+}
+
 pub struct Diagnostic {
   pub severity: Severity,
   pub span: Span,
@@ -38,6 +43,11 @@ let entries: [256]Diagnostic;
 let count: i64 = 0;
 let errors: i64 = 0;
 let dropped: i64 = 0;
+let error_format: ErrorFormat;
+
+pub fn setErrorFormat(fmt: ErrorFormat) {
+  error_format = fmt;
+}
 
 pub fn error(span: Span, kind: DiagKind) {
   add(.Error, span, kind);
@@ -112,6 +122,9 @@ fn render(path: str, src: str, d: Diagnostic) {
     .Expected(w) => std.io.printerr("expected {}", w),
   };
   std.io.printerrln(" {} [{}:{}]", path, d.span.line, d.span.col);
+  if error_format == .Pretty && d.span.line > 0 {
+    caret(src, d.span);
+  }
 }
 
 fn caret(src: str, span: Span) {

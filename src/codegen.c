@@ -724,6 +724,8 @@ static int collect_expr(ctx_t *ctx, expr_t *expr) {
     return collect_expr(ctx, expr->binary.rhs);
   case EXPR_UNARY:
     return collect_expr(ctx, expr->unary.operand);
+  case EXPR_POST_INCR:
+    return collect_expr(ctx, expr->post_incr.operand);
   case EXPR_STRUCT_LITERAL:
     for (field_init_t *init = expr->struct_literal.inits; init != NULL;
          init = init->next) {
@@ -1013,7 +1015,13 @@ static const char *emit_addr(ctx_t *ctx, expr_t *expr) {
       return local->ptr;
     }
     if (is_fn_param(ctx, expr->id.name)) {
-      return arena_format(ctx->arena, "%%%s", expr->id.name);
+      const char *slot = arena_format(ctx->arena, "%%%s.addr", expr->id.name);
+      record_fn_reg(ctx, slot);
+      const char *type = type_kind_to_ir(expr->type.kind);
+      fprintf(ctx->out, "  %s = alloca %s\n", slot, type);
+      fprintf(ctx->out, "  store %s %%%s, ptr %s\n", type, expr->id.name, slot);
+      add_local(ctx, expr->id.name, expr->type, slot);
+      return slot;
     }
     ctx_global_t *global = find_global(ctx, expr->id.name);
     if (global != NULL) {
@@ -1607,6 +1615,21 @@ static value_t emit_value(ctx_t *ctx, expr_t *expr) {
         .ref = arena_format(ctx->arena, "%%%u", reg),
     };
   }
+  case EXPR_POST_INCR: {
+    /* Postfix: load the current value, store value +/- 1, yield the old. */
+    const char *addr = emit_addr(ctx, expr->post_incr.operand);
+    const char *ty = ir_type(ctx, expr->type);
+    unsigned int oldreg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = load %s, ptr %s\n", oldreg, ty, addr);
+    unsigned int newreg = ctx->reg++;
+    fprintf(ctx->out, "  %%%u = %s %s %%%u, 1\n", newreg,
+            expr->post_incr.increment ? "add" : "sub", ty, oldreg);
+    fprintf(ctx->out, "  store %s %%%u, ptr %s\n", ty, newreg, addr);
+    return (value_t){
+        .type = expr->type,
+        .ref = arena_format(ctx->arena, "%%%u", oldreg),
+    };
+  }
   case EXPR_FIELD: {
     if (expr->field.base->type.kind == TYPE_ARRAY) {
       return (value_t){
@@ -1919,6 +1942,7 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
       for (decl_t *m = methods; m != NULL; m = m->next) {
         if (m->kind == DECL_FN &&
             strcmp(m->name, call->call.callee->field.name) == 0) {
+          fn = m;
           param = m->fn.params;
           param_count = m->fn.params_count;
           if (param != NULL && param->is_self) {
@@ -1949,7 +1973,9 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
     argcoerce[z] = NULL;
   }
   bool boxed_variadic = fn != NULL && fn->fn.variadic && !fn->fn.is_extern;
-  size_t fixed = boxed_variadic ? fn->fn.params_count - 1 : 0;
+  /* param_count already excludes self, so this is the fixed-arg count for
+     methods and free functions alike. */
+  size_t fixed = boxed_variadic ? param_count - 1 : 0;
   expr_t *rest = NULL;
   size_t i = 0;
   for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
@@ -2051,7 +2077,9 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
   }
 
   if (boxed_variadic) {
-    const char *box = "{ i32, i64, double, { ptr, i64 } }";
+    /* io.Arg is a tagged union: { i32 tag, [2 x i64] payload }. Variant
+       order in std/io/io.zup gives the tag values — don't reorder. */
+    const char *box = "{ i32, [2 x i64] }";
     size_t vcount =
         call->call.arg_count > fixed ? call->call.arg_count - fixed : 0;
     unsigned int arr = ctx->reg++;
@@ -2082,11 +2110,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
               kf, box, el);
       fprintf(ctx->out, "  store i32 %d, ptr %%%u\n", tag, kf);
 
+      unsigned int payp = ctx->reg++;
+      fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 1\n",
+              payp, box, el);
       if (kind == TYPE_STR) {
-        unsigned int sf = ctx->reg++;
-        fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 3\n",
-                sf, box, el);
-        emit_aggregate_into(ctx, arena_format(ctx->arena, "%%%u", sf),
+        emit_aggregate_into(ctx, arena_format(ctx->arena, "%%%u", payp),
                             (type_t){.kind = TYPE_STR}, arg);
       } else if (type_is_float(kind)) {
         value_t v = emit_value(ctx, arg);
@@ -2096,17 +2124,11 @@ static value_t emit_call(ctx_t *ctx, expr_t *call, const char *sret_dest) {
           fprintf(ctx->out, "  %%%u = fpext float %s to double\n", ext, ref);
           ref = arena_format(ctx->arena, "%%%u", ext);
         }
-        unsigned int ff = ctx->reg++;
-        fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 2\n",
-                ff, box, el);
-        fprintf(ctx->out, "  store double %s, ptr %%%u\n", ref, ff);
+        fprintf(ctx->out, "  store double %s, ptr %%%u\n", ref, payp);
       } else {
         value_t v = emit_value(ctx, arg);
         const char *ref = widen_index(ctx, v);
-        unsigned int inf = ctx->reg++;
-        fprintf(ctx->out, "  %%%u = getelementptr %s, ptr %%%u, i32 0, i32 1\n",
-                inf, box, el);
-        fprintf(ctx->out, "  store i64 %s, ptr %%%u\n", ref, inf);
+        fprintf(ctx->out, "  store i64 %s, ptr %%%u\n", ref, payp);
       }
     }
 
@@ -2876,7 +2898,9 @@ static int emit_block(ctx_t *ctx, stmt_t *body, type_t ret, const char *fn) {
     }
     case STMT_CONTINUE: {
       emit_defers(ctx, ctx->loop_defer_base);
-      fprintf(ctx->out, "  br label %%cond.%d\n", ctx->loop_label);
+      /* Jump to the loop's step block (per-iteration increment for for/
+         foreach, a no-op hop for while) so continue never skips it. */
+      fprintf(ctx->out, "  br label %%step.%d\n", ctx->loop_label);
       break;
     }
     case STMT_DEFER: {
@@ -2924,8 +2948,10 @@ static int emit_while(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
     return 1;
   }
   if (!block_terminates(stmt->while_loop.body)) {
-    fprintf(ctx->out, "  br label %%cond.%d\n", label);
+    fprintf(ctx->out, "  br label %%step.%d\n", label);
   }
+  fprintf(ctx->out, "step.%d:\n", label);
+  fprintf(ctx->out, "  br label %%cond.%d\n", label);
   fprintf(ctx->out, "endwhile.%d:\n", label);
 
   ctx->loop_label = outer;
@@ -2973,13 +2999,15 @@ static int emit_for(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
 
   if (!block_terminates(stmt->for_loop.body)) {
-    unsigned int load = ctx->reg++;
-    fprintf(ctx->out, "  %%%d = load %s, ptr %s\n", load, type, slot);
-    unsigned int inc = ctx->reg++;
-    fprintf(ctx->out, "  %%%d = add %s %%%d, 1\n", inc, type, load);
-    fprintf(ctx->out, "  store %s %%%d, ptr %s\n", type, inc, slot);
-    fprintf(ctx->out, "  br label %%cond.%d\n", label);
+    fprintf(ctx->out, "  br label %%step.%d\n", label);
   }
+  fprintf(ctx->out, "step.%d:\n", label);
+  unsigned int load = ctx->reg++;
+  fprintf(ctx->out, "  %%%d = load %s, ptr %s\n", load, type, slot);
+  unsigned int inc = ctx->reg++;
+  fprintf(ctx->out, "  %%%d = add %s %%%d, 1\n", inc, type, load);
+  fprintf(ctx->out, "  store %s %%%d, ptr %s\n", type, inc, slot);
+  fprintf(ctx->out, "  br label %%cond.%d\n", label);
 
   fprintf(ctx->out, "endwhile.%d:\n", label);
   ctx->loop_label = outer;
@@ -3074,13 +3102,15 @@ static int emit_foreach(ctx_t *ctx, stmt_t *stmt, type_t ret, const char *fn) {
   }
 
   if (!block_terminates(stmt->for_loop.body)) {
-    unsigned int load = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", load, index);
-    unsigned int inc = ctx->reg++;
-    fprintf(ctx->out, "  %%%u = add i64 %%%u, 1\n", inc, load);
-    fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", inc, index);
-    fprintf(ctx->out, "  br label %%cond.%u\n", label);
+    fprintf(ctx->out, "  br label %%step.%u\n", label);
   }
+  fprintf(ctx->out, "step.%u:\n", label);
+  unsigned int load = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = load i64, ptr %%%u\n", load, index);
+  unsigned int inc = ctx->reg++;
+  fprintf(ctx->out, "  %%%u = add i64 %%%u, 1\n", inc, load);
+  fprintf(ctx->out, "  store i64 %%%u, ptr %%%u\n", inc, index);
+  fprintf(ctx->out, "  br label %%cond.%u\n", label);
 
   fprintf(ctx->out, "endwhile.%u:\n", label);
   ctx->loop_label = outer;
@@ -3205,13 +3235,21 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
   ctx->fn_name = name;
 
   bool sret = is_agg(ctx, decl->fn.return_type);
+  record_fn_reg(ctx, "%entry");
   if (sret) {
     record_fn_reg(ctx, "%sret");
   }
+  bool entry_shadowed = false;
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {
     record_fn_reg(ctx, arena_format(ctx->arena, "%%%s", param->name));
     record_fn_param(ctx, param->name);
+    if (strcmp(param->name, "entry") == 0) {
+      entry_shadowed = true;
+    }
+  }
+  if (entry_shadowed) {
+    record_fn_reg(ctx, "%entry.0");
   }
   fprintf(ctx->out, "define %s%s @%s(",
           decl->visibility == VISIBILITY_PRIVATE ? "internal " : "",
@@ -3238,7 +3276,7 @@ static int emit_fn(ctx_t *ctx, decl_t *decl, const char *name) {
     sep = ", ";
   }
 
-  fprintf(ctx->out, ") {\nentry:\n");
+  fprintf(ctx->out, ") {\n%s:\n", entry_shadowed ? "entry.0" : "entry");
 
   for (const param_t *param = decl->fn.params; param != NULL;
        param = param->next) {

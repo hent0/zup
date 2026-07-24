@@ -1,0 +1,40 @@
+--TEST--
+File.writef and File.writelnf format directly to a file
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_writef_test.txt", .Write) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return 1; },
+  };
+
+  f.writef("{} + {} = {}", 1, 2, 3);
+  f.writelnf(" ({})", true);
+  f.writelnf("pi is roughly {}", 3.14);
+  f.close();
+
+  let back: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_writef_test.txt", .Read) {
+    .Ok(x) => { back = x; },
+    .Err(e) => { return 2; },
+  };
+  let buf: [128]u8;
+  const view: []u8 = buf;
+  const n: i64 = match back.read(view) {
+    .Ok(c) => c,
+    .Err(e) => 0,
+  };
+  back.close();
+
+  std.io.print("{}", buf[0..n] as str);
+  return 0;
+}
+--CLEANUP--
+rm -f /tmp/zup_writef_test.txt
+--EXPECT--
+1 + 2 = 3 (true)
+pi is roughly 3.14
+--EXIT--
+0

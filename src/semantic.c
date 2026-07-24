@@ -416,6 +416,12 @@ static void check_globals(sema_t *sema, decl_t *root, scope_t *globals) {
       continue;
     }
 
+    /* Resolve the annotation like bindings do — without this, enum-typed
+       globals stay Struct-kinded and reject enum values. (stage1's sema
+       already resolves here.) */
+    resolve_qualified_type(sema, &member->global.type);
+    resolve_enum_type(sema, &member->global.type);
+
     if (member->global.init == NULL) {
       if (member->global.type.kind == TYPE_UNKNOWN) {
         diag_error(sema->src, member->line, member->col,
@@ -835,28 +841,52 @@ static exprty_t check_method_call(sema_t *sema, expr_t *call) {
     param = param->next;
   }
   size_t expected = method->fn.params_count - (has_self ? 1 : 0);
-  size_t required = 0;
-  for (param_t *p = param; p != NULL; p = p->next) {
-    if (p->default_value == NULL) {
-      required++;
-    }
-  }
-  if (required == expected) {
-    if (call->call.arg_count != expected) {
+  bool boxed_variadic = method->fn.variadic && !method->fn.is_extern;
+  size_t fixed = boxed_variadic ? expected - 1 : expected;
+  if (method->fn.variadic) {
+    if (call->call.arg_count < fixed) {
       diag_error(sema->src, call->line, call->col,
-                 "'%s' expects %zu argument%s but got %zu", field->field.name,
-                 expected, expected == 1 ? "" : "s", call->call.arg_count);
+                 "'%s' expects at least %zu argument%s but got %zu",
+                 field->field.name, fixed, fixed == 1 ? "" : "s",
+                 call->call.arg_count);
       sema->had_error = true;
     }
-  } else if (call->call.arg_count < required ||
-             call->call.arg_count > expected) {
-    diag_error(sema->src, call->line, call->col,
-               "'%s' expects between %zu and %zu arguments but got %zu",
-               field->field.name, required, expected, call->call.arg_count);
-    sema->had_error = true;
+  } else {
+    size_t required = 0;
+    for (param_t *p = param; p != NULL; p = p->next) {
+      if (p->default_value == NULL) {
+        required++;
+      }
+    }
+    if (required == expected) {
+      if (call->call.arg_count != expected) {
+        diag_error(sema->src, call->line, call->col,
+                   "'%s' expects %zu argument%s but got %zu",
+                   field->field.name, expected, expected == 1 ? "" : "s",
+                   call->call.arg_count);
+        sema->had_error = true;
+      }
+    } else if (call->call.arg_count < required ||
+               call->call.arg_count > expected) {
+      diag_error(sema->src, call->line, call->col,
+                 "'%s' expects between %zu and %zu arguments but got %zu",
+                 field->field.name, required, expected, call->call.arg_count);
+      sema->had_error = true;
+    }
   }
 
-  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next) {
+  size_t index = 0;
+  for (expr_t *arg = call->call.args; arg != NULL; arg = arg->next, index++) {
+    if (boxed_variadic && index >= fixed) {
+      exprty_t at = check_expr(sema, arg, type_from_kind(TYPE_UNKNOWN));
+      if (at.ok && !vararg_boxable(at.kind)) {
+        diag_error(sema->src, arg->line, arg->col,
+                   "cannot pass %s as a variadic argument",
+                   type_to_str(exprty_type(at)));
+        sema->had_error = true;
+      }
+      continue;
+    }
     exprty_t at = check_expr(
         sema, arg, param ? param->type : type_from_kind(TYPE_UNKNOWN));
     if (param != NULL) {
@@ -1248,6 +1278,49 @@ static exprty_t check_expr(sema_t *sema, expr_t *expr, type_t expected) {
     } else {
       result =
           (exprty_t){.kind = is_not ? TYPE_BOOL : operand.kind, .ok = true};
+    }
+    break;
+  }
+  case EXPR_POST_INCR: {
+    expr_t *target = expr->post_incr.operand;
+    const char *op = expr->post_incr.increment ? "++" : "--";
+    exprty_t operand = check_expr(sema, target, expected);
+    if (target->kind != EXPR_ID && target->kind != EXPR_FIELD &&
+        target->kind != EXPR_INDEX) {
+      diag_error(sema->src, expr->line, expr->col,
+                 "'%s' requires a variable, field, or element", op);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    const char *root = lvalue_root(target);
+    const local_t *local =
+        (root && sema->scope) ? scope_lookup(sema->scope, root) : NULL;
+    if (local == NULL && root && sema->globals != NULL) {
+      local = scope_lookup(sema->globals, root);
+    }
+    if (local != NULL && !local->mutable && !lvalue_through_pointer(target)) {
+      diag_error(sema->src, expr->line, expr->col,
+                 local->is_loop_var ? "cannot assign to loop variable '%s'"
+                                    : "cannot assign to const '%s'",
+                 root);
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+      break;
+    }
+    if (!operand.ok) {
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else if (!type_is_integer(operand.kind)) {
+      diag_error(sema->src, expr->line, expr->col, "cannot apply '%s' to %s",
+                 op, type_kind_to_str(operand.kind));
+      sema->had_error = true;
+      result = (exprty_t){.kind = TYPE_VOID, .ok = false};
+    } else {
+      result = (exprty_t){.kind = operand.kind,
+                          .name = operand.name,
+                          .element = operand.element,
+                          .array_length = operand.array_length,
+                          .ok = true};
     }
     break;
   }
@@ -2565,7 +2638,8 @@ static void resolve_fn_signature(sema_t *sema, decl_t *fn) {
         typetab_lookup(sema->types, param->type.element->name) == NULL) {
       for (const modnode_t *node = sema->reachable; node != NULL;
            node = node->next) {
-        if (module_pub_struct(node->mod, param->type.element->name) != NULL) {
+        if (module_pub_struct(node->mod, param->type.element->name) != NULL ||
+            module_pub_enum(node->mod, param->type.element->name) != NULL) {
           param->type.element->name = arena_format(
               sema->arena, "%s.%s", module_stem(node->mod->path, sema->arena),
               param->type.element->name);

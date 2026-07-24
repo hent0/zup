@@ -557,6 +557,18 @@ expr_t *ast_propagate_init(expr_t *operand, arena_t *arena) {
   return expr;
 }
 
+expr_t *ast_post_incr_init(expr_t *operand, bool increment, arena_t *arena) {
+  expr_t *expr = arena_alloc(arena, sizeof(expr_t));
+  expr->kind = EXPR_POST_INCR;
+  expr->line = operand->line;
+  expr->col = operand->col;
+  expr->type = (type_t){.kind = TYPE_UNKNOWN};
+  expr->next = NULL;
+  expr->post_incr.operand = operand;
+  expr->post_incr.increment = increment;
+  return expr;
+}
+
 expr_t *ast_ternary_init(expr_t *cond, expr_t *then, expr_t *els,
                          arena_t *arena) {
   expr_t *expr = arena_alloc(arena, sizeof(expr_t));
@@ -952,6 +964,10 @@ static void dump_expr(const expr_t *expr, int depth) {
     break;
   case EXPR_IMPORT:
     printf("Import \"%s\"\n", expr->import.path);
+    break;
+  case EXPR_POST_INCR:
+    printf("PostIncr %s\n", expr->post_incr.increment ? "++" : "--");
+    dump_expr(expr->post_incr.operand, depth + 1);
     break;
   }
 }

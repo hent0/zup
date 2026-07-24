@@ -2,15 +2,16 @@
 flag: -v=false sets a bool explicitly; a bool flag never consumes the next argument
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let a = std.flag.FlagSet.init("prog");
+  let a = flag.FlagSet.init("prog");
   a.addBool("v", true, "verbose");
   const argv1: []str = ["prog", "-v=false"];
   a.parse(argv1);
   std.io.println("explicit={}", a.getBool("v"));
 
-  let b = std.flag.FlagSet.init("prog");
+  let b = flag.FlagSet.init("prog");
   b.addBool("v", false, "verbose");
   const argv2: []str = ["prog", "-v", "false", "tail"];
   b.parse(argv2);

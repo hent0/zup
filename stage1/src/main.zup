@@ -1,8 +1,11 @@
 const std = import("std");
 const flag = import("flag");
 const compiler = import("compiler.zup");
+const diag = import("diag.zup");
 
 const version = "0.0.1";
+
+extern fn isatty(fd: i32): i32;
 
 fn parseArgs(args: []str): compiler.CompilerOpts {
   let fs = flag.FlagSet.init()
@@ -14,6 +17,7 @@ fn parseArgs(args: []str): compiler.CompilerOpts {
     .addBool("static", false, "compile static")
     .addStrList("l", "link against library (passed to clang as -l<lib>)")
     .addStrList("L", "add library search path")
+    .addStr("error-format", "", "error output format: short|pretty (default: pretty on a terminal)")
     .addBool("version", false, "print version")
     .parse(args);
 
@@ -41,6 +45,17 @@ fn parseArgs(args: []str): compiler.CompilerOpts {
     output = fs.getStr("o");
   }
 
+  const efmt = fs.getStr("error-format");
+  if efmt != "" && efmt != "short" && efmt != "pretty" {
+    std.io.printerrln("error: invalid value \"{}\" for -error-format (expected short|pretty)", efmt);
+    std.exit(2);
+  }
+
+  let error_format: diag.ErrorFormat = .Short;
+  if efmt == "pretty" || (efmt == "" && isatty(2) != 0) {
+    error_format = .Pretty;
+  }
+
   return compiler.CompilerOpts.init(
     rest[0],
     output,
@@ -48,7 +63,8 @@ fn parseArgs(args: []str): compiler.CompilerOpts {
     fs.getBool("keep-ir"),
     fs.getBool("static"),
     fs.getStrList("l"),
-    fs.getStrList("L")
+    fs.getStrList("L"),
+    error_format
   );
 }
 

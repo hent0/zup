@@ -2,9 +2,10 @@
 flag: add*/parse return *FlagSet, so chained calls mutate the original set instead of a copy
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let fs = std.flag.FlagSet.init("prog");
+  let fs = flag.FlagSet.init("prog");
   const argv: []str = ["prog", "-v", "-n=12", "rest"];
   fs.addBool("v", false, "verbose")
     .addInt("n", 7, "count")

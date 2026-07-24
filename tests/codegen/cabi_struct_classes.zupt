@@ -1,0 +1,108 @@
+--TEST--
+SysV classification of struct extern args: 8-byte int packs to i64, 12-byte to (i64, i32), float pair to doubles, mixed to (i64, double), >16 bytes falls back to byval
+--ARGS--
+--ir -o -
+--FILE--
+struct P8 {
+  a: i32,
+  b: i32,
+}
+
+struct P12 {
+  a: i64,
+  b: i32,
+}
+
+struct F16 {
+  x: f64,
+  y: f64,
+}
+
+struct M16 {
+  a: i64,
+  x: f64,
+}
+
+struct B24 {
+  a: i64,
+  b: i64,
+  c: i64,
+}
+
+extern fn take8(p: P8): i32;
+extern fn take12(p: P12): i32;
+extern fn takef(p: F16): f64;
+extern fn takem(p: M16): i32;
+extern fn take24(p: B24): i32;
+
+pub fn main(): i32 {
+  let p8 = P8{a: 1, b: 2};
+  let p12 = P12{a: 3, b: 4};
+  let f16 = F16{x: 1.5, y: 2.5};
+  let m16 = M16{a: 5, x: 3.5};
+  let b24 = B24{a: 6, b: 7, c: 8};
+  take8(p8);
+  take12(p12);
+  takef(f16);
+  takem(m16);
+  take24(b24);
+  return 0;
+}
+--EXPECT--
+%P8 = type { i32, i32 }
+%P12 = type { i64, i32 }
+%F16 = type { double, double }
+%M16 = type { i64, double }
+%B24 = type { i64, i64, i64 }
+declare i32 @take8(i64)
+declare i32 @take12(i64, i32)
+declare double @takef(double, double)
+declare i32 @takem(i64, double)
+declare i32 @take24(ptr byval(%B24))
+define i32 @main() {
+entry:
+  %p8 = alloca %P8
+  %1 = getelementptr %P8, ptr %p8, i32 0, i32 0
+  store i32 1, ptr %1
+  %2 = getelementptr %P8, ptr %p8, i32 0, i32 1
+  store i32 2, ptr %2
+  %p12 = alloca %P12
+  %3 = getelementptr %P12, ptr %p12, i32 0, i32 0
+  store i64 3, ptr %3
+  %4 = getelementptr %P12, ptr %p12, i32 0, i32 1
+  store i32 4, ptr %4
+  %f16 = alloca %F16
+  %5 = getelementptr %F16, ptr %f16, i32 0, i32 0
+  store double 0x3FF8000000000000, ptr %5
+  %6 = getelementptr %F16, ptr %f16, i32 0, i32 1
+  store double 0x4004000000000000, ptr %6
+  %m16 = alloca %M16
+  %7 = getelementptr %M16, ptr %m16, i32 0, i32 0
+  store i64 5, ptr %7
+  %8 = getelementptr %M16, ptr %m16, i32 0, i32 1
+  store double 0x400C000000000000, ptr %8
+  %b24 = alloca %B24
+  %9 = getelementptr %B24, ptr %b24, i32 0, i32 0
+  store i64 6, ptr %9
+  %10 = getelementptr %B24, ptr %b24, i32 0, i32 1
+  store i64 7, ptr %10
+  %11 = getelementptr %B24, ptr %b24, i32 0, i32 2
+  store i64 8, ptr %11
+  %12 = load i64, ptr %p8, align 1
+  %13 = call i32 @take8(i64 %12)
+  %14 = load i64, ptr %p12, align 1
+  %15 = getelementptr i8, ptr %p12, i64 8
+  %16 = load i32, ptr %15, align 1
+  %17 = call i32 @take12(i64 %14, i32 %16)
+  %18 = load double, ptr %f16, align 1
+  %19 = getelementptr i8, ptr %f16, i64 8
+  %20 = load double, ptr %19, align 1
+  %21 = call double @takef(double %18, double %20)
+  %22 = load i64, ptr %m16, align 1
+  %23 = getelementptr i8, ptr %m16, i64 8
+  %24 = load double, ptr %23, align 1
+  %25 = call i32 @takem(i64 %22, double %24)
+  %26 = call i32 @take24(ptr byval(%B24) %b24)
+  ret i32 0
+}
+

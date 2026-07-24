@@ -2,16 +2,17 @@
 flag: "--" ends parsing and is consumed so later flags become positionals; a bare "-" is a positional but flags after it still parse
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let a = std.flag.FlagSet.init("prog");
+  let a = flag.FlagSet.init("prog");
   a.addStr("s", "def", "text");
   const argv1: []str = ["prog", "-s=x", "--", "-s=y", "z"];
   a.parse(argv1);
   const ra = a.args();
   std.io.println("s={} rest.len={} rest0={} rest1={}", a.getStr("s"), ra.len, ra[0], ra[1]);
 
-  let b = std.flag.FlagSet.init("prog");
+  let b = flag.FlagSet.init("prog");
   b.addStr("s", "def", "text");
   const argv2: []str = ["prog", "-", "-s=y"];
   b.parse(argv2);

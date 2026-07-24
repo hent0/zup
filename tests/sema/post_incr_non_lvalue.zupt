@@ -1,0 +1,12 @@
+--TEST--
+postfix ++ as an expression requires an assignable operand
+--FILE--
+pub fn main(): i32 {
+  let a: i32 = 1;
+  let b: i32 = (a + 1)++;
+  return b;
+}
+--EXPECTERR--
+zup: error: '++' requires a variable, field, or element [3:17]
+--EXIT--
+1

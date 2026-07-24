@@ -12,10 +12,14 @@ pub fn main(): i32 {
     .Err(e) => { return 1; },
   };
   f.writeln("roundtrip");
-  f.close();
-  if f.isValid() {
-    return 2;
-  }
+  match f.close() {
+    .Ok(c) => {},
+    .Err(e2) => { return 2; },
+  };
+  match f.close() {
+    .Ok(c2) => { return 2; },
+    .Err(e3) => {},
+  };
 
   let back: std.io.File = std.io.File{fd: -1};
   match std.io.open("/tmp/zup_file_test.txt", .Read) {

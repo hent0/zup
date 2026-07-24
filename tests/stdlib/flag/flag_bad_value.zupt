@@ -2,9 +2,10 @@
 flag: a malformed int value prints an error plus usage to stderr and exits 2
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let fs = std.flag.FlagSet.init("prog");
+  let fs = flag.FlagSet.init("prog");
   fs.addInt("n", 0, "count");
   const argv: []str = ["prog", "-n=12a"];
   fs.parse(argv);

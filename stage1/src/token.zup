@@ -245,8 +245,7 @@ pub struct Token {
     };
   }
 
-  pub fn debug(self) {
-    const out = std.io.stdout();
+  pub fn debug(self, out: *std.io.BufWriter) {
     out.write(self.kind.toString());
     match self.kind {
       .Id,
@@ -262,7 +261,7 @@ pub struct Token {
       },
       _ => {},
     };
-    std.io.println(" [{}:{}]", self.line, self.col);
+    out.writelnf(" [{}:{}]", self.line, self.col);
   }
 
   pub fn numberText(self, arena: *std.mem.Arena): str {
@@ -273,7 +272,7 @@ pub struct Token {
     };
   }
 
-  fn writeValue(self, out: std.io.File) {
+  fn writeValue(self, out: *std.io.BufWriter) {
     match self.value {
       .None => {},
       .Text(s) => writeEscaped(out, s),
@@ -290,9 +289,9 @@ fn hexDigit(v: u8): u8 {
   return v < 10 ? v + '0' : v - 10 + 'A';
 }
 
-pub fn writeByte(file: std.io.File, b: u8) {
+pub fn writeByte(out: *std.io.BufWriter, b: u8) {
   if b == 0 {
-    file.write("0");
+    out.write("0");
     return;
   }
   let buf: [3]u8;
@@ -303,23 +302,23 @@ pub fn writeByte(file: std.io.File, b: u8) {
     buf[i] = (v % 10) + '0';
     v = v / 10;
   }
-  file.write(buf[i..3] as str);
+  out.write(buf[i..3] as str);
 }
 
-pub fn writeEscaped(file: std.io.File, s: str) {
+pub fn writeEscaped(out: *std.io.BufWriter, s: str) {
   let i: i64 = 0;
   while i < s.len {
     const c = s[i];
     match s[i] {
-      '\n' => file.write("\\n"),
-      32...126 => file.write(s[i..i + 1]),
+      '\n' => out.write("\\n"),
+      32...126 => out.write(s[i..i + 1]),
       _ => {
         let hex: [4]u8;
         hex[0] = '\\';
         hex[1] = 'x';
         hex[2] = hexDigit(c / 16);
         hex[3] = hexDigit(c % 16);
-        file.write(hex[0..4] as str);
+        out.write(hex[0..4] as str);
       },
     }
     i++;

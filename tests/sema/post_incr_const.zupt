@@ -1,0 +1,12 @@
+--TEST--
+postfix ++ as an expression still rejects a const target
+--FILE--
+pub fn main(): i32 {
+  const n: i32 = 0;
+  let a: i32 = n++;
+  return a;
+}
+--EXPECTERR--
+zup: error: cannot assign to const 'n' [3:16]
+--EXIT--
+1

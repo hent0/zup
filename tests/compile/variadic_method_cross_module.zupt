@@ -1,0 +1,45 @@
+--TEST--
+a variadic method crosses a module boundary (the Arg mirror lives in the declaring module)
+--PREPARE--
+cat > "${TMPDIR:-/tmp}"/zup_vtally.zup <<'EOF'
+// NOTE: Don't reorder! Mirrors std/io/io.zup's Arg tag order.
+enum Arg {
+  Int: i64, // 0
+  Uint: i64, // 1
+  Float: f64, // 2
+  Str: str, // 3
+  Bool: bool, // 4
+}
+
+pub struct Counter {
+  pub base: i64,
+
+  pub fn init(base: i64): Counter {
+    return {base: base};
+  }
+
+  pub fn tally(self, tag: str, args: ...): i64 {
+    let sum = self.base;
+    let i: i64 = 0;
+    while i < args.len {
+      match args[i] {
+        .Int(v) => { sum += v; },
+        _ => {},
+      };
+      i += 1;
+    }
+    return sum;
+  }
+}
+EOF
+--FILE--
+const m = import("zup_vtally.zup");
+
+pub fn main(): i32 {
+  const c = m.Counter.init(100);
+  return c.tally("t", 1, 2, 3) as i32;
+}
+--CLEANUP--
+rm -f "${TMPDIR:-/tmp}"/zup_vtally.zup
+--EXIT--
+106

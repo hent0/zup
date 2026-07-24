@@ -93,6 +93,7 @@ typedef enum {
   EXPR_PROPAGATE,
   EXPR_TERNARY,
   EXPR_IMPORT,
+  EXPR_POST_INCR,
 } ExprKind;
 
 typedef struct expr expr_t;
@@ -211,6 +212,10 @@ struct expr {
     struct {
       char *path;
     } import;
+    struct {
+      expr_t *operand;
+      bool increment;
+    } post_incr;
   };
 };
 
@@ -414,6 +419,7 @@ expr_t *ast_null_init(token_t token, arena_t *arena);
 expr_t *ast_coalesce_init(expr_t *lhs, expr_t *rhs, arena_t *arena);
 expr_t *ast_unwrap_init(expr_t *operand, arena_t *arena);
 expr_t *ast_propagate_init(expr_t *operand, arena_t *arena);
+expr_t *ast_post_incr_init(expr_t *operand, bool increment, arena_t *arena);
 expr_t *ast_ternary_init(expr_t *cond, expr_t *then, expr_t *els,
                          arena_t *arena);
 expr_t *ast_import_init(token_t token, char *path, arena_t *arena);

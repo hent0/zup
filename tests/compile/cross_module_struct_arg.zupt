@@ -1,7 +1,7 @@
 --TEST--
 a struct value crosses a module boundary into a function whose parameter names the type unqualified
 --PREPARE--
-printf 'pub struct Opts {\n  pub v: i32,\n\n  pub fn init(v: i32): Opts {\n    return {v: v};\n  }\n}\n\npub fn consume(o: Opts): i32 {\n  return o.v;\n}\n' > /tmp/zup_xopts.zup
+printf 'pub struct Opts {\n  pub v: i32,\n\n  pub fn init(v: i32): Opts {\n    return {v: v};\n  }\n}\n\npub fn consume(o: Opts): i32 {\n  return o.v;\n}\n' > "${TMPDIR:-/tmp}"/zup_xopts.zup
 --FILE--
 const m = import("zup_xopts.zup");
 
@@ -10,6 +10,6 @@ pub fn main(): i32 {
   return m.consume(o);
 }
 --CLEANUP--
-rm -f /tmp/zup_xopts.zup
+rm -f "${TMPDIR:-/tmp}"/zup_xopts.zup
 --EXIT--
 7

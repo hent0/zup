@@ -2,9 +2,10 @@
 flag: flags and positionals may be interleaved; parsing does not stop at the first non-flag
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let fs = std.flag.FlagSet.init("prog");
+  let fs = flag.FlagSet.init("prog");
   fs.addBool("tokenize", false, "tokens");
   fs.addStr("o", "", "output");
 

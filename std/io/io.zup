@@ -25,20 +25,13 @@ pub enum LineResult {
   Err: IoError,
 }
 
-// Don't reorder!
-enum ArgKind {
-  Int, // 0
-  Uint, // 1
-  Float, // 2
-  Str, // 3
-  Bool, // 4
-}
-
-struct Arg {
-  pub kind: ArgKind,
-  pub i: i64,
-  pub f: f64,
-  pub s: str,
+// TODO: Move to "builtin" when implemented
+pub enum Arg {
+  Int: i64, // 0
+  Uint: i64, // 1
+  Float: f64, // 2
+  Str: str, // 3
+  Bool: bool, // 4
 }
 
 const stdin_fd = 0;
@@ -60,10 +53,7 @@ pub struct File {
 
   pub fn write(self, s: str): IoResult {
     const n = self.writeRaw(s);
-    if n < 0 {
-      return .Err(.Errno(errno()));
-    }
-    return .Ok(n);
+    return n >= 0 ? .Ok(n) : .Err(.Errno(errno()));
   }
 
   pub fn writeln(self, s: str) {
@@ -71,46 +61,42 @@ pub struct File {
     self.writeRaw("\n");
   }
 
+  pub fn writef(self, fmt: str, args: ...) {
+    self.writev(fmt, args);
+  }
+
+  pub fn writelnf(self, fmt: str, args: ...) {
+    self.writelnv(fmt, args);
+  }
+
+  fn writev(self, fmt: str, args: []Arg) {
+    let storage: [1024]u8;
+    let w = BufWriter.init(self, storage);
+    w.writev(fmt, args);
+    w.flush();
+  }
+
+  fn writelnv(self, fmt: str, args: []Arg) {
+    let storage: [1024]u8;
+    let w = BufWriter.init(self, storage);
+    w.writev(fmt, args);
+    w.write("\n");
+    w.flush();
+  }
+
   pub fn writeInt(self, v: i64) {
-    if v == 0 {
-      self.writeRaw("0");
-      return;
-    }
-
     let buf: [20]u8;
-    let i: i64 = 20;
-    let neg: bool = v < 0;
-    let x: i64 = v;
-    if neg {
-      x = 0 - x;
-    }
-
-    while x > 0 {
-      i--;
-      buf[i] = ((x % 10) + 48) as u8;
-      x /= 10;
-    }
-
-    if neg {
-      i--;
-      buf[i] = '-';
-    }
-    self.writeRaw(buf[i..20] as str);
+    self.writeRaw(intStr(v, buf));
   }
 
   pub fn writeFloat(self, v: f64) {
     let buf: [32]u8;
-    let view: []u8 = buf;
-    let n: i32 = snprintf(view.ptr, 32, "%g", v);
-    self.writeRaw(buf[0..n] as str);
+    self.writeRaw(floatStr(v, buf));
   }
 
   pub fn read(self, buf: []u8): IoResult {
     const n = sys.read(self.fd, buf.ptr, buf.len);
-    if n < 0 {
-      return .Err(.Errno(errno()));
-    }
-    return .Ok(n);
+    return n >= 0 ? .Ok(n) : .Err(.Errno(errno()));
   }
 
   pub fn size(self): IoResult {
@@ -118,6 +104,7 @@ pub struct File {
     if end < 0 {
       return .Err(.Errno(errno()));
     }
+
     sys.lseek(self.fd, 0, 0);
     return .Ok(end);
   }
@@ -131,20 +118,13 @@ pub struct File {
       return .Eof;
     }
 
-    let i: i64 = 0;
-    while i < n {
+    for i in (0 as i64)..n {
       if buf[i] == '\n' {
         return .Ok(buf[0..i] as str);
       }
-
-      i++;
     }
 
     return .Ok(buf[0..n] as str);
-  }
-
-  pub fn isValid(self): bool {
-    return self.fd >= 0;
   }
 
   pub fn close(self): IoResult {
@@ -165,11 +145,7 @@ pub fn open(path: str, mode: Mode): OpenResult {
   };
 
   const fd = sys.open(path.ptr, flags, 438);
-  if fd < 0 {
-    return .Err(classifyOpen(path, errno()));
-  }
-
-  return .Ok(File{fd: fd});
+  return fd >= 0 ? .Ok(File{fd: fd}) : .Err(classifyOpen(path, errno()));
 }
 
 pub fn stdin(): File {
@@ -184,26 +160,100 @@ pub fn stderr(): File {
   return File{fd: stderr_fd};
 }
 
-pub fn println(fmt: str, args: ...) {
-  printv(stdout(), fmt, args);
-  stdout().writeRaw("\n");
+pub struct BufWriter {
+  file: File,
+  buf: []u8,
+  pub len: i64,
+
+  pub fn init(file: File, buf: []u8): BufWriter {
+    return {file: file, buf: buf, len: 0};
+  }
+
+  pub fn write(self, s: str) {
+    if s.len >= self.buf.len {
+      self.flush();
+      self.file.write(s);
+      return;
+    }
+    if self.len + s.len > self.buf.len {
+      self.flush();
+    }
+    let i: i64 = 0;
+    while i < s.len {
+      self.buf[self.len] = s[i];
+      self.len += 1;
+      i += 1;
+    }
+  }
+
+  pub fn writeln(self, s: str) {
+    self.write(s);
+    self.write("\n");
+  }
+
+  pub fn writef(self, fmt: str, args: ...) {
+    self.writev(fmt, args);
+  }
+
+  pub fn writelnf(self, fmt: str, args: ...) {
+    self.writev(fmt, args);
+    self.write("\n");
+  }
+
+  fn writev(self, fmt: str, args: []Arg) {
+    let it = FmtIter.init(fmt);
+    let n: i64 = 0;
+    while true {
+      match it.next() {
+        .Text(t) => { self.write(t); },
+        .Hole => {
+          if n < args.len {
+            let buf: [40]u8;
+            self.write(argStr(args[n], buf));
+          }
+          n++;
+        },
+        .End => { break; },
+      };
+    }
+  }
+
+  pub fn writeInt(self, v: i64) {
+    let tmp: [20]u8;
+    self.write(intStr(v, tmp));
+  }
+
+  pub fn writeFloat(self, v: f64) {
+    let tmp: [32]u8;
+    self.write(floatStr(v, tmp));
+  }
+
+  pub fn flush(self) {
+    if self.len > 0 {
+      self.file.write(self.buf[0..self.len] as str);
+      self.len = 0;
+    }
+  }
 }
 
 pub fn print(fmt: str, args: ...) {
-  printv(stdout(), fmt, args);
+  stdout().writev(fmt, args);
 }
 
-pub fn printerrln(fmt: str, args: ...) {
-  printv(stderr(), fmt, args);
-  stderr().writeRaw("\n");
+pub fn println(fmt: str, args: ...) {
+  stdout().writelnv(fmt, args);
 }
 
 pub fn printerr(fmt: str, args: ...) {
-  printv(stderr(), fmt, args);
+  stderr().writev(fmt, args);
 }
 
-fn boolStr(v: i64): str {
-  return v == 1 ? "true" : "false";
+pub fn printerrln(fmt: str, args: ...) {
+  stderr().writelnv(fmt, args);
+}
+
+fn boolStr(v: bool): str {
+  return v ? "true" : "false";
 }
 
 fn errno(): i32 {
@@ -212,51 +262,83 @@ fn errno(): i32 {
 }
 
 fn classifyOpen(path: str, code: i32): IoError {
-  if code == 2 {
-    return .NotFound(path);
-  }
-  if code == 1 || code == 13 {
-    return .Permission(path);
-  }
-  return .Errno(code);
-}
-
-fn put(file: File, s: str) {
-  file.writeRaw(s);
-}
-
-fn writeArg(f: File, a: Arg) {
-  match a.kind {
-    .Int => f.writeInt(a.i),
-    .Uint => f.writeInt(a.i),
-    .Float => f.writeFloat(a.f),
-    .Str => put(f, a.s),
-    .Bool => put(f, boolStr(a.i)),
+  return match code {
+    2 => .NotFound(path),
+    1, 13 => .Permission(path),
+    _ => .Errno(code),
   };
 }
 
-fn printv(file: File, fmt: str, args: []Arg) {
-  let start: i64 = 0;
-  let i: i64 = 0;
-  let n: i64 = 0;
+enum FmtPiece {
+  Text: str,
+  Hole,
+  End,
+}
 
-  while i + 1 < fmt.len {
-    if fmt[i] == '{' {
-      if fmt[i + 1] == '}' {
-        file.writeRaw(fmt[start..i]);
-        if n < args.len {
-          writeArg(file, args[n]);
-        }
+struct FmtIter {
+  fmt: str,
+  pos: i64,
 
-        n++;
-        i += 2;
-        start = i;
-        continue;
-      }
-    }
-
-    i++;
+  fn init(fmt: str): FmtIter {
+    return FmtIter{fmt: fmt, pos: 0};
   }
 
-  file.writeRaw(fmt[start..fmt.len]);
+  fn next(self): FmtPiece {
+    if self.pos >= self.fmt.len {
+      return .End;
+    }
+    let i = self.pos;
+    while i + 1 < self.fmt.len {
+      if self.fmt[i] == '{' && self.fmt[i + 1] == '}' {
+        if i == self.pos {
+          self.pos = i + 2;
+          return .Hole;
+        }
+        const t = self.fmt[self.pos..i];
+        self.pos = i;
+        return .Text(t);
+      }
+      i++;
+    }
+    const rest = self.fmt[self.pos..self.fmt.len];
+    self.pos = self.fmt.len;
+    return .Text(rest);
+  }
+}
+
+fn intStr(v: i64, buf: []u8): str {
+  if v == 0 {
+    return "0";
+  }
+  let i: i64 = 20;
+  let neg: bool = v < 0;
+  let x: i64 = v;
+  if neg {
+    x = -x;
+  }
+  while x > 0 {
+    i--;
+    buf[i] = ((x % 10) + 48) as u8;
+    x /= 10;
+  }
+  if neg {
+    i--;
+    buf[i] = '-';
+  }
+  return buf[i..20] as str;
+}
+
+fn floatStr(v: f64, buf: []u8): str {
+  const n: i32 = snprintf(buf.ptr, buf.len, "%g", v);
+  return buf[0..n] as str;
+}
+
+fn argStr(a: Arg, buf: []u8): str {
+  return match a {
+    .Int(v) => intStr(v, buf),
+    .Uint(u) => intStr(u, buf),
+    .Float(x) => floatStr(x, buf),
+    .Str(s) => s,
+    .Bool(b) => boolStr(b),
+  };
 }

@@ -1,0 +1,3798 @@
+const std = import("std");
+const ast = import("ast.zup");
+const utils = import("utils.zup");
+
+extern fn strtod(s: cstr, end: i64): f64;
+
+const ctx_reg_start: u32 = 1;
+const ctx_label_start: u32 = 1;
+
+pub struct Ctx {
+  a: *ast.Ast,
+  out: *std.io.BufWriter,
+  strings: StrTab,
+  locals: TypedTab,
+  globals: TypedTab,
+  fn_regs: NameList,
+  fn_params: NameList,
+  externs: NameList,
+  structs: Tab,
+  fns: Tab,
+  defers: ast.U32List,
+  loop_defer_base: i64,
+  reg: u32,
+  label: u32,
+  loop_label: u32,
+  uses_str_eq: bool,
+  uses_memcpy: bool,
+  uses_memset: bool,
+  uses_abort: bool,
+  fn_ret: ast.Type,
+  fn_name: str,
+  prefix: str,
+  module: u32,
+  entry: u32,
+
+  pub fn init(a: *ast.Ast, out: *std.io.BufWriter): Ctx {
+    let ctx: Ctx;
+    ctx.a = a;
+    ctx.out = out;
+    ctx.strings = StrTab.init(a.arena);
+    ctx.globals = TypedTab.init(a.arena);
+    ctx.structs = Tab.init(a.arena);
+    ctx.fns = Tab.init(a.arena);
+    ctx.externs = NameList.init(a.arena);
+    ctx.locals = TypedTab.init(a.arena);
+    ctx.fn_regs = NameList.init(a.arena);
+    ctx.fn_params = NameList.init(a.arena);
+    ctx.defers = ast.U32List.init(a.arena);
+    ctx.reg = ctx_reg_start;
+    ctx.label = ctx_label_start;
+    return ctx;
+  }
+
+  fn resetFn(self, ret: ast.Type, name: str) {
+    self.reg = ctx_reg_start;
+    self.label = ctx_label_start;
+    self.loop_label = 0;
+    self.locals = TypedTab.init(self.a.arena);
+    self.fn_regs = NameList.init(self.a.arena);
+    self.fn_params = NameList.init(self.a.arena);
+    self.defers = ast.U32List.init(self.a.arena);
+    self.loop_defer_base = 0;
+    self.fn_ret = ret;
+    self.fn_name = name;
+  }
+
+  fn recordFnReg(self, ref: str) {
+    self.fn_regs.push(ref);
+  }
+
+  fn claimFnReg(self, name: str): str {
+    let ref = utils.concat(self.a.arena, "%", name);
+    let n: i64 = 1;
+    while self.fn_regs.contains(ref) {
+      ref = utils.concat(self.a.arena, "%", name, ".", utils.intText(self.a.arena, n++));
+    }
+    self.fn_regs.push(ref);
+    return ref;
+  }
+
+  fn mangle(self, name: str): str {
+    return self.prefix.len > 0 ? utils.joinPath(self.a.arena, self.prefix, name) : name;
+  }
+
+  fn structRef(self, name: str): str {
+    return utils.lastDot(name) >= 0 ? name : self.mangle(name);
+  }
+
+  fn isTaggedEnum(self, t: ast.Type): bool {
+    if t.kind != .Enum || t.name.len == 0 { return false; }
+
+    const d = self.structs.lookup(self.structRef(t.name));
+    if d == 0 { return false; }
+
+    return match self.a.decls.at(d).kind {
+      .Enum(e) => e.tagged,
+      _ => false,
+    };
+  }
+
+  fn isAgg(self, t: ast.Type): bool {
+    return isAggregate(t.kind) || self.isTaggedEnum(t);
+  }
+
+  fn collectExpr(self, e: u32): i32 {
+    if e == 0 { return 0; }
+
+    match self.a.exprs.at(e).kind {
+      .String(s) => {
+        self.strings.intern(e);
+      },
+      .Call(c) => {
+        if self.collectExpr(c.callee) != 0 {
+          return 1;
+        }
+
+        for i in (0 as u32)..c.args.len {
+          if self.collectExpr(self.a.extra.get(c.args.start + i)) != 0 {
+            return 1;
+          }
+        }
+      },
+      .Cast(cst) => {
+        return self.collectExpr(cst.operand);
+      },
+      .Binary(b) => {
+        if self.a.exprs.at(b.lhs).ty.kind == .Str && (b.op == .Eq || b.op == .Ne) {
+          self.uses_str_eq = true;
+        }
+
+        if self.collectExpr(b.lhs) != 0 { return 1; }
+
+        return self.collectExpr(b.rhs);
+      },
+      .Unary(un) => {
+        return self.collectExpr(un.operand);
+      },
+      .StructLiteral(sl) => {
+        let j: u32 = 0;
+        while j < sl.inits.len {
+          const init_i = self.a.extra.get(sl.inits.start + j);
+          if self.collectExpr(self.a.field_inits.at(init_i).value) != 0 {
+            return 1;
+          }
+          j++;
+        }
+      },
+      .Field(fx) => {
+        return self.collectExpr(fx.base);
+      },
+      .Array(arr) => {
+        let k: u32 = 0;
+        while k < arr.len {
+          if self.collectExpr(self.a.extra.get(arr.start + k)) != 0 {
+            return 1;
+          }
+          k++;
+        }
+      },
+      .Index(ix) => {
+        if self.collectExpr(ix.base) != 0 { return 1; }
+        return self.collectExpr(ix.index);
+      },
+      .SliceRange(sr) => {
+        if self.collectExpr(sr.base) != 0 || self.collectExpr(sr.start) != 0 { return 1; }
+        return self.collectExpr(sr.end);
+      },
+      .Import(ip) => { return 1; },
+      .Match(mt) => {
+        if self.collectExpr(mt.scrutinee) != 0 {
+          return 1;
+        }
+
+        let ai: u32 = 0;
+        while ai < mt.arms.len {
+          const arm = self.a.extra.get(mt.arms.start + ai);
+          match true {
+            self.collectExpr(self.a.match_arms.at(arm).pattern) != 0,
+            self.collectExpr(self.a.match_arms.at(arm).pattern_end) != 0,
+            self.collectExpr(self.a.match_arms.at(arm).value) != 0,
+            self.collectBlock(self.a.match_arms.at(arm).body) != 0 => { return 1; },
+            _ => { ai++; },
+          };
+        }
+      },
+      .Coalesce(co) => {
+        if self.collectExpr(co.lhs) != 0 { return 1; }
+        return self.collectExpr(co.rhs);
+      },
+      .Unwrap(uw) => { return self.collectExpr(uw); },
+      .Propagate(pg) => { return self.collectExpr(pg); },
+      .Ternary(ter) => {
+        if self.collectExpr(ter.cond) != 0 || self.collectExpr(ter.then) != 0 { return 1; }
+        return self.collectExpr(ter.els);
+      },
+      .EnumLiteral(el) => { return self.collectExpr(el.payload); },
+      .PostIncr(pi) => { return self.collectExpr(pi.operand); },
+      _ => {},
+    };
+    return 0;
+  }
+
+  fn collectBlock(self, body: ast.Range): i32 {
+    for i in (0 as u32)..body.len {
+      if self.collectStmt(self.a.extra.get(body.start + i)) != 0 {
+        return 1;
+      }
+    }
+    return 0;
+  }
+
+  fn collectStmt(self, s: u32): i32 {
+    match self.a.stmts.at(s).kind {
+      .Return(rv) => { return self.collectExpr(rv); },
+      .ExprStmt(ex) => { return self.collectExpr(ex); },
+      .If(iff) => {
+        self.collectExpr(iff.cond);
+        if self.collectBlock(iff.then_body) != 0 { return 1; }
+        return self.collectBlock(iff.else_body);
+      },
+      .Binding(bnd) => { return self.collectExpr(bnd.init); },
+      .Assign(asg) => {
+        if self.collectExpr(asg.target) != 0 { return 1; }
+        return self.collectExpr(asg.value);
+      },
+      .While(wh) => {
+        self.collectExpr(wh.cond);
+        return self.collectBlock(wh.body);
+      },
+      .For(fr) => {
+        self.collectExpr(fr.start);
+        self.collectExpr(fr.end);
+        self.collectExpr(fr.iterable);
+        return self.collectBlock(fr.body);
+      },
+      .Defer(df) => { return self.collectExpr(df); },
+      _ => {},
+    };
+    return 0;
+  }
+
+  fn stringText(self, node: u32): str {
+    return match self.a.exprs.at(node).kind {
+      .String(s) => s,
+      _ => "",
+    };
+  }
+
+  fn emitStringGlobals(self) {
+    for i in (0 as i64)..self.strings.len {
+      const s = self.stringText(self.strings.nodeAt(i));
+      self.out.writef("@.str.{} = private unnamed_addr constant [{} x i8] c\"", i, s.len + 1);
+      emitEscaped(self.a.arena, self.out, s);
+      self.out.write("\\00\"\n");
+    }
+  }
+
+  fn typeAt(self, idx: u32): ast.Type {
+    return copyType(self.a.types.at(idx));
+  }
+
+  fn paramTypeAt(self, pi: u32): ast.Type {
+    return copyType(&self.a.params.at(pi).ty);
+  }
+
+  fn irType(self, t: ast.Type): str {
+    if t.kind == .Struct || self.isTaggedEnum(t) {
+      return utils.concat(self.a.arena, "%", self.structRef(t.name));
+    }
+
+    if t.kind == .Array {
+      return utils.concat(self.a.arena, "[", utils.intText(self.a.arena, t.array_length), " x ", self.irType(self.typeAt(t.elem)), "]");
+    }
+
+    if t.kind == .Optional {
+      return utils.concat(self.a.arena, "{ i1, ", self.irType(self.typeAt(t.elem)), " }");
+    }
+
+    return t.kind.toIr();
+  }
+
+  fn cAbiAlign(self, t: ast.Type): i64 {
+    return match t.kind {
+      .Bool, .I8, .U8 => 1,
+      .I16, .U16 => 2,
+      .I32, .U32, .F32 => 4,
+      .Array => self.cAbiAlign(self.typeAt(t.elem)),
+      .Optional => self.cAbiAlign(self.typeAt(t.elem)),
+      .Struct => self.cAbiAlignStruct(t),
+      _ => 8,
+    };
+  }
+
+  fn cAbiAlignStruct(self, t: ast.Type): i64 {
+    const ref = self.structRef(t.name);
+    const d = self.structs.lookup(ref);
+    if d == 0 { return 8; }
+    let align: i64 = 1;
+    const fields = self.structFields(d);
+
+    for i in (0 as u32)..fields.len {
+      const fi = self.a.extra.get(fields.start + i);
+      const fa = self.cAbiAlign(self.relMemberType(ref, copyType(&self.a.fields.at(fi).ty)));
+      if fa > align { align = fa; }
+    }
+
+    return align;
+  }
+
+  fn cAbiSize(self, t: ast.Type): i64 {
+    return match t.kind {
+      .Bool, .I8, .U8 => 1,
+      .I16, .U16 => 2,
+      .I32, .U32, .F32 => 4,
+      .Str, .Slice => 16,
+      .Array => t.array_length * self.cAbiSize(self.typeAt(t.elem)),
+      .Optional => self.cAbiSizeOptional(t),
+      .Struct => self.cAbiSizeStruct(t),
+      .Enum => self.cAbiSizeEnum(t),
+      _ => 8,
+    };
+  }
+
+  fn cAbiSizeOptional(self, t: ast.Type): i64 {
+    const a = self.cAbiAlign(t);
+    const elem = self.typeAt(t.elem);
+    const n = self.cAbiAlign(elem) + self.cAbiSize(elem);
+    return (n + a - 1) / a * a;
+  }
+
+  fn cAbiSizeStruct(self, t: ast.Type): i64 {
+    const ref = self.structRef(t.name);
+    const d = self.structs.lookup(ref);
+    if d == 0 { return 8; }
+
+    let off: i64 = 0;
+    let align: i64 = 1;
+    const fields = self.structFields(d);
+
+    for i in (0 as u32)..fields.len {
+      const fi = self.a.extra.get(fields.start + i);
+      const fty = self.relMemberType(ref, copyType(&self.a.fields.at(fi).ty));
+      const fa = self.cAbiAlign(fty);
+      off = (off + fa - 1) / fa * fa;
+      off += self.cAbiSize(fty);
+      if fa > align { align = fa; }
+    }
+
+    return (off + align - 1) / align * align;
+  }
+
+  fn cAbiSizeEnum(self, t: ast.Type): i64 {
+    if !self.isTaggedEnum(t) { return 8; }
+    const ref = self.structRef(t.name);
+    return 8 + 8 * self.enumPayloadSlots(self.structs.lookup(ref), ref);
+  }
+
+  fn cabiScanType(self, t: ast.Type, off: i64, s: *CabiScan): bool {
+    if t.kind == .F32 || t.kind == .F64 {
+      cabiMark(s, off, self.cAbiSize(t), true);
+      return true;
+    }
+
+    if t.kind.isInteger() || t.kind == .Bool || t.kind == .Cstr {
+      cabiMark(s, off, self.cAbiSize(t), false);
+      return true;
+    }
+
+    if t.kind == .Str || t.kind == .Slice {
+      cabiMark(s, off, 8, false);
+      cabiMark(s, off + 8, 8, false);
+      return true;
+    }
+
+    if t.kind == .Array {
+      return self.cabiScanArray(t, off, s);
+    }
+
+    if t.kind == .Optional {
+      cabiMark(s, off, 1, false);
+      const elem = self.typeAt(t.elem);
+      return self.cabiScanType(elem, off + self.cAbiAlign(elem), s);
+    }
+
+    if t.kind == .Struct {
+      return self.cabiScanStruct(t, off, s);
+    }
+
+    if t.kind == .Enum {
+      cabiMark(s, off, self.cAbiSize(t), false);
+      return true;
+    }
+
+    return false;
+  }
+
+  fn cabiScanArray(self, t: ast.Type, off: i64, s: *CabiScan): bool {
+    const elem = self.typeAt(t.elem);
+    const es = self.cAbiSize(elem);
+
+    for i in (0 as i64)..t.array_length {
+      if !self.cabiScanType(elem, off + i * es, s) { return false; }
+    }
+
+    return true;
+  }
+
+  fn cabiScanStruct(self, t: ast.Type, off: i64, s: *CabiScan): bool {
+    const d = self.structs.lookup(self.structRef(t.name));
+    if d == 0 { return false; }
+
+    let o: i64 = 0;
+    const fields = self.structFields(d);
+
+    for i in (0 as u32)..fields.len {
+      const fi = self.a.extra.get(fields.start + i);
+      const fty = copyType(&self.a.fields.at(fi).ty);
+      const fa = self.cAbiAlign(fty);
+      o = (o + fa - 1) / fa * fa;
+      if !self.cabiScanType(fty, off + o, s) { return false; }
+      o += self.cAbiSize(fty);
+    }
+
+    return true;
+  }
+
+  fn cabiClassify(self, t: ast.Type): Cabi {
+    let r: Cabi;
+    if t.kind != .Struct { return r; }
+
+    const size = self.cAbiSize(t);
+    if size == 0 || size > 16 { return r; }
+
+    let s: CabiScan;
+    if !self.cabiScanType(t, 0, &s) { return r; }
+
+    r.n = size > 8 ? 2 : 1;
+
+    for i in (0 as i64)..r.n {
+      let ty = "";
+      if s.present[i] && !s.has_int[i] {
+        ty = s.end[i] <= 4 ? "float" : "double";
+      } else {
+        const used: i64 = s.present[i] ? s.end[i] : 8;
+        ty = utils.concat(self.a.arena, "i", utils.intText(self.a.arena, used * 8));
+      }
+
+      if i == 0 {
+        r.ty0 = ty;
+      } else {
+        r.ty1 = ty;
+      }
+    }
+
+    return r;
+  }
+
+  fn cabiLoadArgs(self, addr: str, c: Cabi): str {
+    const lo = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}, align 1\n", lo, c.ty0, addr);
+
+    if c.n == 1 {
+      return utils.concat(self.a.arena, c.ty0, " %", utils.intText(self.a.arena, lo as i64));
+    }
+
+    const p = self.nextReg();
+    self.out.writef("  %{} = getelementptr i8, ptr {}, i64 8\n", p, addr);
+
+    const hi = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr %{}, align 1\n", hi, c.ty1, p);
+
+    return utils.concat(self.a.arena, c.ty0, " %", utils.intText(self.a.arena, lo as i64), ", ", c.ty1, " %", utils.intText(self.a.arena, hi as i64));
+  }
+
+  fn rootMembersOf(self, m: u32): ast.Range {
+    return match self.a.decls.at(self.a.modules.at(m).root).kind {
+      .Container(members) => members,
+      _ => ast.Range.empty(),
+    };
+  }
+
+  fn findImportIn(self, members: ast.Range, name: str, pub_only: bool): u32 {
+    for i in (0 as u32)..members.len {
+      const di = self.a.extra.get(members.start + i);
+      if !pub_only || self.a.decls.at(di).visibility == .Public {
+        match self.a.decls.at(di).kind {
+          .Import(imp) => {
+            if self.a.decls.at(di).name == name {
+              return imp.resolved;
+            }
+          },
+          _ => {},
+        };
+      }
+    }
+
+    return 0;
+  }
+
+  fn modulePath(self, e: u32): u32 {
+    match self.a.exprs.at(e).kind {
+      .Id(n) => {
+        return self.findImportIn(self.rootMembersOf(self.module), n, false);
+      },
+      .Field(fx) => {
+        const base = self.modulePath(fx.base);
+        if base == 0 { return 0; }
+        return self.findImportIn(self.rootMembersOf(base), fx.name, true);
+      },
+      _ => { return 0; },
+    };
+    return 0;
+  }
+
+  fn moduleFn(self, m: u32, name: str): u32 {
+    const members = self.rootMembersOf(m);
+    for i in (0 as u32)..members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).visibility == .Public && self.a.decls.at(di).name == name {
+        match self.a.decls.at(di).kind {
+          .Fn(f) => { return di; },
+          _ => {},
+        };
+      }
+    }
+
+    return 0;
+  }
+
+  fn findFnIn(self, members: ast.Range, name: str): u32 {
+    for i in (0 as u32)..members.len {
+      const di = self.a.extra.get(members.start + i);
+      if self.a.decls.at(di).name == name {
+        match self.a.decls.at(di).kind {
+          .Fn(f) => { return di; },
+          _ => {},
+        };
+      }
+    }
+
+    return 0;
+  }
+
+  fn findFnInDecl(self, owner: u32, name: str): u32 {
+    return match self.a.decls.at(owner).kind {
+      .Struct(sd) => self.findFnIn(sd.members, name),
+      .Enum(ed) => self.findFnIn(ed.methods, name),
+      _ => 0,
+    };
+  }
+
+  fn cabiRetType(self, c: Cabi): str {
+    return c.n == 2 ? utils.concat(self.a.arena, "{ ", c.ty0, ", ", c.ty1, " }") : c.ty0;
+  }
+
+  fn lvalueRootName(self, e: u32): str {
+    let cur = e;
+    while true {
+      match self.a.exprs.at(cur).kind {
+        .Field(fx) => { cur = fx.base; },
+        _ => { break; },
+      };
+    }
+
+    return match self.a.exprs.at(cur).kind {
+      .Id(n) => n,
+      _ => "",
+    };
+  }
+
+  fn stmtAssigns(self, body: ast.Range, name: str): bool {
+    for i in (0 as u32)..body.len {
+      const s = self.a.extra.get(body.start + i);
+      match self.a.stmts.at(s).kind {
+        .Assign(asg) => {
+          const root = self.lvalueRootName(asg.target);
+          if root.len > 0 && root == name {
+            return true;
+          }
+        },
+        .If(iff) => {
+          if self.stmtAssigns(iff.then_body, name) || self.stmtAssigns(iff.else_body, name) {
+            return true;
+          }
+        },
+        .While(wh) => {
+          if self.stmtAssigns(wh.body, name) {
+            return true;
+          }
+        },
+        .For(fr) => {
+          if self.stmtAssigns(fr.body, name) {
+            return true;
+          }
+        },
+        _ => {},
+      }
+    }
+
+    return false;
+  }
+
+  fn emitExternFn(self, d: u32) {
+    const name = self.a.decls.at(d).name;
+    if self.externs.contains(name) { return; }
+
+    self.externs.push(name);
+
+    match self.a.decls.at(d).kind {
+      .Fn(f) => {
+        const retc = self.cabiClassify(f.return_type);
+        const sret = self.isAgg(f.return_type) && retc.n == 0;
+
+        const ret_ty = match true {
+          retc.n > 0 => self.cabiRetType(retc),
+          sret => "void",
+          _ => self.irType(f.return_type),
+        };
+
+        self.out.writef("declare {} @{}(", ret_ty, name);
+
+        let sep = "";
+        if sret {
+          self.out.writef("ptr sret({})", self.irType(f.return_type));
+          sep = ", ";
+        }
+
+        for i in (0 as u32)..f.params.len {
+          const pi = self.a.extra.get(f.params.start + i);
+          const pty = self.paramTypeAt(pi);
+          self.out.write(sep);
+          if self.isAgg(pty) {
+            const pc = self.cabiClassify(pty);
+            match pc.n {
+              1 => { self.out.write(pc.ty0); },
+              2 => { self.out.writef("{}, {}", pc.ty0, pc.ty1); },
+              _ => { self.out.writef("ptr byval({})", self.irType(pty)); },
+            }
+          } else {
+            self.out.write(self.irType(pty));
+          }
+          sep = ", ";
+        }
+
+        if f.variadic { self.out.writef("{}...", sep); }
+        self.out.write(")\n");
+      },
+      _ => {},
+    };
+  }
+
+  fn emitFn(self, d: u32, name: str): i32 {
+    return match self.a.decls.at(d).kind {
+      .Fn(f) => self.emitFnInner(d, f, name),
+      _ => 0,
+    };
+  }
+
+  fn emitFnInner(self, d: u32, f: ast.FnDecl, name: str): i32 {
+    self.resetFn(f.return_type, name);
+
+    const sret = self.isAgg(f.return_type);
+    self.recordFnReg("%entry");
+
+    if sret { self.recordFnReg("%sret"); }
+
+    let entry_shadowed = false;
+
+    for i in (0 as u32)..f.params.len {
+      const pi = self.a.extra.get(f.params.start + i);
+      const pname = self.a.params.at(pi).name;
+      self.recordFnReg(utils.concat(self.a.arena, "%", pname));
+      self.fn_params.push(pname);
+      if pname == "entry" {
+        entry_shadowed = true;
+      }
+    }
+
+    if entry_shadowed { self.recordFnReg("%entry.0"); }
+
+    self.out.write("define ");
+    if self.a.decls.at(d).visibility == .Private {
+      self.out.write("internal ");
+    }
+
+    if sret {
+      self.out.write("void");
+    } else {
+      self.out.write(self.irType(f.return_type));
+    }
+
+    self.out.writef(" @{}(", self.mangle(name));
+
+    let sep = "";
+    if sret {
+      self.out.writef("ptr sret({}) %sret", self.irType(f.return_type));
+      sep = ", ";
+    }
+
+    for i in (0 as u32)..f.params.len {
+      const pj = self.a.extra.get(f.params.start + i);
+      const pjname = self.a.params.at(pj).name;
+      const pjty = self.paramTypeAt(pj);
+      self.out.write(sep);
+
+      match true {
+        self.a.params.at(pj).is_self => { self.out.writef("ptr %{}", pjname); },
+        self.isAgg(pjty) => { self.out.writef("ptr byval({}) %{}", self.irType(pjty), pjname); },
+        _ => { self.out.writef("{} %{}", self.irType(pjty), pjname); },
+      }
+      sep = ", ";
+    }
+
+    if entry_shadowed {
+      self.out.write(") {\nentry.0:\n");
+    } else {
+      self.out.write(") {\nentry:\n");
+    }
+
+    for i in (0 as u32)..f.params.len {
+      const pk = self.a.extra.get(f.params.start + i);
+      const pkname = self.a.params.at(pk).name;
+      const pkty = self.paramTypeAt(pk);
+      if self.a.params.at(pk).is_self || self.isAgg(pkty) {
+        self.locals.push(pkname, pkty, utils.concat(self.a.arena, "%", pkname));
+      } else if self.a.params.at(pk).mutable && self.stmtAssigns(f.body, pkname) {
+        const slot = utils.concat(self.a.arena, "%", pkname, ".addr");
+        self.recordFnReg(slot);
+        const ty_ir = pkty.kind.toIr();
+        self.out.writef("  {} = alloca {}\n", slot, ty_ir);
+        self.out.writef("  store {} %{}, ptr {}\n", ty_ir, pkname, slot);
+        self.locals.push(pkname, pkty, slot);
+      }
+    }
+
+    if self.emitBlock(f.body, f.return_type, self.a.decls.at(d).name) != 0 { return 1; }
+
+    if f.return_type.kind == .Void && !self.blockTerminates(f.body) {
+      self.out.write("  ret void\n");
+    }
+
+    self.out.write("}\n\n");
+    return 0;
+  }
+
+  fn emitBlock(self, body: ast.Range, ret: ast.Type, fname: str): i32 {
+    const defer_base = self.defers.len;
+    let terminated = false;
+
+    for i in (0 as u32)..body.len {
+      const s = self.a.extra.get(body.start + i);
+      match self.a.stmts.at(s).kind {
+        .Return(rv) => {
+          if self.emitReturn(rv, ret, fname) != 0 {
+            return 1;
+          }
+        },
+        .ExprStmt(ex) => {
+          if self.emitExpr(ex) != 0 {
+            return 1;
+          }
+        },
+        .Binding(bnd) => {
+          const ptr = self.claimFnReg(bnd.name);
+          self.out.writef("  {} = alloca {}\n", ptr, self.irType(bnd.ty));
+          self.locals.push(bnd.name, bnd.ty, ptr);
+          if bnd.init == 0 {
+            if bnd.ty.kind == .Struct || bnd.ty.kind == .Array {
+              self.uses_memset = true;
+              self.out.writef(
+                "  call void @llvm.memset.p0.i64(ptr {}, i8 0, i64 ptrtoint (ptr getelementptr ({}, ptr null, i32 1) to i64), i1 false)\n",
+                ptr, self.irType(bnd.ty));
+            } else {
+              let zv = zeroValue(bnd.ty.kind);
+              if self.isAgg(bnd.ty) {
+                zv = "zeroinitializer";
+              }
+              self.out.writef("  store {} {}, ptr {}\n", self.irType(bnd.ty), zv, ptr);
+            }
+          } else if self.isAgg(bnd.ty) {
+            self.emitAggregateInto(ptr, bnd.ty, bnd.init);
+          } else {
+            const value = self.emitValue(bnd.init);
+            self.out.writef("  store {} {}, ptr {}\n", bnd.ty.kind.toIr(), value.ref, ptr);
+          }
+        },
+        .Assign(asg) => { self.emitAssign(asg); },
+        .If(iff) => {
+          if self.emitCondition(iff, ret, fname) != 0 {
+            return 1;
+          }
+        },
+        .While(wh) => {
+          if self.emitWhile(wh, ret, fname) != 0 {
+            return 1;
+          }
+        },
+        .For(fr) => {
+          if self.emitFor(fr, ret, fname) != 0 {
+            return 1;
+          }
+        },
+        .Break => {
+          self.emitDefers(self.loop_defer_base);
+          self.out.writef("  br label %endwhile.{}\n", self.loop_label);
+        },
+        .Continue => {
+          self.emitDefers(self.loop_defer_base);
+          self.out.writef("  br label %step.{}\n", self.loop_label);
+        },
+        .Defer(df) => {
+          self.defers.push(df);
+        },
+      };
+      if self.stmtTerminates(s) {
+        terminated = true;
+        break;
+      }
+    }
+
+    if !terminated {
+      self.emitDefers(defer_base);
+    }
+
+    self.defers.len = defer_base;
+    return 0;
+  }
+
+  fn emitCondition(self, iff: ast.IfStmt, ret: ast.Type, fname: str): i32 {
+    const has_else = iff.else_body.len > 0;
+    const then_term = self.blockTerminates(iff.then_body);
+    const else_term = has_else && self.blockTerminates(iff.else_body);
+    const merge = !has_else || !then_term || !else_term;
+
+    const cond = self.emitValue(iff.cond);
+    const label = self.nextLabel();
+
+    const target = has_else ? "else" : "endif";
+    self.out.writef("  br i1 {}, label %then.{}, label %{}.{}\n", cond.ref, label, target, label);
+
+    self.out.writef("then.{}:\n", label);
+    if self.emitBlock(iff.then_body, ret, fname) != 0 { return 1; }
+
+    if !then_term {
+      self.out.writef("  br label %endif.{}\n", label);
+    }
+
+    if has_else {
+      self.out.writef("else.{}:\n", label);
+      if self.emitBlock(iff.else_body, ret, fname) != 0 { return 1; }
+
+      if !else_term {
+        self.out.writef("  br label %endif.{}\n", label);
+      }
+    }
+
+    if merge {
+      self.out.writef("endif.{}:\n", label);
+    }
+
+    return 0;
+  }
+
+  fn emitWhile(self, wh: ast.WhileStmt, ret: ast.Type, fname: str): i32 {
+    const label = self.nextLabel();
+    const outer = self.loop_label;
+    const outer_defer_base = self.loop_defer_base;
+    self.loop_label = label;
+    self.loop_defer_base = self.defers.len;
+
+    self.out.writef("  br label %cond.{}\n", label);
+    self.out.writef("cond.{}:\n", label);
+
+    const cond = self.emitValue(wh.cond);
+    self.out.writef("  br i1 {}, label %body.{}, label %endwhile.{}\n", cond.ref, label, label);
+    self.out.writef("body.{}:\n", label);
+
+    if self.emitBlock(wh.body, ret, fname) != 0 { return 1; }
+
+    if !self.blockTerminates(wh.body) {
+      self.out.writef("  br label %step.{}\n", label);
+    }
+    self.out.writef("step.{}:\n", label);
+    self.out.writef("  br label %cond.{}\n", label);
+
+    self.out.writef("endwhile.{}:\n", label);
+
+    self.loop_label = outer;
+    self.loop_defer_base = outer_defer_base;
+    return 0;
+  }
+
+  fn emitFor(self, fr: ast.ForStmt, ret: ast.Type, fname: str): i32 {
+    if fr.iterable != 0 {
+      return self.emitForeach(fr, ret, fname);
+    }
+
+    const start_kind = self.a.exprs.at(fr.start).ty.kind;
+    const ty = start_kind.toIr();
+    const slot = self.claimFnReg(fr.variable);
+    self.out.writef("  {} = alloca {}\n", slot, ty);
+
+    const start = self.emitValue(fr.start);
+    self.out.writef("  store {} {}, ptr {}\n", ty, start.ref, slot);
+    self.locals.push(fr.variable, kindTy(start_kind), slot);
+
+    const label = self.nextLabel();
+    const outer = self.loop_label;
+    const outer_defer_base = self.loop_defer_base;
+    self.loop_label = label;
+    self.loop_defer_base = self.defers.len;
+
+    self.out.writef("  br label %cond.{}\n", label);
+    self.out.writef("cond.{}:\n", label);
+    const current = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", current, ty, slot);
+    const endv = self.emitValue(fr.end);
+    const cmp = self.nextReg();
+    self.out.writef("  %{} = icmp slt {} %{}, {}\n", cmp, ty, current, endv.ref);
+    self.out.writef("  br i1 %{}, label %body.{}, label %endwhile.{}\n", cmp, label, label);
+
+    self.out.writef("body.{}:\n", label);
+    if self.emitBlock(fr.body, ret, fname) != 0 { return 1; }
+
+    if !self.blockTerminates(fr.body) {
+      self.out.writef("  br label %step.{}\n", label);
+    }
+    self.out.writef("step.{}:\n", label);
+    const load = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", load, ty, slot);
+    const inc = self.nextReg();
+    self.out.writef("  %{} = add {} %{}, 1\n", inc, ty, load);
+    self.out.writef("  store {} %{}, ptr {}\n", ty, inc, slot);
+    self.out.writef("  br label %cond.{}\n", label);
+
+    self.out.writef("endwhile.{}:\n", label);
+    self.loop_label = outer;
+    self.loop_defer_base = outer_defer_base;
+    return 0;
+  }
+
+  fn emitForeach(self, fr: ast.ForStmt, ret: ast.Type, fname: str): i32 {
+    const iter = fr.iterable;
+    const iter_ty = copyType(&self.a.exprs.at(iter).ty);
+    const is_slice = iter_ty.kind == .Slice;
+
+    const elem = self.typeAt(iter_ty.elem);
+    const elem_ir = self.irType(elem);
+
+    const is_arr_lit = match self.a.exprs.at(iter).kind {
+      .Array(a2) => true,
+      _ => false,
+    };
+
+    let base = "";
+    if is_slice {
+      base = self.emitAddr(iter);
+    } else if is_arr_lit {
+      const slot0 = self.nextReg();
+      self.out.writef("  %{} = alloca {}\n", slot0, self.irType(iter_ty));
+      base = self.regRef(slot0);
+      self.emitStructInto(base, iter);
+    } else {
+      base = self.emitAddr(iter);
+    }
+
+    const xslot = self.claimFnReg(fr.variable);
+    self.out.writef("  {} = alloca {}\n", xslot, elem_ir);
+    self.locals.push(fr.variable, elem, xslot);
+
+    const index = self.nextReg();
+    self.out.writef("  %{} = alloca i64\n", index);
+    self.out.writef("  store i64 0, ptr %{}\n", index);
+
+    const label = self.nextLabel();
+    const outer = self.loop_label;
+    const outer_defer_base = self.loop_defer_base;
+    self.loop_label = label;
+    self.loop_defer_base = self.defers.len;
+
+    self.out.writef("  br label %cond.{}\n", label);
+    self.out.writef("cond.{}:\n", label);
+    const cur = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", cur, index);
+
+    let len = "";
+    if is_slice {
+      const len_ptr = self.nextReg();
+      self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", len_ptr, base);
+      const len_val = self.nextReg();
+      self.out.writef("  %{} = load i64, ptr %{}\n", len_val, len_ptr);
+      len = self.regRef(len_val);
+    } else {
+      len = utils.intText(self.a.arena, iter_ty.array_length);
+    }
+
+    const cmp = self.nextReg();
+    self.out.writef("  %{} = icmp slt i64 %{}, {}\n", cmp, cur, len);
+    self.out.writef("  br i1 %{}, label %body.{}, label %endwhile.{}\n", cmp, label, label);
+
+    self.out.writef("body.{}:\n", label);
+    const bidx = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", bidx, index);
+
+    let elem_ptr: u32 = 0;
+    if is_slice {
+      const data_ptr = self.nextReg();
+      self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", data_ptr, base);
+
+      const data = self.nextReg();
+      self.out.writef("  %{} = load ptr, ptr %{}\n", data, data_ptr);
+      elem_ptr = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr %{}, i64 %{}\n", elem_ptr, elem_ir, data, bidx);
+    } else {
+      elem_ptr = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i64 %{}\n", elem_ptr, self.irType(iter_ty), base, bidx);
+    }
+
+    const elem_val = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr %{}\n", elem_val, elem_ir, elem_ptr);
+    self.out.writef("  store {} %{}, ptr {}\n", elem_ir, elem_val, xslot);
+
+    if self.emitBlock(fr.body, ret, fname) != 0 { return 1; }
+
+    if !self.blockTerminates(fr.body) {
+      self.out.writef("  br label %step.{}\n", label);
+    }
+
+    self.out.writef("step.{}:\n", label);
+    const load2 = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", load2, index);
+
+    const inc2 = self.nextReg();
+    self.out.writef("  %{} = add i64 %{}, 1\n", inc2, load2);
+    self.out.writef("  store i64 %{}, ptr %{}\n", inc2, index);
+    self.out.writef("  br label %cond.{}\n", label);
+
+    self.out.writef("endwhile.{}:\n", label);
+    self.loop_label = outer;
+    self.loop_defer_base = outer_defer_base;
+    return 0;
+  }
+
+  fn emitReturn(self, rv: u32, ret: ast.Type, fname: str): i32 {
+    if rv == 0 {
+      self.emitDefers(0);
+      self.out.write("  ret void\n");
+      return 0;
+    }
+
+    if self.isAgg(ret) {
+      self.emitAggregateInto("%sret", ret, rv);
+      self.emitDefers(0);
+      self.out.write("  ret void\n");
+      return 0;
+    }
+
+    const val = self.emitValue(rv);
+    self.emitDefers(0);
+    self.out.writef("  ret {} {}\n", self.irType(ret), val.ref);
+    return 0;
+  }
+
+  fn emitDefers(self, base: i64) {
+    let i: i64 = self.defers.len - 1;
+    while i >= base {
+      self.emitExpr(self.defers.get(i));
+      i -= 1;
+    }
+  }
+
+  fn emitExpr(self, e: u32): i32 {
+    match self.a.exprs.at(e).kind {
+      .Call(c) => { self.emitCall(e, c, ""); },
+      .Match(mt) => { self.emitValue(e); },
+      .Ternary(t) => { self.emitValue(e); },
+      _ => { return 1; },
+    };
+    return 0;
+  }
+
+  fn regRef(self, r: u32): str {
+    return utils.concat(self.a.arena, "%", utils.intText(self.a.arena, r as i64));
+  }
+
+  fn emitIdValue(self, e: u32, name: str): Value {
+    let v: Value;
+    const li = self.locals.lookup(name);
+    if li >= 0 {
+      const reg = self.nextReg();
+      const lty = self.locals.ty(li);
+      self.out.writef("  %{} = load {}, ptr {}\n", reg, lty.kind.toIr(), self.locals.ptr(li));
+      v.ty = lty;
+      v.ref = self.regRef(reg);
+      return v;
+    }
+
+    if self.fn_params.contains(name) {
+      v.ty = copyType(&self.a.exprs.at(e).ty);
+      v.ref = utils.concat(self.a.arena, "%", name);
+      return v;
+    }
+
+    const gi = self.globals.lookup(name);
+    if gi >= 0 {
+      const reg2 = self.nextReg();
+      const gty = self.globals.ty(gi);
+      self.out.writef("  %{} = load {}, ptr @{}\n", reg2, gty.kind.toIr(), name);
+      v.ty = gty;
+      v.ref = self.regRef(reg2);
+      return v;
+    }
+
+    v.ty = copyType(&self.a.exprs.at(e).ty);
+    v.ref = utils.concat(self.a.arena, "%", name);
+    return v;
+  }
+
+  fn numberRef(self, text: str, kind: ast.TypeKind): str {
+    return match true {
+      kind == .F32 || kind == .F64 => floatConstRef(self.a.arena, text),
+      text.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') => hexToDecText(self.a.arena, text),
+      _ => text,
+    };
+  }
+
+  fn widenIndex(self, v: Value): str {
+    if typeBits(v.ty.kind) >= 64 {
+      return v.ref;
+    }
+
+    const reg = self.nextReg();
+    const op = v.ty.kind.isSignedInteger() ? "sext" : "zext";
+    self.out.writef("  %{} = {} {} {} to i64\n", reg, op, v.ty.kind.toIr(), v.ref);
+    return self.regRef(reg);
+  }
+
+  fn emitAddr(self, e: u32): str {
+    match self.a.exprs.at(e).kind {
+      .Id(name) => {
+        const li = self.locals.lookup(name);
+        if li >= 0 {
+          return self.locals.ptr(li);
+        }
+
+        if self.fn_params.contains(name) {
+          const slot = utils.concat(self.a.arena, "%", name, ".addr");
+          self.recordFnReg(slot);
+          const ty = copyType(&self.a.exprs.at(e).ty);
+          const ty_ir = ty.kind.toIr();
+          self.out.writef("  {} = alloca {}\n", slot, ty_ir);
+          self.out.writef("  store {} %{}, ptr {}\n", ty_ir, name, slot);
+          self.locals.push(name, ty, slot);
+          return slot;
+        }
+
+        const gi = self.globals.lookup(name);
+        if gi >= 0 {
+          return utils.concat(self.a.arena, "@", name);
+        }
+
+        return utils.concat(self.a.arena, "%", name);
+      },
+      .Field(fx) => {
+        let base_ty = copyType(&self.a.exprs.at(fx.base).ty);
+        let base = "";
+        if base_ty.kind == .Pointer {
+          base = self.emitValue(fx.base).ref;
+          base_ty = self.typeAt(base_ty.elem);
+        } else {
+          base = self.emitAddr(fx.base);
+          if base.len == 0 && isAggregate(base_ty.kind) {
+            base = self.emitValue(fx.base).ref;
+          }
+        }
+
+        if base_ty.kind == .Str || base_ty.kind == .Slice {
+          let index: i64 = 1;
+          if fx.name == "ptr" {
+            index = 0;
+          }
+
+          const reg = self.nextReg();
+          self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 {}\n", reg, base, index);
+          return self.regRef(reg);
+        }
+
+        const sname = self.structRef(base_ty.name);
+        const index2 = self.fieldIndexIn(self.structFields(self.structs.lookup(sname)), fx.name);
+        const reg2 = self.nextReg();
+        self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 {}\n", reg2, sname, base, index2);
+        return self.regRef(reg2);
+      },
+      .Index(ix) => {
+        const base_ty = copyType(&self.a.exprs.at(ix.base).ty);
+        let base2 = self.emitAddr(ix.base);
+        if base2.len == 0 && isAggregate(base_ty.kind) {
+          base2 = self.emitValue(ix.base).ref;
+        }
+
+        const idxv = self.emitValue(ix.index);
+        if base_ty.kind == .Slice || base_ty.kind == .Str {
+          const g = self.nextReg();
+          self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", g, base2);
+          const p = self.nextReg();
+          self.out.writef("  %{} = load ptr, ptr %{}\n", p, g);
+          const reg3 = self.nextReg();
+          self.out.writef("  %{} = getelementptr {}, ptr %{}, {} {}\n", reg3, self.irType(copyType(&self.a.exprs.at(e).ty)), p, idxv.ty.kind.toIr(), idxv.ref);
+          return self.regRef(reg3);
+        }
+
+        const reg4 = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, {} {}\n", reg4, self.irType(base_ty), base2, idxv.ty.kind.toIr(), idxv.ref);
+        return self.regRef(reg4);
+      },
+      .Unwrap(uw) => {
+        const inner_ty = copyType(&self.a.exprs.at(uw).ty);
+        const addr = self.addrOrValue(uw);
+        const opt_ir = self.irType(inner_ty);
+        const id = self.nextLabel();
+        const fp = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp, opt_ir, addr);
+
+        const flag = self.nextReg();
+        self.out.writef("  %{} = load i1, ptr %{}\n", flag, fp);
+        self.out.writef("  br i1 %{}, label %unwrap.some.{}, label %unwrap.none.{}\n", flag, id, id);
+        self.out.writef("unwrap.none.{}:\n", id);
+        self.uses_abort = true;
+        self.out.write("  call void @abort()\n");
+        self.out.write("  unreachable\n");
+        self.out.writef("unwrap.some.{}:\n", id);
+        const pp = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", pp, opt_ir, addr);
+
+        return self.regRef(pp);
+      },
+      .Propagate(pg) => {
+        const inner_ty2 = copyType(&self.a.exprs.at(pg).ty);
+        const addr2 = self.addrOrValue(pg);
+        const opt_ir2 = self.irType(inner_ty2);
+        const id2 = self.nextLabel();
+        const fp2 = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp2, opt_ir2, addr2);
+
+        const flag2 = self.nextReg();
+        self.out.writef("  %{} = load i1, ptr %{}\n", flag2, fp2);
+        self.out.writef("  br i1 %{}, label %propagate.some.{}, label %propagate.none.{}\n", flag2, id2, id2);
+        self.out.writef("propagate.none.{}:\n", id2);
+        self.uses_memset = true;
+        self.out.writef( "  call void @llvm.memset.p0.i64(ptr %sret, i8 0, i64 ptrtoint (ptr getelementptr ({}, ptr null, i32 1) to i64), i1 false)\n", self.irType(self.fn_ret));
+        self.emitDefers(0);
+        self.out.write("  ret void\n");
+        self.out.writef("propagate.some.{}:\n", id2);
+        const pp2 = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", pp2, opt_ir2, addr2);
+
+        return self.regRef(pp2);
+      },
+      _ => { return ""; },
+    };
+    return "";
+  }
+
+  fn addrOrValue(self, e: u32): str {
+    const addr = self.emitAddr(e);
+    return addr.len > 0 ? addr : self.emitValue(e).ref;
+  }
+
+  fn emitAggregateInto(self, dest: str, target: ast.Type, e: u32) {
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    if target.kind == .Optional && ety.kind != .Optional {
+      self.emitOptionalWrapInto(dest, target, e);
+      return;
+    }
+
+    if target.kind == .Slice && ety.kind == .Array {
+      self.emitSliceFromArray(dest, e);
+      return;
+    }
+
+    self.emitStructInto(dest, e);
+  }
+
+  fn emitOptionalWrapInto(self, dest: str, target: ast.Type, e: u32) {
+    const ir = self.irType(target);
+    const flag = self.nextReg();
+    self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", flag, ir, dest);
+    self.out.writef("  store i1 true, ptr %{}\n", flag);
+
+    const payload = self.nextReg();
+    self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", payload, ir, dest);
+
+    const pdest = self.regRef(payload);
+    const elem = self.typeAt(target.elem);
+    if self.isAgg(elem) {
+      self.emitAggregateInto(pdest, elem, e);
+    } else {
+      const value = self.emitValue(e);
+      self.out.writef("  store {} {}, ptr {}\n", self.irType(elem), value.ref, pdest);
+    }
+  }
+
+  fn emitSliceFromArray(self, dest: str, arr_e: u32) {
+    const aty = copyType(&self.a.exprs.at(arr_e).ty);
+    const is_arr_lit = match self.a.exprs.at(arr_e).kind {
+      .Array(a2) => true,
+      _ => false,
+    };
+
+    let base = "";
+    if is_arr_lit {
+      const slot = self.nextReg();
+      self.out.writef("  %{} = alloca {}\n", slot, self.irType(aty));
+      base = self.regRef(slot);
+      self.emitStructInto(base, arr_e);
+    } else {
+      base = self.emitAddr(arr_e);
+    }
+
+    const p = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", p, dest);
+    self.out.writef("  store ptr {}, ptr %{}\n", base, p);
+
+    const l = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", l, dest);
+    self.out.writef("  store i64 {}, ptr %{}\n", aty.array_length, l);
+  }
+
+  fn structFields(self, d: u32): ast.Range {
+    return match self.a.decls.at(d).kind {
+      .Struct(sd) => sd.fields,
+      _ => ast.Range.empty(),
+    };
+  }
+
+  fn fieldIndexIn(self, fields: ast.Range, name: str): i64 {
+    for i in (0 as u32)..fields.len {
+      if self.a.fields.at(self.a.extra.get(fields.start + i)).name == name { return i as i64; }
+    }
+
+    return -1;
+  }
+
+  fn findFieldIn(self, fields: ast.Range, name: str): u32 {
+    for i in (0 as u32)..fields.len {
+      const fi = self.a.extra.get(fields.start + i);
+      if self.a.fields.at(fi).name == name { return fi; }
+    }
+    return 0;
+  }
+
+  fn findEnumMember(self, d: u32, name: str): u32 {
+    match self.a.decls.at(d).kind {
+      .Enum(ed) => {
+        for i in (0 as u32)..ed.members.len {
+          const mi = self.a.extra.get(ed.members.start + i);
+          if self.a.enum_members.at(mi).name == name { return mi; }
+        }
+      },
+      _ => {},
+    };
+    return 0;
+  }
+
+  fn emitEnumLiteralInto(self, dest: str, e: u32) {
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const ename = self.structRef(ety.name);
+    const enm = self.structs.lookup(ename);
+    let mname = "";
+    let payload: u32 = 0;
+    match self.a.exprs.at(e).kind {
+      .EnumLiteral(el) => { mname = el.name; payload = el.payload; },
+      _ => {},
+    };
+    const mi = self.findEnumMember(enm, mname);
+
+    const tagp = self.nextReg();
+    self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 0\n", tagp, ename, dest);
+    self.out.writef("  store i32 {}, ptr %{}\n", self.a.enum_members.at(mi).value, tagp);
+
+    if payload == 0 { return; }
+
+    const payp = self.nextReg();
+    self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 1\n", payp, ename, dest);
+    const pdest = self.regRef(payp);
+    const pty = copyType(&self.a.enum_members.at(mi).payload);
+    if self.isAgg(pty) {
+      self.emitAggregateInto(pdest, pty, payload);
+    } else {
+      const v = self.emitValue(payload);
+      self.out.writef("  store {} {}, ptr {}\n", self.irType(pty), v.ref, pdest);
+    }
+  }
+
+  fn emitMatch(self, e: u32, m: ast.MatchExpr, dest0: str): Value {
+    const id = self.nextLabel();
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const is_void = ety.kind == .Void;
+    const scrutinee = m.scrutinee;
+    const s_ty = copyType(&self.a.exprs.at(scrutinee).ty);
+
+    let scrut_ref = "";
+    let scrut_ir = "";
+    let flag_ref = "";
+    let tagged_addr = "";
+    let tagged_enm: u32 = 0;
+    let tagged_ename = "";
+    let scrut_kind = s_ty.kind;
+    if s_ty.kind == .Optional {
+      scrut_kind = self.typeAt(s_ty.elem).kind;
+    }
+
+    if self.isTaggedEnum(s_ty) {
+      tagged_ename = self.structRef(s_ty.name);
+      tagged_enm = self.structs.lookup(tagged_ename);
+      tagged_addr = self.addrOrValue(scrutinee);
+      const tp = self.nextReg();
+      self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 0\n", tp, tagged_ename, tagged_addr);
+      const tv = self.nextReg();
+      self.out.writef("  %{} = load i32, ptr %{}\n", tv, tp);
+      scrut_ref = self.regRef(tv);
+      scrut_ir = "i32";
+      scrut_kind = .I32;
+    } else if s_ty.kind == .Optional {
+      const opt_ir = self.irType(s_ty);
+      const oaddr = self.addrOrValue(scrutinee);
+      const fp = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp, opt_ir, oaddr);
+      const fl = self.nextReg();
+      self.out.writef("  %{} = load i1, ptr %{}\n", fl, fp);
+      const pp = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", pp, opt_ir, oaddr);
+      const elem_ir = self.irType(self.typeAt(s_ty.elem));
+      const pv = self.nextReg();
+      self.out.writef("  %{} = load {}, ptr %{}\n", pv, elem_ir, pp);
+      flag_ref = self.regRef(fl);
+      scrut_ref = self.regRef(pv);
+      scrut_ir = elem_ir;
+    } else {
+      const scrut = self.emitValue(scrutinee);
+      scrut_ref = scrut.ref;
+      scrut_ir = self.irType(scrut.ty);
+    }
+
+    let dest = dest0;
+    if !is_void && dest.len == 0 {
+      const slot = self.nextReg();
+      self.out.writef("  %{} = alloca {}\n", slot, self.irType(ety));
+      dest = self.regRef(slot);
+    }
+
+    self.out.writef("  br label %match.arm.{}.0\n", id);
+
+    let group_pending = false;
+    for i in (0 as u32)..m.arms.len {
+      const arm = self.a.extra.get(m.arms.start + i);
+      const pattern = self.a.match_arms.at(arm).pattern;
+      const pattern_end = self.a.match_arms.at(arm).pattern_end;
+      const or_next = self.a.match_arms.at(arm).or_next;
+      const binding = self.a.match_arms.at(arm).binding;
+      const is_block = self.a.match_arms.at(arm).is_block;
+      const avalue = self.a.match_arms.at(arm).value;
+      const abody = self.a.match_arms.at(arm).body;
+
+      self.out.writef("match.arm.{}.{}:\n", id, i);
+      if or_next || (pattern != 0 && ((i as i64) + 1) < (m.arms.len as i64)) {
+        let cmp: u32 = 0;
+        if self.isNullExpr(pattern) {
+          cmp = self.nextReg();
+          self.out.writef("  %{} = xor i1 {}, true\n", cmp, flag_ref);
+        } else if pattern_end != 0 {
+          const lo = self.emitValue(pattern);
+          const hi = self.emitValue(pattern_end);
+          const sgn = scrut_kind.isSignedInteger();
+          const geop = sgn ? "sge" : "uge";
+          const leop = sgn ? "sle" : "ule";
+
+          const ge = self.nextReg();
+          self.out.writef("  %{} = icmp {} {} {}, {}\n", ge, geop, scrut_ir, scrut_ref, lo.ref);
+
+          const le = self.nextReg();
+          self.out.writef("  %{} = icmp {} {} {}, {}\n", le, leop, scrut_ir, scrut_ref, hi.ref);
+
+          const within = self.nextReg();
+          self.out.writef("  %{} = and i1 %{}, %{}\n", within, ge, le);
+
+          if flag_ref.len > 0 {
+            cmp = self.nextReg();
+            self.out.writef("  %{} = and i1 {}, %{}\n", cmp, flag_ref, within);
+          } else {
+            cmp = within;
+          }
+        } else {
+          const pat_enum_name = match self.a.exprs.at(pattern).kind {
+            .EnumLiteral(pel) => pel.name,
+            _ => "",
+          };
+
+          let pat_ref = "";
+          if pat_enum_name.len > 0 {
+            const pm = self.findEnumMember(tagged_enm, pat_enum_name);
+            pat_ref = utils.intText(self.a.arena, self.a.enum_members.at(pm).value);
+          } else {
+            pat_ref = self.emitValue(pattern).ref;
+          }
+
+          const eq = self.nextReg();
+          self.out.writef("  %{} = icmp eq {} {}, {}\n", eq, scrut_ir, scrut_ref, pat_ref);
+
+          if flag_ref.len > 0 {
+            cmp = self.nextReg();
+            self.out.writef("  %{} = and i1 {}, %{}\n", cmp, flag_ref, eq);
+          } else {
+            cmp = eq;
+          }
+        }
+
+        let body_index: u32 = i;
+        let g: u32 = i;
+        while true {
+          const garm = self.a.extra.get(m.arms.start + g);
+          if self.a.match_arms.at(garm).or_next {
+            body_index += 1;
+            g += 1;
+          } else {
+            break;
+          }
+        }
+
+        self.out.writef("  br i1 %{}, label %match.body.{}.{}, label %match.arm.{}.{}\n", cmp, id, body_index, id, i + 1);
+        if or_next {
+          group_pending = true;
+          continue;
+        }
+
+        self.out.writef("match.body.{}.{}:\n", id, i);
+      } else if group_pending {
+        self.out.writef("  br label %match.body.{}.{}\n", id, i);
+        self.out.writef("match.body.{}.{}:\n", id, i);
+      }
+
+      group_pending = false;
+
+      const saved_locals = self.locals.len;
+      if binding.len > 0 && tagged_enm != 0 {
+        const bind_name = match self.a.exprs.at(pattern).kind {
+          .EnumLiteral(pel2) => pel2.name,
+          _ => "",
+        };
+
+        const pm2 = self.findEnumMember(tagged_enm, bind_name);
+        const pp2 = self.nextReg();
+        self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 1\n", pp2, tagged_ename, tagged_addr);
+        self.locals.push(binding, copyType(&self.a.enum_members.at(pm2).payload), self.regRef(pp2));
+      }
+
+      if is_block {
+        self.emitBlock(abody, self.fn_ret, self.fn_name);
+        self.locals.len = saved_locals;
+        if !self.blockTerminates(abody) {
+          self.out.writef("  br label %match.end.{}\n", id);
+        }
+
+        continue;
+      }
+      if is_void {
+        self.emitValue(avalue);
+      } else if self.isAgg(ety) {
+        self.emitAggregateInto(dest, ety, avalue);
+      } else {
+        const value = self.emitValue(avalue);
+        self.out.writef("  store {} {}, ptr {}\n", self.irType(ety), value.ref, dest);
+      }
+
+      self.locals.len = saved_locals;
+      self.out.writef("  br label %match.end.{}\n", id);
+    }
+
+    self.out.writef("match.end.{}:\n", id);
+    let result: Value;
+    result.ty = ety;
+    if is_void {
+      result.ref = "";
+      return result;
+    }
+
+    if self.isAgg(ety) {
+      result.ref = dest;
+      return result;
+    }
+
+    const reg = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", reg, self.irType(ety), dest);
+    result.ref = self.regRef(reg);
+    return result;
+  }
+
+  fn emitStructInto(self, dest: str, e: u32) {
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    match self.a.exprs.at(e).kind {
+      .String(sv) => {
+        const p = self.nextReg();
+        self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", p, dest);
+        self.out.writef("  store ptr @.str.{}, ptr %{}\n", self.strings.idOf(e), p);
+        const l = self.nextReg();
+        self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", l, dest);
+        self.out.writef("  store i64 {}, ptr %{}\n", sv.len, l);
+        return;
+      },
+      .Array(arr) => {
+        const arr_ir = self.irType(ety);
+        for i in (0 as u32)..arr.len {
+          const el = self.a.extra.get(arr.start + i);
+          const reg = self.nextReg();
+          self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 {}\n", reg, arr_ir, dest, i);
+          const slot = self.regRef(reg);
+          const el_ty = copyType(&self.a.exprs.at(el).ty);
+          if self.isAgg(el_ty) {
+            self.emitStructInto(slot, el);
+          } else {
+            const value = self.emitValue(el);
+            self.out.writef("  store {} {}, ptr {}\n", self.irType(value.ty), value.ref, slot);
+          }
+        }
+        return;
+      },
+      .StructLiteral(sl) => {
+        const sname = self.structRef(ety.name);
+        const sd = self.structs.lookup(sname);
+        const fields = self.structFields(sd);
+
+        for i in (0 as u32)..sl.inits.len {
+          const fi = self.a.extra.get(sl.inits.start + i);
+          const finame = self.a.field_inits.at(fi).name;
+          const fival = self.a.field_inits.at(fi).value;
+          const index = self.fieldIndexIn(fields, finame);
+          const fpool = self.findFieldIn(fields, finame);
+          const fty = copyType(&self.a.fields.at(fpool).ty);
+          const reg2 = self.nextReg();
+          self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 {}\n", reg2, sname, dest, index);
+          const slot2 = self.regRef(reg2);
+          if self.isAgg(fty) {
+            self.emitAggregateInto(slot2, fty, fival);
+          } else {
+            const value2 = self.emitValue(fival);
+            self.out.writef("  store {} {}, ptr {}\n", self.irType(value2.ty), value2.ref, slot2);
+          }
+        }
+
+        for i in (0 as u32)..fields.len {
+          const fd = self.a.extra.get(fields.start + i);
+          const dv = self.a.fields.at(fd).default_value;
+          if dv != 0 {
+            const fname = self.a.fields.at(fd).name;
+            let provided = false;
+
+            let j: u32 = 0;
+            while j < sl.inits.len {
+              if self.a.field_inits.at(self.a.extra.get(sl.inits.start + j)).name == fname {
+                provided = true;
+                j = sl.inits.len;
+              } else {
+                j++;
+              }
+            }
+
+            if !provided {
+              const fty2 = copyType(&self.a.fields.at(fd).ty);
+              const reg3 = self.nextReg();
+              self.out.writef("  %{} = getelementptr %{}, ptr {}, i32 0, i32 {}\n", reg3, sname, dest, i);
+              const slot3 = self.regRef(reg3);
+              if self.isAgg(fty2) {
+                self.emitAggregateInto(slot3, fty2, dv);
+              } else {
+                const value3 = self.emitValue(dv);
+                self.out.writef("  store {} {}, ptr {}\n", self.irType(value3.ty), value3.ref, slot3);
+              }
+            }
+          }
+        }
+        return;
+      },
+      .EnumLiteral(el2) => {
+        self.emitEnumLiteralInto(dest, e);
+        return;
+      },
+      .Call(cl2) => {
+        self.emitCall(e, cl2, dest);
+        return;
+      },
+      .Match(mt2) => {
+        self.emitMatch(e, mt2, dest);
+        return;
+      },
+      _ => {},
+    };
+
+    let src = self.emitAddr(e);
+    if src.len == 0 {
+      src = self.emitValue(e).ref;
+    }
+
+    if ety.kind == .Struct || ety.kind == .Array {
+      self.uses_memcpy = true;
+      self.out.writef( "  call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 ptrtoint (ptr getelementptr ({}, ptr null, i32 1) to i64), i1 false)\n", dest, src, self.irType(ety));
+      return;
+    }
+
+    const reg4 = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", reg4, self.irType(ety), src);
+    self.out.writef("  store {} %{}, ptr {}\n", self.irType(ety), reg4, dest);
+  }
+
+  fn strLen(self, op: u32, addr: str): str {
+    const is_string = match self.a.exprs.at(op).kind {
+      .String(sv) => true,
+      _ => false,
+    };
+
+    if is_string {
+      return utils.intText(self.a.arena, self.stringText(op).len);
+    }
+
+    const lenp = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", lenp, addr);
+    const value = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", value, lenp);
+    return self.regRef(value);
+  }
+
+  fn strPtr(self, op: u32, addr: str): str {
+    const is_string = match self.a.exprs.at(op).kind {
+      .String(sv) => true,
+      _ => false,
+    };
+
+    if is_string {
+      return utils.concat(self.a.arena, "@.str.",
+        utils.intText(self.a.arena, self.strings.idOf(op)));
+    }
+
+    const ptrp = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", ptrp, addr);
+    const value = self.nextReg();
+    self.out.writef("  %{} = load ptr, ptr %{}\n", value, ptrp);
+    return self.regRef(value);
+  }
+
+  fn emitStrEquality(self, e: u32, b: ast.BinaryExpr): Value {
+    let lhs_addr = "";
+    const lhs_is_string = match self.a.exprs.at(b.lhs).kind {
+      .String(sv) => true,
+      _ => false,
+    };
+
+    if !lhs_is_string {
+      lhs_addr = self.addrOrValue(b.lhs);
+    }
+
+    let rhs_addr = "";
+    const rhs_is_string = match self.a.exprs.at(b.rhs).kind {
+      .String(sw) => true,
+      _ => false,
+    };
+
+    if !rhs_is_string {
+      rhs_addr = self.addrOrValue(b.rhs);
+    }
+
+    const lhs_len = self.strLen(b.lhs, lhs_addr);
+    const rhs_len = self.strLen(b.rhs, rhs_addr);
+    const equal = self.nextReg();
+    self.out.writef("  %{} = icmp eq i64 {}, {}\n", equal, lhs_len, rhs_len);
+
+    const result = self.nextReg();
+    self.out.writef("  %{} = alloca i1\n", result);
+    self.out.writef("  store i1 %{}, ptr %{}\n", equal, result);
+
+    const label = self.nextLabel();
+    self.out.writef("  br i1 %{}, label %streq.cmp.{}, label %streq.end.{}\n", equal, label, label);
+
+    self.out.writef("streq.cmp.{}:\n", label);
+    const lhs_ptr = self.strPtr(b.lhs, lhs_addr);
+    const rhs_ptr = self.strPtr(b.rhs, rhs_addr);
+
+    const cmp = self.nextReg();
+    self.out.writef("  %{} = call i32 @memcmp(ptr {}, ptr {}, i64 {})\n", cmp, lhs_ptr, rhs_ptr, lhs_len);
+    const zero = self.nextReg();
+    self.out.writef("  %{} = icmp eq i32 %{}, 0\n", zero, cmp);
+    self.out.writef("  store i1 %{}, ptr %{}\n", zero, result);
+    self.out.writef("  br label %streq.end.{}\n", label);
+
+    self.out.writef("streq.end.{}:\n", label);
+    const loaded = self.nextReg();
+    self.out.writef("  %{} = load i1, ptr %{}\n", loaded, result);
+
+    let ref = self.regRef(loaded);
+    if b.op == .Ne {
+      const neg = self.nextReg();
+      self.out.writef("  %{} = xor i1 {}, true\n", neg, ref);
+      ref = self.regRef(neg);
+    }
+
+    let v: Value;
+    v.ty = kindTy(.Bool);
+    v.ref = ref;
+    return v;
+  }
+
+  fn nextLabel(self): u32 {
+    const l = self.label;
+    self.label++;
+    return l;
+  }
+
+  fn emitLogical(self, e: u32, b: ast.BinaryExpr): Value {
+    const id = self.nextLabel();
+    const slot = self.nextReg();
+    const kw = b.op.toIr(self.a.exprs.at(b.lhs).ty.kind.isSignedInteger());
+
+    self.out.writef("  %{} = alloca i1\n", slot);
+
+    const lhs = self.emitValue(b.lhs);
+    self.out.writef("  store i1 {}, ptr %{}\n", lhs.ref, slot);
+
+    match b.op {
+      .And => self.out.writef("  br i1 {}, label %{}.rhs.{}, label %{}.end.{}\n", lhs.ref, kw, id, kw, id),
+      _ => self.out.writef("  br i1 {}, label %{}.end.{}, label %{}.rhs.{}\n", lhs.ref, kw, id, kw, id),
+    }
+
+    self.out.writef("{}.rhs.{}:\n", kw, id);
+    const rhs = self.emitValue(b.rhs);
+    self.out.writef("  store i1 {}, ptr %{}\n", rhs.ref, slot);
+    self.out.writef("  br label %{}.end.{}\n", kw, id);
+
+    self.out.writef("{}.end.{}:\n", kw, id);
+    const result = self.nextReg();
+    self.out.writef("  %{} = load i1, ptr %{}\n", result, slot);
+
+    let v: Value;
+    v.ty = kindTy(.Bool);
+    v.ref = self.regRef(result);
+    return v;
+  }
+
+  fn emitOptionalCompare(self, e: u32, b: ast.BinaryExpr, lty: ast.Type, rty: ast.Type): Value {
+    let opt = b.rhs;
+    let opt_ty = rty;
+    let other = b.lhs;
+    let other_ty = lty;
+    if self.isNullExpr(b.lhs) {
+      // NOOP: opt = rhs (already)
+    } else if self.isNullExpr(b.rhs) || lty.kind == .Optional {
+      opt = b.lhs;
+      opt_ty = lty;
+      other = b.rhs;
+      other_ty = rty;
+    }
+
+    const addr = self.addrOrValue(opt);
+    const fp = self.nextReg();
+    self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp, self.irType(opt_ty), addr);
+    const flag = self.nextReg();
+    self.out.writef("  %{} = load i1, ptr %{}\n", flag, fp);
+
+    if !self.isNullExpr(other) {
+      const elem_ir = self.irType(self.typeAt(opt_ty.elem));
+      const pp = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", pp, self.irType(opt_ty), addr);
+
+      const pv = self.nextReg();
+      self.out.writef("  %{} = load {}, ptr %{}\n", pv, elem_ir, pp);
+
+      const o = self.emitValue(other);
+      const eq = self.nextReg();
+      self.out.writef("  %{} = icmp eq {} %{}, {}\n", eq, elem_ir, pv, o.ref);
+
+      const both = self.nextReg();
+      self.out.writef("  %{} = and i1 %{}, %{}\n", both, flag, eq);
+
+      let v: Value;
+      v.ty = kindTy(.Bool);
+      if b.op == .Ne {
+        const inv = self.nextReg();
+        self.out.writef("  %{} = xor i1 %{}, true\n", inv, both);
+        v.ref = self.regRef(inv);
+        return v;
+      }
+      v.ref = self.regRef(both);
+      return v;
+    }
+
+    let v2: Value;
+    v2.ty = kindTy(.Bool);
+
+    if b.op == .Eq {
+      const inv2 = self.nextReg();
+      self.out.writef("  %{} = xor i1 %{}, true\n", inv2, flag);
+      v2.ref = self.regRef(inv2);
+      return v2;
+    }
+
+    v2.ref = self.regRef(flag);
+    return v2;
+  }
+
+  fn emitBinaryValue(self, e: u32, b: ast.BinaryExpr): Value {
+    if b.op.isLogical() {
+      return self.emitLogical(e, b);
+    }
+
+    const lty = copyType(&self.a.exprs.at(b.lhs).ty);
+    const rty = copyType(&self.a.exprs.at(b.rhs).ty);
+    if lty.kind == .Optional || rty.kind == .Optional {
+      return self.emitOptionalCompare(e, b, lty, rty);
+    }
+
+    if lty.kind == .Str {
+      return self.emitStrEquality(e, b);
+    }
+
+    const left = self.emitValue(b.lhs);
+    const right = self.emitValue(b.rhs);
+    let opcode = b.op.toIr(left.ty.kind.isSignedInteger());
+
+    if left.ty.kind.isFloat() {
+      opcode = b.op.toIrFloat();
+    }
+
+    const reg = self.nextReg();
+    self.out.writef("  %{} = {} {} {}, {}\n", reg, opcode, left.ty.kind.toIr(), left.ref, right.ref);
+
+    let v: Value;
+    v.ty = copyType(&self.a.exprs.at(e).ty);
+    v.ref = self.regRef(reg);
+    return v;
+  }
+
+  fn emitUnaryValue(self, e: u32, un: ast.UnaryExpr): Value {
+    if un.op == .Addr {
+      let v: Value;
+      v.ty = copyType(&self.a.exprs.at(e).ty);
+      v.ref = self.addrOrValue(un.operand);
+      return v;
+    }
+
+    const operand = self.emitValue(un.operand);
+    const reg = self.nextReg();
+
+    if un.op == .Not {
+      self.out.writef("  %{} = xor i1 {}, true\n", reg, operand.ref);
+      let v2: Value;
+      v2.ty = kindTy(.Bool);
+      v2.ref = self.regRef(reg);
+      return v2;
+    }
+
+    match true {
+      operand.ty.kind.isFloat() => { self.out.writef("  %{} = fneg {} {}\n", reg, operand.ty.kind.toIr(), operand.ref); },
+      _ => { self.out.writef("  %{} = sub {} 0, {}\n", reg, operand.ty.kind.toIr(), operand.ref); },
+    }
+
+    let v3: Value;
+    v3.ty = operand.ty;
+    v3.ref = self.regRef(reg);
+    return v3;
+  }
+
+  fn emitCastValue(self, e: u32, c: ast.CastExpr): Value {
+    const operand_ty = copyType(&self.a.exprs.at(c.operand).ty);
+    if operand_ty.kind == .Slice && c.target.kind == .Slice {
+      return self.emitSliceReinterpret(e, c, operand_ty);
+    }
+
+    if isAggregate(operand_ty.kind) && isAggregate(c.target.kind) {
+      let v: Value;
+      v.ty = c.target;
+      v.ref = self.addrOrValue(c.operand);
+      return v;
+    }
+
+    const operand = self.emitValue(c.operand);
+    let from = operand.ty.kind;
+    let to = c.target.kind;
+    if from == .Enum {
+      from = .I32;
+    }
+
+    if to == .Enum {
+      to = .I32;
+    }
+
+    const from_bits = typeBits(from);
+    const to_bits = typeBits(to);
+
+    let v2: Value;
+    v2.ty = c.target;
+    if from.isFloat() {
+      if to.isInteger() {
+        const reg = self.nextReg();
+        let op = "fptoui";
+        if to.isSignedInteger() {
+          op = "fptosi";
+        }
+        self.out.writef("  %{} = {} {} {} to {}\n", reg, op, from.toIr(), operand.ref, to.toIr());
+        v2.ref = self.regRef(reg);
+        return v2;
+      }
+      if to.isFloat() {
+        if from_bits == to_bits {
+          v2.ref = operand.ref;
+          return v2;
+        }
+        let op2 = "fpext";
+        if from_bits > to_bits {
+          op2 = "fptrunc";
+        }
+        const reg2 = self.nextReg();
+        self.out.writef("  %{} = {} {} {} to {}\n", reg2, op2, from.toIr(), operand.ref, to.toIr());
+        v2.ref = self.regRef(reg2);
+        return v2;
+      }
+    } else if from.isNumeric() {
+      if to.isFloat() {
+        const reg3 = self.nextReg();
+        let op3 = "uitofp";
+        if from.isSignedInteger() {
+          op3 = "sitofp";
+        }
+
+        self.out.writef("  %{} = {} {} {} to {}\n", reg3, op3, from.toIr(), operand.ref, to.toIr());
+        v2.ref = self.regRef(reg3);
+        return v2;
+      }
+
+      if from_bits == to_bits {
+        v2.ref = operand.ref;
+        return v2;
+      }
+
+      let op4 = "zext";
+      if from_bits > to_bits {
+        op4 = "trunc";
+      } else if from.isSignedInteger() {
+        op4 = "sext";
+      }
+
+      const reg4 = self.nextReg();
+      self.out.writef("  %{} = {} {} {} to {}\n", reg4, op4, from.toIr(), operand.ref, to.toIr());
+      v2.ref = self.regRef(reg4);
+      return v2;
+    }
+
+    v2.ref = operand.ref;
+    return v2;
+  }
+
+  fn emitSliceReinterpret(self, e: u32, c: ast.CastExpr, operand_ty: ast.Type): Value {
+    const addr = self.addrOrValue(c.operand);
+    const old_sz = self.typeSize(self.typeAt(operand_ty.elem));
+    const new_sz = self.typeSize(self.typeAt(c.target.elem));
+
+    const pp = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", pp, addr);
+
+    const ptrv = self.nextReg();
+    self.out.writef("  %{} = load ptr, ptr %{}\n", ptrv, pp);
+
+    const lp = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", lp, addr);
+
+    const lenv = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", lenv, lp);
+
+    let newlen = self.regRef(lenv);
+    if old_sz != new_sz {
+      const m = self.nextReg();
+      self.out.writef("  %{} = mul i64 {}, {}\n", m, newlen, old_sz);
+      const dv = self.nextReg();
+      self.out.writef("  %{} = udiv i64 %{}, {}\n", dv, m, new_sz);
+      newlen = self.regRef(dv);
+    }
+
+    const slot = self.nextReg();
+    self.out.writef("  %{} = alloca { ptr, i64 }\n", slot);
+
+    const sp = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 0\n", sp, slot);
+    self.out.writef("  store ptr %{}, ptr %{}\n", ptrv, sp);
+
+    const sl = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 1\n", sl, slot);
+    self.out.writef("  store i64 {}, ptr %{}\n", newlen, sl);
+
+    let v: Value;
+    v.ty = c.target;
+    v.ref = self.regRef(slot);
+    return v;
+  }
+
+  fn emitNullValue(self, e: u32): Value {
+    let v: Value;
+    v.ty = copyType(&self.a.exprs.at(e).ty);
+    if v.ty.kind == .Cstr {
+      v.ref = "null";
+      return v;
+    }
+
+    const slot = self.nextReg();
+    self.out.writef("  %{} = alloca {}\n", slot, self.irType(v.ty));
+    self.out.writef("  store {} zeroinitializer, ptr %{}\n", self.irType(v.ty), slot);
+    v.ref = self.regRef(slot);
+    return v;
+  }
+
+  fn emitTernaryValue(self, e: u32, t: ast.TernaryExpr): Value {
+    const cond = self.emitValue(t.cond);
+    const id = self.nextLabel();
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const is_void = ety.kind == .Void;
+    const agg = self.isAgg(ety);
+    let dest = "";
+
+    if !is_void {
+      const slot = self.nextReg();
+      self.out.writef("  %{} = alloca {}\n", slot, self.irType(ety));
+      dest = self.regRef(slot);
+    }
+
+    self.out.writef("  br i1 {}, label %tern.then.{}, label %tern.else.{}\n", cond.ref, id, id);
+
+    self.out.writef("tern.then.{}:\n", id);
+
+    match true {
+      is_void => { self.emitValue(t.then); },
+      agg => { self.emitAggregateInto(dest, ety, t.then); },
+      _ => {
+        const tv = self.emitValue(t.then);
+        self.out.writef("  store {} {}, ptr {}\n", self.irType(ety), tv.ref, dest);
+      },
+    }
+
+    self.out.writef("  br label %tern.end.{}\n", id);
+
+    self.out.writef("tern.else.{}:\n", id);
+
+    match true {
+      is_void => { self.emitValue(t.els); },
+      agg => { self.emitAggregateInto(dest, ety, t.els); },
+      _ => {
+        const ev = self.emitValue(t.els);
+        self.out.writef("  store {} {}, ptr {}\n", self.irType(ety), ev.ref, dest);
+      },
+    }
+
+    self.out.writef("  br label %tern.end.{}\n", id);
+
+    self.out.writef("tern.end.{}:\n", id);
+    let v: Value;
+    v.ty = ety;
+
+    if is_void {
+      v.ref = "";
+      return v;
+    }
+
+    if agg {
+      v.ref = dest;
+      return v;
+    }
+
+    const loaded = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", loaded, self.irType(ety), dest);
+    v.ref = self.regRef(loaded);
+    return v;
+  }
+
+  fn emitCoalesceValue(self, e: u32, co: ast.PairExpr): Value {
+    const addr = self.addrOrValue(co.lhs);
+    const id = self.nextLabel();
+    const opt_ir = self.irType(copyType(&self.a.exprs.at(co.lhs).ty));
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const out_ir = self.irType(ety);
+    const agg = self.isAgg(ety);
+
+    const slot = self.nextReg();
+    self.out.writef("  %{} = alloca {}\n", slot, out_ir);
+    const dest = self.regRef(slot);
+
+    const fp = self.nextReg();
+    self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp, opt_ir, addr);
+
+    const flag = self.nextReg();
+    self.out.writef("  %{} = load i1, ptr %{}\n", flag, fp);
+    self.out.writef("  br i1 %{}, label %coalesce.some.{}, label %coalesce.none.{}\n", flag, id, id);
+    self.out.writef("coalesce.some.{}:\n", id);
+
+    const pf = self.nextReg();
+    self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 1\n", pf, opt_ir, addr);
+
+    const pv = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr %{}\n", pv, out_ir, pf);
+    self.out.writef("  store {} %{}, ptr {}\n", out_ir, pv, dest);
+    self.out.writef("  br label %coalesce.end.{}\n", id);
+
+    self.out.writef("coalesce.none.{}:\n", id);
+
+    if agg {
+      self.emitAggregateInto(dest, ety, co.rhs);
+    } else {
+      const rhs = self.emitValue(co.rhs);
+      self.out.writef("  store {} {}, ptr {}\n", out_ir, rhs.ref, dest);
+    }
+
+    self.out.writef("  br label %coalesce.end.{}\n", id);
+
+    self.out.writef("coalesce.end.{}:\n", id);
+    let v: Value;
+    v.ty = ety;
+
+    if agg {
+      v.ref = dest;
+      return v;
+    }
+
+    const loaded = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", loaded, out_ir, dest);
+    v.ref = self.regRef(loaded);
+    return v;
+  }
+
+  fn emitSizeofValue(self, t: ast.Type): Value {
+    let v: Value;
+    v.ty = kindTy(.I64);
+    v.ref = utils.intText(self.a.arena, self.typeSize(t));
+    return v;
+  }
+
+  fn emitLoadThroughAddr(self, e: u32): Value {
+    const addr = self.emitAddr(e);
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const reg = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", reg, self.irType(ety), addr);
+
+    let v: Value;
+    v.ty = ety;
+    v.ref = self.regRef(reg);
+    return v;
+  }
+
+  fn emitPostIncrValue(self, e: u32, pi: ast.PostIncrExpr): Value {
+    const addr = self.emitAddr(pi.operand);
+    const ety = copyType(&self.a.exprs.at(e).ty);
+    const ty = self.irType(ety);
+    const oldreg = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", oldreg, ty, addr);
+
+    const newreg = self.nextReg();
+    self.out.writef("  %{} = {} {} %{}, 1\n", newreg, pi.increment ? "add" : "sub", ty, oldreg);
+    self.out.writef("  store {} %{}, ptr {}\n", ty, newreg, addr);
+
+    let v: Value;
+    v.ty = ety;
+    v.ref = self.regRef(oldreg);
+    return v;
+  }
+
+  fn emitFieldValue(self, e: u32, fld: ast.FieldExpr): Value {
+    const base_ty = copyType(&self.a.exprs.at(fld.base).ty);
+    if base_ty.kind == .Array {
+      let v: Value;
+      v.ty = kindTy(.I64);
+      v.ref = utils.intText(self.a.arena, base_ty.array_length);
+      return v;
+    }
+
+    return self.emitLoadThroughAddr(e);
+  }
+
+  fn emitUnwrapValue(self, e: u32): Value {
+    const addr = self.emitAddr(e);
+    const ety = copyType(&self.a.exprs.at(e).ty);
+
+    let v: Value;
+    v.ty = ety;
+    if self.isAgg(ety) {
+      v.ref = addr;
+      return v;
+    }
+
+    const reg = self.nextReg();
+    self.out.writef("  %{} = load {}, ptr {}\n", reg, self.irType(ety), addr);
+    v.ref = self.regRef(reg);
+    return v;
+  }
+
+  fn emitSliceRangeValue(self, e: u32, sr: ast.SliceRangeExpr): Value {
+    const base_ty = copyType(&self.a.exprs.at(sr.base).ty);
+    const base_is_string = match self.a.exprs.at(sr.base).kind {
+      .String(sv) => true,
+      _ => false,
+    };
+
+    let base_addr = "";
+    let dataref = "";
+
+    match true {
+      base_is_string => {
+        dataref = utils.concat(self.a.arena, "@.str.", utils.intText(self.a.arena, self.strings.idOf(sr.base)));
+      },
+      base_ty.kind == .Cstr => {
+        dataref = self.emitValue(sr.base).ref;
+      },
+      _ => {
+        base_addr = self.addrOrValue(sr.base);
+      },
+    }
+
+
+    const startv = self.emitValue(sr.start);
+    const endv = self.emitValue(sr.end);
+    const s = self.widenIndex(startv);
+    const ev = self.widenIndex(endv);
+
+    let elem_ir = "i8";
+    if base_ty.kind != .Str && base_ty.kind != .Cstr {
+      elem_ir = self.irType(self.typeAt(base_ty.elem));
+    }
+
+    match true {
+      base_ty.kind == .Array => {
+        const p = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i64 0, i64 {}\n", p, self.irType(base_ty), base_addr, s);
+        dataref = self.regRef(p);
+      },
+      dataref.len == 0 => {
+        const pfield = self.nextReg();
+        self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", pfield, base_addr);
+        const loaded = self.nextReg();
+        self.out.writef("  %{} = load ptr, ptr %{}\n", loaded, pfield);
+        const p2 = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr %{}, i64 {}\n", p2, elem_ir, loaded, s);
+        dataref = self.regRef(p2);
+      },
+      _ => {
+        const p3 = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr {}, i64 {}\n", p3, elem_ir, dataref, s);
+        dataref = self.regRef(p3);
+      }
+    }
+
+    const len = self.nextReg();
+    self.out.writef("  %{} = sub i64 {}, {}\n", len, ev, s);
+
+    const slot = self.nextReg();
+    self.out.writef("  %{} = alloca { ptr, i64 }\n", slot);
+
+    const f0 = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 0\n", f0, slot);
+    self.out.writef("  store ptr {}, ptr %{}\n", dataref, f0);
+
+    const f1 = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 1\n", f1, slot);
+    self.out.writef("  store i64 %{}, ptr %{}\n", len, f1);
+
+    let v: Value;
+    v.ty = copyType(&self.a.exprs.at(e).ty);
+    v.ref = self.regRef(slot);
+    return v;
+  }
+
+  fn emitAssign(self, asg: ast.AssignStmt) {
+    const addr = self.emitAddr(asg.target);
+    const target_ty = copyType(&self.a.exprs.at(asg.target).ty);
+    if asg.coalesce {
+      const id = self.nextLabel();
+      const ir = self.irType(target_ty);
+      const fp = self.nextReg();
+      self.out.writef("  %{} = getelementptr {}, ptr {}, i32 0, i32 0\n", fp, ir, addr);
+
+      const flag = self.nextReg();
+      self.out.writef("  %{} = load i1, ptr %{}\n", flag, fp);
+      self.out.writef("  br i1 %{}, label %coal.end.{}, label %coal.set.{}\n", flag, id, id);
+      self.out.writef("coal.set.{}:\n", id);
+      self.emitOptionalWrapInto(addr, target_ty, asg.value);
+      self.out.writef("  br label %coal.end.{}\n", id);
+      self.out.writef("coal.end.{}:\n", id);
+      return;
+    }
+
+    if asg.compound {
+      const kind = target_ty.kind;
+      const ir2 = self.irType(target_ty);
+      const old = self.nextReg();
+      self.out.writef("  %{} = load {}, ptr {}\n", old, ir2, addr);
+
+      const value = self.emitValue(asg.value);
+      let op = asg.op.toIr(kind.isSignedInteger());
+      if kind.isFloat() {
+        op = asg.op.toIrFloat();
+      }
+
+      const result = self.nextReg();
+      self.out.writef("  %{} = {} {} %{}, {}\n", result, op, ir2, old, value.ref);
+      self.out.writef("  store {} %{}, ptr {}\n", ir2, result, addr);
+      return;
+    }
+
+    if self.isAgg(target_ty) {
+      self.emitAggregateInto(addr, target_ty, asg.value);
+      return;
+    }
+
+    const value2 = self.emitValue(asg.value);
+    self.out.writef("  store {} {}, ptr {}\n", self.irType(value2.ty), value2.ref, addr);
+  }
+
+  fn emitCall(self, e: u32, c: ast.CallExpr, sret_dest: str): Value {
+    let is_method = false;
+    let callee_base: u32 = 0;
+    let callee_field = "";
+    let callee_id = "";
+
+    match self.a.exprs.at(c.callee).kind {
+      .Field(fx) => {
+        is_method = !c.type_scoped;
+        callee_base = fx.base;
+        callee_field = fx.name;
+      },
+      .Id(idn) => { callee_id = idn; },
+      _ => {},
+    }
+
+    let fname = "";
+    let self_ref = "";
+    let fn_d: u32 = 0;
+
+    if c.type_scoped {
+      const tname = self.a.exprs.at(callee_base).ty.name;
+      const tref = self.structRef(tname);
+      const owner0 = self.structs.lookup(tref);
+
+      if owner0 != 0 {
+        fname = utils.joinPath(self.a.arena, tref, callee_field);
+        fn_d = self.findFnInDecl(owner0, callee_field);
+      }
+
+      if fname.len == 0 {
+        fname = self.mangle(utils.joinPath(self.a.arena, tname, callee_field));
+      }
+    } else if is_method {
+      const mod = self.modulePath(callee_base);
+      if mod != 0 {
+        fn_d = self.moduleFn(mod, callee_field);
+        const prefix = modulePrefix(self.a, self.entry, mod);
+        let mod_ext = false;
+        if fn_d != 0 {
+          match self.a.decls.at(fn_d).kind {
+            .Fn(f0) => { mod_ext = f0.is_extern; },
+            _ => {},
+          };
+        }
+
+        fname = match true {
+          fn_d != 0 && mod_ext => callee_field,
+          prefix.len > 0 => utils.joinPath(self.a.arena, prefix, callee_field),
+          _ => callee_field,
+        };
+
+        is_method = false;
+      } else {
+        const recv_raw = copyType(&self.a.exprs.at(callee_base).ty);
+        const recv_is_ptr = recv_raw.kind == .Pointer;
+        let recv_type = recv_raw;
+        if recv_is_ptr {
+          recv_type = self.typeAt(recv_raw.elem);
+        }
+
+        if recv_type.kind == .Enum && recv_type.name.len > 0 {
+          const recv_ref = self.structRef(recv_type.name);
+          fname = "";
+          let si: i64 = self.structs.len - 1;
+          while si >= 0 {
+            const sdl = self.structs.declAt(si);
+            const is_enum_d = match self.a.decls.at(sdl).kind {
+              .Enum(en0) => true,
+              _ => false,
+            };
+            if is_enum_d && (self.a.decls.at(sdl).name == recv_type.name
+              || self.structs.nameAt(si) == recv_ref) {
+              fname = utils.joinPath(self.a.arena, self.structs.nameAt(si), callee_field);
+              si = -1;
+            } else {
+              si -= 1;
+            }
+          }
+
+          if fname.len == 0 {
+            fname = utils.joinPath(self.a.arena, recv_ref, callee_field);
+          }
+        } else {
+          fname = utils.joinPath(self.a.arena, self.structRef(recv_type.name), callee_field);
+        }
+
+        if recv_is_ptr {
+          self_ref = self.emitValue(callee_base).ref;
+        } else {
+          self_ref = self.emitAddr(callee_base);
+          if self_ref.len == 0 {
+            const rv = self.emitValue(callee_base);
+            if self.isAgg(rv.ty) {
+              self_ref = rv.ref;
+            } else {
+              const rslot = self.nextReg();
+              self.out.writef("  %{} = alloca {}\n", rslot, self.irType(rv.ty));
+              self.out.writef("  store {} {}, ptr %{}\n", self.irType(rv.ty), rv.ref, rslot);
+              self_ref = self.regRef(rslot);
+            }
+          }
+        }
+      }
+    } else {
+      fn_d = self.fns.lookup(callee_id);
+      let id_ext = false;
+      if fn_d != 0 {
+        match self.a.decls.at(fn_d).kind {
+          .Fn(f1) => { id_ext = f1.is_extern; },
+          _ => {},
+        };
+      }
+
+      fname = match true {
+        fn_d != 0 && id_ext => callee_id,
+        _ => self.mangle(callee_id),
+      };
+    }
+
+    const call_ty = copyType(&self.a.exprs.at(e).ty);
+    const ret_struct = self.isAgg(call_ty);
+    let is_extern = false;
+    let is_variadic = false;
+
+    if fn_d != 0 {
+      match self.a.decls.at(fn_d).kind {
+        .Fn(f2) => {
+          is_extern = f2.is_extern;
+          is_variadic = f2.variadic;
+        },
+        _ => {},
+      };
+    }
+
+    let retc: Cabi;
+    if is_extern {
+      retc = self.cabiClassify(call_ty);
+    }
+
+    let params = ast.Range.empty();
+    let pskip: u32 = 0;
+    if is_method {
+      const rt_raw = copyType(&self.a.exprs.at(callee_base).ty);
+      let rtype = rt_raw;
+      if rt_raw.kind == .Pointer {
+        rtype = self.typeAt(rt_raw.elem);
+      }
+
+      let owner: u32 = 0;
+      if rtype.kind == .Enum && rtype.name.len > 0 {
+        const rref = self.structRef(rtype.name);
+        let si2: i64 = self.structs.len - 1;
+        while si2 >= 0 {
+          const sdl2 = self.structs.declAt(si2);
+          const is_enum_d2 = match self.a.decls.at(sdl2).kind {
+            .Enum(en1) => true,
+            _ => false,
+          };
+          if is_enum_d2 && (self.a.decls.at(sdl2).name == rtype.name
+            || self.structs.nameAt(si2) == rref) {
+            owner = sdl2;
+            si2 = -1;
+          } else {
+            si2 -= 1;
+          }
+        }
+      } else {
+        owner = self.structs.lookup(self.structRef(rtype.name));
+      }
+
+      if owner != 0 {
+        const md = self.findFnInDecl(owner, callee_field);
+        if md != 0 {
+          fn_d = md;
+          match self.a.decls.at(md).kind {
+            .Fn(f3) => {
+              params = f3.params;
+              is_variadic = f3.variadic;
+            },
+            _ => {},
+          }
+
+          if params.len > 0 {
+            const p0 = self.a.extra.get(params.start);
+            if self.a.params.at(p0).is_self {
+              pskip = 1;
+            }
+          }
+        }
+      }
+    } else if fn_d != 0 {
+      match self.a.decls.at(fn_d).kind {
+        .Fn(f4) => { params = f4.params; },
+        _ => {},
+      };
+    }
+
+    const param_count: i64 = (params.len as i64) - (pskip as i64);
+
+    let cap: i64 = c.args.len as i64;
+    if param_count > cap {
+      cap = param_count;
+    }
+
+    if cap < (c.args.len as i64) + 1 {
+      cap = (c.args.len as i64) + 1;
+    }
+
+    let argref = self.a.arena.alloc(cap * sizeof(str)) as []str;
+    let argtype = self.a.arena.alloc(cap * sizeof(ast.Type)) as []ast.Type;
+    let argbyval = self.a.arena.alloc(cap * sizeof(bool)) as []bool;
+    let argcoerce = self.a.arena.alloc(cap * sizeof(str)) as []str;
+
+    for zi in (0 as i64)..cap {
+      argcoerce[zi] = "";
+    }
+
+    const boxed_variadic = fn_d != 0 && is_variadic && !is_extern;
+    let fixed: u32 = 0;
+    if boxed_variadic {
+      fixed = param_count as u32;
+      if fixed > 0 {
+        fixed -= 1;
+      }
+    }
+
+    let pidx: i64 = 0;
+    let n: i64 = 0;
+    for i in (0 as u32)..c.args.len {
+      if boxed_variadic && i == fixed { break; }
+
+      const arg = self.a.extra.get(c.args.start + i);
+      const pslot = (pskip as i64) + pidx;
+      let ptype: ast.Type;
+
+      if pslot < (params.len as i64) {
+        ptype = self.paramTypeAt(self.a.extra.get(params.start + (pslot as u32)));
+      }
+
+      const arg_ty = copyType(&self.a.exprs.at(arg).ty);
+      const arg_is_string = match self.a.exprs.at(arg).kind {
+        .String(sv) => true,
+        _ => false,
+      };
+
+      const beyond_params = pslot >= (params.len as i64);
+      if ptype.kind == .Str && arg_is_string {
+        const sslot = self.nextReg();
+        self.out.writef("  %{} = alloca { ptr, i64 }\n", sslot);
+        const tmp = self.regRef(sslot);
+        self.emitStructInto(tmp, arg);
+        argref[n] = tmp;
+        argtype[n] = kindTy(.Str);
+        argbyval[n] = true;
+      } else if arg_ty.kind == .Str && !arg_is_string
+        && (ptype.kind == .Cstr || (fn_d != 0 && is_variadic && beyond_params)) {
+        const saddr = self.addrOrValue(arg);
+        const field_addr = self.nextReg();
+        self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", field_addr, saddr);
+        const cstr_reg = self.nextReg();
+        self.out.writef("  %{} = load ptr, ptr %{}\n", cstr_reg, field_addr);
+        argref[n] = self.regRef(cstr_reg);
+        argtype[n] = kindTy(.Cstr);
+        argbyval[n] = false;
+      } else if ptype.kind == .Slice && arg_ty.kind == .Array {
+        const aslot = self.nextReg();
+        self.out.writef("  %{} = alloca { ptr, i64 }\n", aslot);
+        const tmp2 = self.regRef(aslot);
+        self.emitSliceFromArray(tmp2, arg);
+        argref[n] = tmp2;
+        argtype[n] = ptype;
+        argbyval[n] = true;
+      } else if ptype.kind == .Optional && arg_ty.kind != .Optional {
+        const oslot = self.nextReg();
+        self.out.writef("  %{} = alloca {}\n", oslot, self.irType(ptype));
+        const tmp3 = self.regRef(oslot);
+        self.emitAggregateInto(tmp3, ptype, arg);
+        argref[n] = tmp3;
+        argtype[n] = ptype;
+        argbyval[n] = true;
+      } else if self.isAgg(arg_ty) && !arg_is_string {
+        let aaddr = self.emitAddr(arg);
+        if aaddr.len == 0 {
+          const gslot = self.nextReg();
+          self.out.writef("  %{} = alloca {}\n", gslot, self.irType(arg_ty));
+          aaddr = self.regRef(gslot);
+          self.emitAggregateInto(aaddr, arg_ty, arg);
+        }
+
+        if is_extern {
+          const pc0 = self.cabiClassify(arg_ty);
+          if pc0.n > 0 {
+            argcoerce[n] = self.cabiLoadArgs(aaddr, pc0);
+          }
+        }
+
+        argref[n] = aaddr;
+        argtype[n] = arg_ty;
+        argbyval[n] = true;
+      } else {
+        const v = self.emitValue(arg);
+        argref[n] = v.ref;
+        argtype[n] = v.ty;
+        argbyval[n] = false;
+      }
+
+      if pslot < (params.len as i64) {
+        pidx += 1;
+      }
+
+      n += 1;
+    }
+
+    while (pskip as i64) + pidx < (params.len as i64) {
+      const pd = self.a.extra.get(params.start + ((pskip as i64 + pidx) as u32));
+      const dv = self.a.params.at(pd).default_value;
+      if dv == 0 { break; }
+
+      const pdty = self.paramTypeAt(pd);
+      if self.isAgg(pdty) {
+        const dvty = copyType(&self.a.exprs.at(dv).ty);
+        let dt = pdty;
+
+        if dvty.kind != .Unknown {
+          dt = dvty;
+        }
+
+        const dslot = self.nextReg();
+        self.out.writef("  %{} = alloca {}\n", dslot, self.irType(dt));
+
+        const dtmp = self.regRef(dslot);
+        self.emitAggregateInto(dtmp, dt, dv);
+
+        if is_extern {
+          const pc1 = self.cabiClassify(dt);
+          if pc1.n > 0 {
+            argcoerce[n] = self.cabiLoadArgs(dtmp, pc1);
+          }
+        }
+
+        argref[n] = dtmp;
+        argtype[n] = dt;
+        argbyval[n] = true;
+      } else {
+        const v2 = self.emitValue(dv);
+        argref[n] = v2.ref;
+        argtype[n] = v2.ty;
+        argbyval[n] = false;
+      }
+      n += 1;
+      pidx += 1;
+    }
+
+    if boxed_variadic {
+      const box = "{ i32, [2 x i64] }";
+      let vcount: i64 = 0;
+
+      if (c.args.len as i64) > (fixed as i64) {
+        vcount = (c.args.len as i64) - (fixed as i64);
+      }
+
+      const arr = self.nextReg();
+      self.out.writef("  %{} = alloca [{} x {}]\n", arr, vcount, box);
+
+      let bj: i64 = 0;
+      for i in fixed..c.args.len {
+        const varg = self.a.extra.get(c.args.start + i);
+        const el = self.nextReg();
+        self.out.writef("  %{} = getelementptr [{} x {}], ptr %{}, i64 0, i64 {}\n", el, vcount, box, arr, bj);
+
+        const vk = copyType(&self.a.exprs.at(varg).ty).kind;
+        // NOTE: tag values used in std.io.Arg
+        const tag: i64 = match true {
+          vk == .Bool => 4,
+          vk == .Str => 3,
+          vk.isFloat() => 2,
+          vk.isSignedInteger() || vk == .Enum => 0,
+          _ => 1,
+        };
+
+        const kf = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr %{}, i32 0, i32 0\n", kf, box, el);
+        self.out.writef("  store i32 {}, ptr %{}\n", tag, kf);
+
+        const payp = self.nextReg();
+        self.out.writef("  %{} = getelementptr {}, ptr %{}, i32 0, i32 1\n", payp, box, el);
+
+        if vk == .Str {
+          self.emitAggregateInto(self.regRef(payp), kindTy(.Str), varg);
+        } else if vk.isFloat() {
+          const v3 = self.emitValue(varg);
+          let vref = v3.ref;
+          if vk == .F32 {
+            const ext = self.nextReg();
+            self.out.writef("  %{} = fpext float {} to double\n", ext, vref);
+            vref = self.regRef(ext);
+          }
+          self.out.writef("  store double {}, ptr %{}\n", vref, payp);
+        } else {
+          const v4 = self.emitValue(varg);
+          const wref = self.widenIndex(v4);
+          self.out.writef("  store i64 {}, ptr %{}\n", wref, payp);
+        }
+        bj += 1;
+      }
+
+      const sl = self.nextReg();
+      self.out.writef("  %{} = alloca { ptr, i64 }\n", sl);
+
+      const bp0 = self.nextReg();
+      self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 0\n", bp0, sl);
+      self.out.writef("  store ptr %{}, ptr %{}\n", arr, bp0);
+
+      const bp1 = self.nextReg();
+      self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 1\n", bp1, sl);
+      self.out.writef("  store i64 {}, ptr %{}\n", vcount, bp1);
+
+      argref[n] = self.regRef(sl);
+      argtype[n] = kindTy(.Slice);
+      argbyval[n] = true;
+      n += 1;
+    }
+
+    const ret_coerce = retc.n > 0 ? self.cabiRetType(retc) : "";
+
+    let callee_type = "";
+    if fn_d != 0 && is_extern && is_variadic {
+      let ptypes = "";
+      let psep = "";
+      let pi2: u32 = 0;
+      while pi2 < params.len {
+        const pp = self.a.extra.get(params.start + pi2);
+        const ppty = self.paramTypeAt(pp);
+        let pt = self.irType(ppty);
+        if self.isAgg(ppty) {
+          const pc = self.cabiClassify(ppty);
+          if pc.n == 1 {
+            pt = pc.ty0;
+          } else if pc.n == 2 {
+            pt = utils.concat(self.a.arena, pc.ty0, ", ", pc.ty1);
+          } else {
+            pt = "ptr";
+          }
+        }
+        ptypes = utils.concat(self.a.arena, ptypes, psep, pt);
+        psep = ", ";
+        pi2 += 1;
+      }
+      let rpart = "void";
+      if ret_coerce.len > 0 {
+        rpart = ret_coerce;
+      } else if call_ty.kind != .Void {
+        rpart = self.irType(call_ty);
+      }
+      let vsep = "";
+      if params.len > 0 {
+        vsep = ", ";
+      }
+      callee_type = utils.concat(self.a.arena, rpart, " (", ptypes, vsep, "...)");
+    }
+
+    let dest = sret_dest;
+    if ret_struct && dest.len == 0 {
+      const slot = self.nextReg();
+      self.out.writef("  %{} = alloca {}\n", slot, self.irType(call_ty));
+      dest = self.regRef(slot);
+    }
+
+    let result: Value;
+    result.ty = call_ty;
+    let retreg: u32 = 0;
+
+    if ret_struct && ret_coerce.len > 0 {
+      retreg = self.nextReg();
+      let ct0 = ret_coerce;
+      if callee_type.len > 0 {
+        ct0 = callee_type;
+      }
+
+      self.out.writef("  %{} = call {} @{}(", retreg, ct0, fname);
+      result.ref = dest;
+    } else if ret_struct || call_ty.kind == .Void {
+      let ct = "void";
+      if callee_type.len > 0 {
+        ct = callee_type;
+      }
+
+      self.out.writef("  call {} @{}(", ct, fname);
+
+      if ret_struct {
+        result.ref = dest;
+      } else {
+        result.ref = "";
+      }
+    } else {
+      const reg = self.nextReg();
+      let ct2 = self.irType(call_ty);
+      if callee_type.len > 0 {
+        ct2 = callee_type;
+      }
+
+      self.out.writef("  %{} = call {} @{}(", reg, ct2, fname);
+      result.ref = self.regRef(reg);
+    }
+
+    let sep = "";
+    if ret_struct && ret_coerce.len == 0 {
+      self.out.writef("ptr sret({}) {}", self.irType(call_ty), dest);
+      sep = ", ";
+    }
+
+    if is_method {
+      self.out.writef("{}ptr {}", sep, self_ref);
+      sep = ", ";
+    }
+
+    for i in (0 as i64)..n {
+      self.out.write(sep);
+      match true {
+        argcoerce[i].len > 0 => { self.out.write(argcoerce[i]); },
+        argbyval[i] => { self.out.writef("ptr byval({}) {}", self.irType(argtype[i]), argref[i]); },
+        _ => { self.out.writef("{} {}", self.irType(argtype[i]), argref[i]); },
+      }
+      sep = ", ";
+    }
+
+    self.out.write(")\n");
+
+    if ret_struct && ret_coerce.len > 0 {
+      if retc.n == 1 {
+        self.out.writef("  store {} %{}, ptr {}, align 1\n", retc.ty0, retreg, dest);
+      } else {
+        const e0 = self.nextReg();
+        self.out.writef("  %{} = extractvalue {} %{}, 0\n", e0, ret_coerce, retreg);
+        self.out.writef("  store {} %{}, ptr {}, align 1\n", retc.ty0, e0, dest);
+        const ph = self.nextReg();
+        self.out.writef("  %{} = getelementptr i8, ptr {}, i64 8\n", ph, dest);
+        const e1 = self.nextReg();
+        self.out.writef("  %{} = extractvalue {} %{}, 1\n", e1, ret_coerce, retreg);
+        self.out.writef("  store {} %{}, ptr %{}, align 1\n", retc.ty1, e1, ph);
+      }
+    }
+
+    return result;
+  }
+
+  fn nextReg(self): u32 {
+    const r = self.reg;
+    self.reg += 1;
+    return r;
+  }
+
+  fn isNullExpr(self, e: u32): bool {
+    return match self.a.exprs.at(e).kind {
+      .Null => true,
+      _ => false,
+    };
+  }
+
+  fn emitValue(self, e: u32): Value {
+    match self.a.exprs.at(e).kind {
+      .Id(idn) => { return self.emitIdValue(e, idn); },
+      .Call(cl) => { return self.emitCall(e, cl, ""); },
+      .Cast(cst) => { return self.emitCastValue(e, cst); },
+      .Sizeof(szt) => { return self.emitSizeofValue(szt); },
+      .Null => { return self.emitNullValue(e); },
+      .Binary(bin) => { return self.emitBinaryValue(e, bin); },
+      .Unary(un) => { return self.emitUnaryValue(e, un); },
+      .Ternary(ter) => { return self.emitTernaryValue(e, ter); },
+      .Coalesce(coa) => { return self.emitCoalesceValue(e, coa); },
+      .Field(fld) => { return self.emitFieldValue(e, fld); },
+      .Index(ixp) => { return self.emitLoadThroughAddr(e); },
+      .SliceRange(slr) => { return self.emitSliceRangeValue(e, slr); },
+      .Unwrap(uw2) => { return self.emitUnwrapValue(e); },
+      .Propagate(pg2) => { return self.emitUnwrapValue(e); },
+      .Match(mtc) => { return self.emitMatch(e, mtc, ""); },
+      .PostIncr(pi) => { return self.emitPostIncrValue(e, pi); },
+      _ => {},
+    };
+
+    let v: Value;
+    v.ty = copyType(&self.a.exprs.at(e).ty);
+
+    match self.a.exprs.at(e).kind {
+      .Boolean(b) => {
+        v.ref = b ? "true" : "false";
+      },
+      .Number(nv) => {
+        v.ref = self.numberRef(nv, v.ty.kind);
+      },
+      .String(sv) => {
+        v.ty = kindTy(.Cstr);
+        v.ref = utils.concat(self.a.arena, "@.str.",
+          utils.intText(self.a.arena, self.strings.idOf(e)));
+      },
+      _ => {
+        v.ref = "0";
+      },
+    };
+
+    return v;
+  }
+
+  fn relMemberType(self, owner_ref: str, t: ast.Type): ast.Type {
+    const dot = utils.lastDot(owner_ref);
+    if dot < 0 { return t; }
+
+    let nt = t;
+    if (nt.kind == .Struct || nt.kind == .Enum) && nt.name.len > 0 && utils.lastDot(nt.name) < 0 {
+      const q = utils.joinPath(self.a.arena, owner_ref[0..dot], nt.name);
+      if self.structs.lookup(q) != 0 {
+        nt.name = q;
+      }
+
+      return nt;
+    }
+
+    if (nt.kind == .Array || nt.kind == .Slice || nt.kind == .Optional || nt.kind == .Pointer) && nt.elem != 0 {
+      nt.elem = self.a.types.push(self.relMemberType(owner_ref, self.typeAt(nt.elem)));
+    }
+
+    return nt;
+  }
+
+  fn typeSize(self, t: ast.Type): i64 {
+    return match t.kind {
+      .Bool, .I8, .U8 => 1,
+      .I16, .U16 => 2,
+      .I32, .U32, .F32 => 4,
+      .I64, .U64, .F64, .Cstr, .Pointer => 8,
+      .Str, .Slice => 16,
+      .Array => t.array_length * self.typeSize(self.typeAt(t.elem)),
+      .Optional => 8 + roundUp8(self.typeSize(self.typeAt(t.elem))),
+      .Struct => self.structSize(t),
+      .Enum => self.enumSize(t),
+      _ => 8,
+    };
+  }
+
+  fn structSize(self, t: ast.Type): i64 {
+    const ref = self.structRef(t.name);
+    const d = self.structs.lookup(ref);
+    if d == 0 {
+      return 8;
+    }
+
+    let n: i64 = 0;
+    match self.a.decls.at(d).kind {
+      .Struct(sd) => {
+        let i: u32 = 0;
+        while i < sd.fields.len {
+          const fi = self.a.extra.get(sd.fields.start + i);
+          n += roundUp8(self.typeSize(self.relMemberType(ref, copyType(&self.a.fields.at(fi).ty))));
+          i += 1;
+        }
+      },
+      _ => {},
+    }
+
+    return n == 0 ? 8 : n;
+  }
+
+  fn enumSize(self, t: ast.Type): i64 {
+    if !self.isTaggedEnum(t) {
+      return 8;
+    }
+
+    const ref = self.structRef(t.name);
+    return 8 + roundUp8(self.maxPayloadSize(self.structs.lookup(ref), ref));
+  }
+
+  fn maxPayloadSize(self, d: u32, owner_ref: str): i64 {
+    let max: i64 = 0;
+    match self.a.decls.at(d).kind {
+      .Enum(ed) => {
+        for i in (0 as u32)..ed.members.len {
+          const mi = self.a.extra.get(ed.members.start + i);
+          if self.a.enum_members.at(mi).has_payload {
+            const s = self.typeSize(self.relMemberType(owner_ref,
+              copyType(&self.a.enum_members.at(mi).payload)));
+            if s > max {
+              max = s;
+            }
+          }
+        }
+      },
+      _ => {},
+    };
+    return max;
+  }
+
+  fn enumPayloadSlots(self, d: u32, owner_ref: str): i64 {
+    const slots = roundUp8(self.maxPayloadSize(d, owner_ref)) / 8;
+    return slots != 0 ? slots : 1;
+  }
+
+  fn emitStructTypes(self, d: u32) {
+    match self.a.decls.at(d).kind {
+      .Container(members) => {
+        for i in (0 as u32)..members.len {
+          self.emitStructTypes(self.a.extra.get(members.start + i));
+        }
+      },
+      .Enum(ed) => {
+        if ed.tagged {
+          const m = self.mangle(self.a.decls.at(d).name);
+          self.out.writef("%{} = type { i32, [{} x i64] }\n",
+            m, self.enumPayloadSlots(d, m));
+        }
+      },
+      .Struct(sd) => {
+        self.out.writef("%{} = type {", self.mangle(self.a.decls.at(d).name));
+        let first = true;
+        for i in (0 as u32)..sd.fields.len {
+          const fi = self.a.extra.get(sd.fields.start + i);
+          self.out.write(first ? " " : ", ");
+          self.out.write(self.irType(copyType(&self.a.fields.at(fi).ty)));
+          first = false;
+        }
+
+        self.out.write(first ? "}\n" : " }\n");
+      },
+      _ => {},
+    };
+  }
+
+  fn emitEntryPoint(self, d: u32): i32 {
+    return match self.a.decls.at(d).kind {
+      .Fn(f) => f.params.len == 0 ? self.emitFn(d, self.a.decls.at(d).name) : self.emitEntryPointArgs(d, f),
+      _ => 0,
+    };
+  }
+
+  fn emitEntryPointArgs(self, d: u32, f: ast.FnDecl): i32 {
+    const p0 = self.a.extra.get(f.params.start);
+    const args_name = self.a.params.at(p0).name;
+
+    self.locals = TypedTab.init(self.a.arena);
+    self.fn_regs = NameList.init(self.a.arena);
+    self.fn_params = NameList.init(self.a.arena);
+    self.defers = ast.U32List.init(self.a.arena);
+    self.loop_defer_base = 0;
+    self.fn_ret = f.return_type;
+    self.fn_name = self.a.decls.at(d).name;
+
+    self.recordFnReg("%argc");
+    self.recordFnReg("%argv");
+    const args_slot = self.claimFnReg(args_name);
+    self.locals.push(args_name, self.paramTypeAt(p0), args_slot);
+
+    if self.fns.lookup("strlen") == 0 {
+      self.out.write("declare i64 @strlen(ptr)\n");
+    }
+
+    self.out.write("define i32 @main(i32 %argc, ptr %argv) {\n");
+    self.out.write("entry:\n");
+    self.out.writef("  {} = alloca { ptr, i64 }\n", args_slot);
+    const argc = self.nextReg();
+    self.out.writef("  %{} = sext i32 %argc to i64\n", argc);
+
+    const strs = self.nextReg();
+    self.out.writef("  %{} = alloca { ptr, i64 }, i64 %{}\n", strs, argc);
+
+    const loop_index = self.nextReg();
+    self.out.writef("  %{} = alloca i64\n", loop_index);
+    self.out.writef("  store i64 0, ptr %{}\n", loop_index);
+    self.out.write("  br label %args.cond\n");
+
+    self.out.write("args.cond:\n");
+    let idx = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", idx, loop_index);
+
+    const cond = self.nextReg();
+    self.out.writef("  %{} = icmp slt i64 %{}, %{}\n", cond, idx, argc);
+    self.out.writef("  br i1 %{}, label %args.body, label %args.done\n", cond);
+
+    self.out.write("args.body:\n");
+    idx = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", idx, loop_index);
+    const argv_slot = self.nextReg();
+    self.out.writef("  %{} = getelementptr ptr, ptr %argv, i64 %{}\n", argv_slot, idx);
+
+    const cstr_reg = self.nextReg();
+    self.out.writef("  %{} = load ptr, ptr %{}\n", cstr_reg, argv_slot);
+
+    const len = self.nextReg();
+    self.out.writef("  %{} = call i64 @strlen(ptr %{})\n", len, cstr_reg);
+
+    const element = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i64 %{}\n", element, strs, idx);
+
+    const element_ptr = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 0\n", element_ptr, element);
+    self.out.writef("  store ptr %{}, ptr %{}\n", cstr_reg, element_ptr);
+
+    const element_len = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr %{}, i32 0, i32 1\n", element_len, element);
+    self.out.writef("  store i64 %{}, ptr %{}\n", len, element_len);
+    idx = self.nextReg();
+    self.out.writef("  %{} = load i64, ptr %{}\n", idx, loop_index);
+
+    const next = self.nextReg();
+    self.out.writef("  %{} = add i64 %{}, 1\n", next, idx);
+    self.out.writef("  store i64 %{}, ptr %{}\n", next, loop_index);
+    self.out.write("  br label %args.cond\n");
+    self.out.write("args.done:\n");
+
+    const args_ptr = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 0\n", args_ptr, args_slot);
+    self.out.writef("  store ptr %{}, ptr %{}\n", strs, args_ptr);
+
+    const args_len = self.nextReg();
+    self.out.writef("  %{} = getelementptr { ptr, i64 }, ptr {}, i32 0, i32 1\n", args_len, args_slot);
+    self.out.writef("  store i64 %{}, ptr %{}\n", argc, args_len);
+
+    if self.emitBlock(f.body, f.return_type, self.a.decls.at(d).name) != 0 {
+      return 1;
+    }
+
+    self.out.write("}\n\n");
+    return 0;
+  }
+
+  fn emitGlobal(self, d: u32, g: ast.GlobalDecl) {
+    const name = self.a.decls.at(d).name;
+    const vis = self.a.decls.at(d).visibility == .Private ? "internal " : "";
+    const kw = g.mutable ? "global" : "constant";
+
+    if g.init == 0 || self.isNullExpr(g.init) {
+      self.out.writef("@{} = {}{} {} zeroinitializer\n", name, vis, kw, self.irType(g.ty));
+      return;
+    }
+
+    let init_str_id: i64 = -1;
+    match self.a.exprs.at(g.init).kind {
+      .String(sv) => { init_str_id = self.strings.idOf(g.init); },
+      _ => {},
+    }
+
+    if g.ty.kind == .Str && init_str_id >= 0 {
+      self.out.writef("@{} = {}{} { ptr, i64 } { ptr @.str.{}, i64 {} }\n", name, vis, kw, init_str_id, self.stringText(g.init).len);
+      return;
+    }
+
+    const v = self.emitValue(g.init);
+    self.out.writef("@{} = {}{} {} {}\n", name, vis, kw, g.ty.kind.toIr(), v.ref);
+  }
+
+  fn emitDecl(self, d: u32): i32 {
+    const name = self.a.decls.at(d).name;
+    match self.a.decls.at(d).kind {
+      .Container(members) => {
+        for i in (0 as u32)..members.len {
+          if self.emitDecl(self.a.extra.get(members.start + i)) != 0 { return 1; }
+        }
+      },
+      .Fn(f) => {
+        if f.is_extern {
+          self.emitExternFn(d);
+          return 0;
+        }
+
+        if name == "main" {
+          return self.emitEntryPoint(d);
+        }
+
+        return self.emitFn(d, name);
+      },
+      .Struct(sd) => {
+        for i in (0 as u32)..sd.members.len {
+          const mi = self.a.extra.get(sd.members.start + i);
+          if self.emitFn(mi, utils.joinPath(self.a.arena, name, self.a.decls.at(mi).name)) != 0 { return 1; }
+        }
+      },
+      .Enum(ed) => {
+        let k: u32 = 0;
+        for i in (0 as u32)..ed.methods.len {
+          const mi2 = self.a.extra.get(ed.methods.start + i);
+          if self.emitFn(mi2, utils.joinPath(self.a.arena, name, self.a.decls.at(mi2).name)) != 0 { return 1; }
+        }
+      },
+      .Global(g) => { self.emitGlobal(d, g); },
+      _ => {},
+    };
+
+    return 0;
+  }
+
+  fn stmtTerminates(self, s: u32): bool {
+    return match self.a.stmts.at(s).kind {
+      .Return(rv) => true,
+      .Break => true,
+      .Continue => true,
+      .If(iff) => iff.else_body.len > 0 && self.blockTerminates(iff.then_body) && self.blockTerminates(iff.else_body),
+      _ => false,
+    };
+  }
+
+  fn blockTerminates(self, body: ast.Range): bool {
+    for i in (0 as u32)..body.len {
+      if self.stmtTerminates(self.a.extra.get(body.start + i)) { return true; }
+    }
+
+    return false;
+  }
+
+  fn collectParams(self, params: ast.Range) {
+    for i in (0 as u32)..params.len {
+      const pi = self.a.extra.get(params.start + i);
+      self.collectExpr(self.a.params.at(pi).default_value);
+    }
+  }
+
+  fn collectFnMembers(self, members: ast.Range): i32 {
+    for i in (0 as u32)..members.len {
+      const di = self.a.extra.get(members.start + i);
+      match self.a.decls.at(di).kind {
+        .Fn(f) => {
+          self.collectParams(f.params);
+          if self.collectBlock(f.body) != 0 { return 1; }
+        },
+        _ => {},
+      }
+    }
+
+    return 0;
+  }
+
+  fn collectDecl(self, d: u32): i32 {
+    const name = self.a.decls.at(d).name;
+    match self.a.decls.at(d).kind {
+      .Container(members) => {
+        let i: u32 = 0;
+        for i in (0 as u32)..members.len {
+          if self.collectDecl(self.a.extra.get(members.start + i)) != 0 { return 1; }
+        }
+      },
+      .Fn(f) => {
+        self.fns.push(name, d);
+        self.collectParams(f.params);
+        return self.collectBlock(f.body);
+      },
+      .Global(g) => {
+        self.globals.push(name, g.ty, "");
+        return self.collectExpr(g.init);
+      },
+      .Struct(sd) => {
+        self.structs.push(self.mangle(name), d);
+        for i in (0 as u32)..sd.fields.len {
+          const fidx = self.a.extra.get(sd.fields.start + i);
+          self.collectExpr(self.a.fields.at(fidx).default_value);
+        }
+
+        return self.collectFnMembers(sd.members);
+      },
+      .Enum(ed) => {
+        self.structs.push(self.mangle(name), d);
+        return self.collectFnMembers(ed.methods);
+      },
+      _ => {},
+    };
+    return 0;
+  }
+}
+
+struct StrEntry {
+  node: u32,
+  id: i64,
+}
+
+struct StrTab {
+  arena: *std.mem.Arena,
+  items: []StrEntry,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): StrTab {
+    let t: StrTab;
+    t.arena = arena;
+    return t;
+  }
+
+  pub fn idOf(self, node: u32): i64 {
+    for i in (0 as i64)..self.len {
+      if self.items[i].node == node {
+        return self.items[i].id;
+      }
+    }
+
+    return -1;
+  }
+
+  pub fn intern(self, node: u32): i64 {
+    const existing = self.idOf(node);
+    if existing >= 0 {
+      return existing;
+    }
+
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(StrEntry)) as []StrEntry;
+      for i in (0 as i64)..self.len {
+        bigger[i] = self.items[i];
+      }
+
+      self.items = bigger;
+    }
+
+    const id = self.len;
+    self.items[self.len] = StrEntry{node: node, id: id};
+    self.len += 1;
+
+    return id;
+  }
+
+  pub fn nodeAt(self, i: i64): u32 {
+    return self.items[i].node;
+  }
+}
+
+struct TypedEntry {
+  name: str,
+  ty: ast.Type,
+  ptr: str,
+}
+
+struct TypedTab {
+  arena: *std.mem.Arena,
+  items: []TypedEntry,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): TypedTab {
+    let t: TypedTab;
+    t.arena = arena;
+    return t;
+  }
+
+  pub fn push(self, name: str, ty: ast.Type, ptr: str) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(TypedEntry)) as []TypedEntry;
+      for i in (0 as i64)..self.len {
+        bigger[i] = self.items[i];
+      }
+
+      self.items = bigger;
+    }
+
+    self.items[self.len] = TypedEntry{name: name, ty: ty, ptr: ptr};
+    self.len += 1;
+  }
+
+  pub fn lookup(self, name: str): i64 {
+    let i: i64 = self.len - 1;
+    while i >= 0 {
+      if self.items[i].name == name {
+        return i;
+      }
+      i -= 1;
+    }
+    return -1;
+  }
+
+  pub fn ty(self, i: i64): ast.Type {
+    return self.items[i].ty;
+  }
+
+  pub fn ptr(self, i: i64): str {
+    return self.items[i].ptr;
+  }
+}
+
+struct NameList {
+  arena: *std.mem.Arena,
+  items: []str,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): NameList {
+    let l: NameList;
+    l.arena = arena;
+    return l;
+  }
+
+  pub fn push(self, name: str) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(str)) as []str;
+      for i in (0 as i64)..self.len {
+        bigger[i] = self.items[i];
+      }
+
+      self.items = bigger;
+    }
+
+    self.items[self.len] = name;
+    self.len += 1;
+  }
+
+  pub fn contains(self, name: str): bool {
+    for i in (0 as i64)..self.len {
+      if self.items[i] == name {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}
+
+struct Entry {
+  name: str,
+  decl: u32,
+}
+
+struct Tab {
+  arena: *std.mem.Arena,
+  items: []Entry,
+  pub len: i64,
+
+  pub fn init(arena: *std.mem.Arena): Tab {
+    let t: Tab;
+    t.arena = arena;
+    return t;
+  }
+
+  pub fn push(self, name: str, decl: u32) {
+    if self.len == self.items.len {
+      const cap: i64 = self.items.len == 0 ? 16 : self.items.len * 2;
+      let bigger = self.arena.alloc(cap * sizeof(Entry)) as []Entry;
+      for i in (0 as i64)..self.len {
+        bigger[i] = self.items[i];
+      }
+
+      self.items = bigger;
+    }
+
+    self.items[self.len] = Entry{name: name, decl: decl};
+    self.len += 1;
+  }
+
+  pub fn lookup(self, name: str): u32 {
+    let i: i64 = self.len - 1;
+    while i >= 0 {
+      if self.items[i].name == name {
+        return self.items[i].decl;
+      }
+
+      i -= 1;
+    }
+
+    return 0;
+  }
+
+  pub fn nameAt(self, i: i64): str {
+    return self.items[i].name;
+  }
+
+  pub fn declAt(self, i: i64): u32 {
+    return self.items[i].decl;
+  }
+}
+
+fn emitEscaped(arena: *std.mem.Arena, out: *std.io.BufWriter, s: str) {
+  const hex = "0123456789ABCDEF";
+  let buf = arena.alloc(s.len * 3);
+  let n: i64 = 0;
+  let i: i64 = 0;
+  while i < s.len {
+    const b = s[i];
+    if b >= 0x20 && b < 0x7F && b != '"' && b != '\\' {
+      buf[n] = b;
+      n += 1;
+    } else {
+      buf[n] = '\\';
+      buf[n + 1] = hex[(b >> 4) as i64];
+      buf[n + 2] = hex[(b & 15) as i64];
+      n += 3;
+    }
+    i += 1;
+  }
+  out.write(buf[0..n] as str);
+}
+
+struct Value {
+  ty: ast.Type,
+  ref: str,
+}
+
+fn roundUp8(n: i64): i64 {
+  return (n + 7) / 8 * 8;
+}
+
+fn kindTy(kind: ast.TypeKind): ast.Type {
+  let t: ast.Type;
+  t.kind = kind;
+  return t;
+}
+
+fn typeBits(kind: ast.TypeKind): i64 {
+  return match kind {
+    .I8, .U8 => 8,
+    .I16, .U16 => 16,
+    .I32, .U32, .F32 => 32,
+    .I64, .U64, .F64 => 64,
+    _ => 0,
+  };
+}
+
+fn zeroValue(kind: ast.TypeKind): str {
+  return match kind {
+    .Bool => "false",
+    .F32, .F64 => "0.0",
+    .Cstr => "null",
+    .Str, .Slice, .Array, .Struct, .Optional => "zeroinitializer",
+    _ => "0",
+  };
+}
+
+fn floatConstRef(arena: *std.mem.Arena, text: str): str {
+  let ztext = arena.alloc(text.len + 1);
+  for i in (0 as i64)..text.len {
+    ztext[i] = text[i];
+  }
+
+  ztext[text.len] = 0;
+  const d = strtod(ztext.ptr, 0);
+
+  let bytes = arena.alloc(8);
+  let as_f = bytes as []f64;
+  as_f[0] = d;
+
+  const as_u = bytes as []u64;
+  let bits = as_u[0];
+
+  const hex = "0123456789ABCDEF";
+  let out = arena.alloc(18);
+  out[0] = '0';
+  out[1] = 'x';
+
+  for i in 0..16 {
+    out[17 - i] = hex[(bits & 15) as i64];
+    bits >>= 4;
+  }
+  return out[0..18] as str;
+}
+
+fn hexToDecText(arena: *std.mem.Arena, text: str): str {
+  let v: u64 = 0;
+  for i in (2 as i64)..text.len {
+    const ch = text[i];
+    const d: u64 = match ch {
+      '0'...'9' => (ch - '0') as u64,
+      'a'...'f' => (ch - 'a') as u64 + 10,
+      'A'...'F' => (ch - 'A') as u64 + 10,
+      _ => 0,
+    };
+    v = v * 16 + d;
+  }
+
+  if v == 0 { return "0"; }
+
+  let buf = arena.alloc(20);
+  let n: i64 = 20;
+  while v > 0 {
+    n -= 1;
+    buf[n] = (v % 10) as u8 + '0';
+    v /= 10;
+  }
+
+  return buf[n..20] as str;
+}
+
+struct Cabi {
+  n: i64,
+  ty0: str,
+  ty1: str,
+}
+
+struct CabiScan {
+  present: [2]bool,
+  has_int: [2]bool,
+  end: [2]i64,
+}
+
+fn cabiMark(s: *CabiScan, off: i64, size: i64, is_float: bool) {
+  for i in (0 as i64)..(2 as i64) {
+    const lo = i * 8;
+    const hi = lo + 8;
+
+    if off < hi && off + size > lo {
+      s.present[i] = true;
+      if !is_float {
+        s.has_int[i] = true;
+      }
+      let end = off + size;
+      if end > hi {
+        end = hi;
+      }
+      if end - lo > s.end[i] {
+        s.end[i] = end - lo;
+      }
+    }
+  }
+}
+
+fn copyType(t: *ast.Type): ast.Type {
+  return {
+    kind: t.kind,
+    name: t.name,
+    module: t.module,
+    elem: t.elem,
+    array_length: t.array_length,
+    span: t.span,
+  };
+}
+
+// TODO: Refactor to be under TypeKind
+fn isAggregate(kind: ast.TypeKind): bool {
+  return match kind {
+    .Struct, .Str, .Array, .Slice, .Optional => true,
+    _ => false,
+  };
+}
+
+pub enum Result {
+  Ok,
+  Err: str,
+}
+
+pub fn emit(a: *ast.Ast, entry: u32, out: std.io.File): Result {
+  let bw = std.io.BufWriter.init(out, a.arena.alloc(65536));
+  let ctx = Ctx.init(a, &bw);
+
+  for i in (1 as u32)..(a.modules.len as u32) {
+    ctx.prefix = modulePrefix(a, entry, i);
+    ctx.module = i;
+
+    if ctx.collectDecl(a.modules.at(i).root) != 0 {
+      bw.flush();
+      return .Err("cannot emit IR for this input");
+    }
+  }
+
+  ctx.prefix = "";
+  ctx.emitStringGlobals();
+  if ctx.uses_str_eq && ctx.fns.lookup("memcmp") == 0 {
+    bw.write("declare i32 @memcmp(ptr, ptr, i64)\n");
+  }
+
+  for i in (1 as u32)..(a.modules.len as u32) {
+    ctx.prefix = modulePrefix(a, entry, i);
+    ctx.emitStructTypes(a.modules.at(i).root);
+  }
+
+  for i in (1 as u32)..(a.modules.len as u32) {
+    ctx.prefix = modulePrefix(a, entry, i);
+    ctx.module = i;
+
+    if ctx.emitDecl(a.modules.at(i).root) != 0 {
+      bw.flush();
+      return .Err("cannot emit IR for this input");
+    }
+  }
+
+  if ctx.uses_memcpy {
+    bw.write("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n");
+  }
+  if ctx.uses_memset {
+    bw.write("declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)\n");
+  }
+  if ctx.uses_abort && ctx.fns.lookup("abort") == 0 {
+    bw.write("declare void @abort()\n");
+  }
+
+  bw.flush();
+  return .Ok;
+}
+
+fn modulePrefix(a: *ast.Ast, entry: u32, m: u32): str {
+  return m != entry ? utils.moduleStem(a.modules.at(m).path) : "";
+}

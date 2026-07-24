@@ -2,9 +2,10 @@
 flag: all four flag types parse from =value and space forms; defaults apply when unset
 --FILE--
 const std = import("std");
+const flag = import("flag");
 
 pub fn main(): i32 {
-  let fs = std.flag.FlagSet.init("prog");
+  let fs = flag.FlagSet.init("prog");
   fs.addBool("v", false, "verbose");
   fs.addInt("n", 7, "count");
   fs.addFloat("r", 0.5, "ratio");

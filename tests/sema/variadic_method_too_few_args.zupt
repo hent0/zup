@@ -1,0 +1,27 @@
+--TEST--
+a variadic method still requires its fixed parameters
+--FILE--
+enum Arg {
+  Int: i64,
+  Uint: i64,
+  Float: f64,
+  Str: str,
+  Bool: bool,
+}
+
+struct S {
+  v: i32,
+
+  pub fn f(self, tag: str, args: ...): i64 {
+    return args.len;
+  }
+}
+
+pub fn main(): i32 {
+  const s = S{v: 1};
+  return s.f() as i32;
+}
+--EXPECTERR--
+zup: error: 'f' expects at least 1 argument but got 0 [19:12]
+--EXIT--
+1

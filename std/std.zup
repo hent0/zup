@@ -4,6 +4,20 @@ pub const ascii = import("ascii/ascii.zup");
 
 pub extern fn exit(code: i32);
 extern fn abort();
+extern fn strlen(s: cstr): i64;
+extern fn getenv(name: cstr): cstr;
+
+pub fn fromCstr(c: cstr): str {
+  return c != null ? c[0..strlen(c)] as str : "";
+}
+
+pub fn env(name: cstr): ?str {
+  const v = getenv(name);
+  if v == null {
+    return null;
+  }
+  return fromCstr(v);
+}
 
 pub fn assert(cond: bool, msg: str = "") {
   if !cond {

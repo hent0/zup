@@ -481,6 +481,12 @@ static expr_t *parse_postfix(parser_t *parser) {
     } else if (check(parser, TOKEN_BANG)) {
       advance(parser);
       expr = ast_unwrap_init(expr, parser->arena);
+    } else if (check(parser, TOKEN_PLUS_PLUS) ||
+               check(parser, TOKEN_MINUS_MINUS)) {
+      bool increment = parser->current.kind == TOKEN_PLUS_PLUS;
+      advance(parser);
+      expr = ast_post_incr_init(expr, increment, parser->arena);
+      break;
     } else {
       break;
     }
@@ -952,19 +958,22 @@ static stmt_t *parse_stmt(parser_t *parser) {
     return NULL;
   }
 
-  if (check(parser, TOKEN_PLUS_PLUS) || check(parser, TOKEN_MINUS_MINUS)) {
-    bool increment = parser->current.kind == TOKEN_PLUS_PLUS;
-    token_t op = advance(parser);
-    if (expr->kind != EXPR_ID && expr->kind != EXPR_FIELD &&
-        expr->kind != EXPR_INDEX) {
+  /* A top-level `n++;` desugars to the compound-assign form so it reuses the
+     assignment codegen (and keeps its AST/IR unchanged); post-incr only stays
+     an expression when it is nested inside another expression. */
+  if (expr->kind == EXPR_POST_INCR) {
+    expr_t *target = expr->post_incr.operand;
+    bool increment = expr->post_incr.increment;
+    if (target->kind != EXPR_ID && target->kind != EXPR_FIELD &&
+        target->kind != EXPR_INDEX) {
       parse_error(parser, "invalid assignment target");
       return NULL;
     }
     expect(parser, TOKEN_SEMICOLON,
            increment ? "expected ';' after '++'" : "expected ';' after '--'");
-    token_t one = {.value = "1", .line = op.line, .col = op.col};
+    token_t one = {.value = "1", .line = expr->line, .col = expr->col};
     stmt_t *stmt = ast_assign_init(
-        start, expr, ast_number_init(one, parser->arena), parser->arena);
+        start, target, ast_number_init(one, parser->arena), parser->arena);
     stmt->assign.compound = true;
     stmt->assign.op = increment ? BINOP_ADD : BINOP_SUB;
     return stmt;
@@ -1207,11 +1216,6 @@ static decl_t *parse_method(parser_t *parser, char *struct_name,
     if (p == NULL) {
       break;
     }
-    if (named_variadic) {
-      diag_error(parser->src, parser->current.line, parser->current.col,
-                 "methods cannot take variadic parameters");
-      parser->had_error = true;
-    }
     if (tail == NULL) {
       fn->fn.params = p;
     } else {
@@ -1219,6 +1223,15 @@ static decl_t *parse_method(parser_t *parser, char *struct_name,
     }
     tail = p;
     fn->fn.params_count++;
+    if (named_variadic) {
+      fn->fn.variadic = true;
+      if (!check(parser, TOKEN_RPAREN)) {
+        diag_error(parser->src, parser->current.line, parser->current.col,
+                   "the variadic parameter must be last");
+        parser->had_error = true;
+      }
+      break;
+    }
     if (!match(parser, TOKEN_COMMA)) {
       break;
     }

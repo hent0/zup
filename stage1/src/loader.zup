@@ -6,21 +6,28 @@ const ast = import("ast.zup");
 const sema = import("sema.zup");
 const utils = import("utils.zup");
 
-pub const std_root = "std";
+extern fn readlink(path: cstr, buf: cstr, size: i64): i64;
+
+fn stdRoot(arena: *std.mem.Arena): str {
+  let buf = arena.alloc(4096);
+  const n = readlink("/proc/self/exe", buf.ptr, 4095);
+
+  if n > 0 {
+    return utils.concat(arena, dirname(buf[0..n] as str), "/../std");
+  }
+
+  return std.env("ZUP_STD") ?? "std";
+}
 
 pub fn load(a: *ast.Ast, path: str): u32 {
   return loadModule(a, path, diag.Span{line: 0, col: 0}, "");
 }
 
 fn lookup(a: *ast.Ast, path: str): u32 {
-  let i: u32 = 1;
-  while (i as i64) < a.modules.len {
-    if a.modules.at(i).path == path {
-      return i;
-    }
-
-    i += 1;
+  for i in (0 as u32)..(a.modules.len as u32) {
+    if a.modules.at(i).path == path { return i; }
   }
+
   return 0;
 }
 
@@ -46,8 +53,7 @@ fn loadModule(a: *ast.Ast, path: str, imp_span: diag.Span, imp_path: str): u32 {
 
       match a.decls.at(root).kind {
         .Container(members) => {
-          let i: u32 = 0;
-          while i < members.len {
+          for i in (0 as u32)..members.len {
             const di = a.extra.get(members.start + i);
             match a.decls.at(di).kind {
               .Import(imp) => {
@@ -73,7 +79,6 @@ fn loadModule(a: *ast.Ast, path: str, imp_span: diag.Span, imp_path: str): u32 {
               },
               _ => {},
             }
-            i += 1;
           }
         },
         _ => {},
@@ -119,5 +124,5 @@ fn resolveModule(arena: *std.mem.Arena, spec: str, dir: str): str {
     return utils.concat(arena, dir, "/", spec);
   }
 
-  return utils.concat(arena, std_root, "/", spec, ".zup");
+  return utils.concat(arena, stdRoot(arena), "/", spec, ".zup");
 }

@@ -118,7 +118,7 @@ pub struct FlagSet {
         io.printerrln("flag provided but not defined: -{}", name);
         self.die();
       }
-      const f = &self.flags[found ?? 0];
+      const f = &self.flags[found!];
 
       const is_bool = match f.value {
         .Bool(b) => true,
@@ -133,7 +133,7 @@ pub struct FlagSet {
             io.printerrln("invalid boolean value \"{}\" for -{}", value, name);
             self.die();
           }
-          b = pb ?? false;
+          b = pb!;
         }
         f.value = .Bool(b);
       } else {
@@ -153,7 +153,7 @@ pub struct FlagSet {
               io.printerrln("invalid value \"{}\" for flag -{}", value, name);
               self.die();
             }
-            f.value = .Int(iv ?? 0);
+            f.value = .Int(iv!);
           },
           .Float(old) => {
             const fv = parseFloat(value);
@@ -161,7 +161,7 @@ pub struct FlagSet {
               io.printerrln("invalid value \"{}\" for flag -{}", value, name);
               self.die();
             }
-            f.value = .Float(fv ?? 0.0);
+            f.value = .Float(fv!);
           },
           .Str(old) => {
             f.value = .Str(value);
@@ -194,43 +194,50 @@ pub struct FlagSet {
   }
 
   pub fn getBool(self, name: str): bool {
-    const f = self.mustFind(name);
-    return match f.value {
-      .Bool(b) => b,
-      _ => typeErrBool(name),
+    match self.mustFind(name).value {
+      .Bool(b) => { return b; },
+      _ => {},
     };
+    typeErr(name, "a bool");
+    return false;
   }
 
   pub fn getInt(self, name: str): i64 {
-    const f = self.mustFind(name);
-    return match f.value {
-      .Int(v) => v,
-      _ => typeErrInt(name),
+    match self.mustFind(name).value {
+      .Int(v) => { return v; },
+      _ => {},
     };
+    typeErr(name, "an int");
+    return 0;
   }
 
   pub fn getFloat(self, name: str): f64 {
-    const f = self.mustFind(name);
-    return match f.value {
-      .Float(v) => v,
-      _ => typeErrFloat(name),
+    match self.mustFind(name).value {
+      .Float(v) => { return v; },
+      _ => {},
     };
+    typeErr(name, "a float");
+    return 0.0;
   }
 
   pub fn getStr(self, name: str): str {
-    const f = self.mustFind(name);
-    return match f.value {
-      .Str(v) => v,
-      _ => typeErrStr(name),
+    match self.mustFind(name).value {
+      .Str(v) => { return v; },
+      _ => {},
     };
+    typeErr(name, "a string");
+    return "";
   }
 
   pub fn getStrList(self, name: str): []str {
     const f = self.mustFind(name);
-    return match f.value {
-      .StrList => f.list[0..f.list_count],
-      _ => typeErrStrList(name),
+    match f.value {
+      .StrList => { return f.list[0..f.list_count]; },
+      _ => {},
     };
+    typeErr(name, "a string list");
+    let e: [1]str;
+    return e[0..0];
   }
 
   pub fn wasSet(self, name: str): bool {
@@ -319,7 +326,7 @@ pub struct FlagSet {
       io.printerrln("flag: lookup of undefined flag: {}", name);
       exit(2);
     }
-    return &self.flags[idx ?? 0];
+    return &self.flags[idx!];
   }
 
   fn die(self) {
@@ -360,7 +367,7 @@ pub fn parseInt(s: str): ?i64 {
       if d == null {
         return null;
       }
-      v = v * 16 + (d ?? 0);
+      v = v * 16 + d!;
       i++;
     }
   } else {
@@ -373,7 +380,7 @@ pub fn parseInt(s: str): ?i64 {
     }
   }
 
-  return neg ? 0 - v : v;
+  return neg ? -v : v;
 }
 
 fn parseFloat(s: str): ?f64 {
@@ -432,33 +439,7 @@ fn validFloat(s: str): bool {
   return i == s.len;
 }
 
-fn typeErrBool(name: str): bool {
-  io.printerrln("flag: -{} is not a bool flag", name);
+fn typeErr(name: str, kind: str) {
+  io.printerrln("flag: -{} is not {} flag", name, kind);
   exit(2);
-  return false;
-}
-
-fn typeErrInt(name: str): i64 {
-  io.printerrln("flag: -{} is not an int flag", name);
-  exit(2);
-  return 0;
-}
-
-fn typeErrFloat(name: str): f64 {
-  io.printerrln("flag: -{} is not a float flag", name);
-  exit(2);
-  return 0.0;
-}
-
-fn typeErrStr(name: str): str {
-  io.printerrln("flag: -{} is not a string flag", name);
-  exit(2);
-  return "";
-}
-
-fn typeErrStrList(name: str): []str {
-  io.printerrln("flag: -{} is not a string list flag", name);
-  exit(2);
-  let e: [1]str;
-  return e[0..0];
 }

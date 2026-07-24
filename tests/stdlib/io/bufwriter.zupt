@@ -1,0 +1,45 @@
+--TEST--
+std.io.BufWriter batches small writes, bypasses on oversize writes, and loses nothing across flush boundaries
+--FILE--
+const std = import("std");
+
+pub fn main(): i32 {
+  let f: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_bufwriter_test.txt", .Write) {
+    .Ok(x) => { f = x; },
+    .Err(e) => { return 1; },
+  };
+
+  let storage: [8]u8;
+  let w = std.io.BufWriter.init(f, storage);
+  w.write("ab");
+  w.write("cde");
+  w.write("fgh");
+  w.writef("-{}-{}-", 42, true);
+  w.write("this line is far larger than the buffer");
+  w.writeln("!");
+  w.flush();
+  f.close();
+
+  let back: std.io.File = std.io.File{fd: -1};
+  match std.io.open("/tmp/zup_bufwriter_test.txt", .Read) {
+    .Ok(x) => { back = x; },
+    .Err(e) => { return 2; },
+  };
+  let buf: [128]u8;
+  const view: []u8 = buf;
+  const n: i64 = match back.read(view) {
+    .Ok(c) => c,
+    .Err(e) => 0,
+  };
+  back.close();
+
+  std.io.print("{}", buf[0..n] as str);
+  return 0;
+}
+--CLEANUP--
+rm -f /tmp/zup_bufwriter_test.txt
+--EXPECT--
+abcdefgh-42-true-this line is far larger than the buffer!
+--EXIT--
+0

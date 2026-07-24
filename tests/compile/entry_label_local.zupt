@@ -1,0 +1,13 @@
+--TEST--
+a local or parameter named 'entry' does not collide with the function's entry basic-block label
+--FILE--
+fn double(entry: i32): i32 {
+  return entry * 2;
+}
+
+pub fn main(): i32 {
+  const entry: i32 = 0;
+  return entry + double(entry);
+}
+--EXIT--
+0

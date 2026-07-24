@@ -5,6 +5,8 @@ const source = import("source.zup");
 const diag = import("diag.zup");
 const ast = import("ast.zup");
 const loader = import("loader.zup");
+const codegen = import("codegen.zup");
+const utils = import("utils.zup");
 
 pub struct Source {
   path: str,
@@ -33,8 +35,9 @@ pub struct CompilerOpts {
   pub static: bool,
   pub link_libs: []str,
   pub link_paths: []str,
+  pub error_format: diag.ErrorFormat,
 
-  pub fn init(input: str, output: ?str, mode: Mode, keep_ir: bool, static: bool, link_libs: []str, link_paths: []str): CompilerOpts {
+  pub fn init(input: str, output: ?str, mode: Mode, keep_ir: bool, static: bool, link_libs: []str, link_paths: []str, error_format: diag.ErrorFormat): CompilerOpts {
     return {
       input: input,
       output: output,
@@ -43,6 +46,7 @@ pub struct CompilerOpts {
       static: static,
       link_libs: link_libs,
       link_paths: link_paths,
+      error_format: error_format,
     };
   }
 }
@@ -57,6 +61,8 @@ pub struct Compiler {
   }
 
   pub fn compile(self, opts: CompilerOpts) {
+    diag.setErrorFormat(opts.error_format);
+
     match opts.mode {
       .Tokenize => {
         match source.Source.init(opts.input, self.arena) {
@@ -72,35 +78,123 @@ pub struct Compiler {
         };
       },
       .Ast => self.parse(opts.input),
+      .Ir => {
+        let ira = ast.Ast.init(self.arena);
+        const ir_entry = loader.load(&ira, opts.input);
+        const out_path = opts.output ?? withLlExt(self.arena, basenameStem(opts.input));
+        let out = std.io.stdout();
+        if out_path != "-" {
+          match std.io.open(out_path, .Write) {
+            .Ok(f) => { out = f; },
+            .Err(e) => {
+              std.io.printerrln("zup: error: cannot write '{}'", out_path);
+              std.exit(1);
+            },
+          };
+        }
+        match codegen.emit(&ira, ir_entry, out) {
+          .Err(m) => {
+            std.io.printerrln("zup: error: {}", m);
+            std.exit(1);
+          },
+          _ => {},
+        };
+      },
       _ => {
-        self.parseOnly(opts.input);
-        std.io.printerrln("Not implemented!");
-        std.exit(2);
+        let ca = ast.Ast.init(self.arena);
+        const c_entry = loader.load(&ca, opts.input);
+
+        const output = opts.output ?? basenameStem(opts.input);
+        const ir_path = withLlExt(self.arena, output);
+        let irf: std.io.File = std.io.File{fd: -1};
+        match std.io.open(ir_path, .Write) {
+          .Ok(f2) => { irf = f2; },
+          .Err(e2) => {
+            std.io.printerrln("zup: error: cannot write '{}'", ir_path);
+            std.exit(1);
+          },
+        };
+        match codegen.emit(&ca, c_entry, irf) {
+          .Err(m2) => {
+            std.io.printerrln("zup: error: {}", m2);
+            std.exit(1);
+          },
+          _ => {},
+        };
+        irf.close();
+
+        let static_flag = "";
+        if opts.static {
+          static_flag = "-static ";
+        }
+        let cmd = utils.concat(self.arena, "clang -Qunused-arguments -Wno-override-module ",
+          static_flag, ir_path, " -o ", output);
+        let lp: i64 = 0;
+        while lp < opts.link_paths.len {
+          cmd = utils.concat(self.arena, cmd, " -L", opts.link_paths[lp]);
+          lp += 1;
+        }
+        let ll: i64 = 0;
+        while ll < opts.link_libs.len {
+          cmd = utils.concat(self.arena, cmd, " -l", opts.link_libs[ll]);
+          ll += 1;
+        }
+        if system(toCstr(self.arena, cmd)) != 0 {
+          std.io.printerrln("zup: error: failed to link '{}'", output);
+          std.exit(1);
+        }
+        if !opts.keep_ir {
+          remove(toCstr(self.arena, ir_path));
+        }
       },
     };
   }
 
   fn tokenize(self, src: source.Source) {
     const l = lexer.Lexer.init(src, self.arena);
+    let out = std.io.BufWriter.init(std.io.stdout(), self.arena.alloc(65536));
     let tok = l.nextToken();
     while tok.kind != .Eof {
-      tok.debug();
+      tok.debug(&out);
       tok = l.nextToken();
     }
-  }
-
-  fn parseOnly(self, path: str) {
-    let a = ast.Ast.init(self.arena);
-    loader.load(&a, path);
+    out.flush();
   }
 
   fn parse(self, path: str) {
     let a = ast.Ast.init(self.arena);
 
-    const entry_mod = loader.load(&a, path);
+    const entry = loader.load(&a, path);
 
-    if entry_mod != 0 && !diag.hadErrors() {
-      a.decls.at(a.modules.at(entry_mod).root).dump(&a, std.io.stdout(), 0);
+    if entry != 0 && !diag.hadErrors() {
+      let out = std.io.BufWriter.init(std.io.stdout(), self.arena.alloc(65536));
+      a.decls.at(a.modules.at(entry).root).dump(&a, &out, 0);
+      out.flush();
     }
   }
+}
+
+fn basenameStem(path: str): str {
+  if path == "-" {
+    return "out";
+  }
+  return utils.moduleStem(path);
+}
+
+fn withLlExt(arena: *std.mem.Arena, stem: str): str {
+  return utils.concat(arena, stem, ".ll");
+}
+
+extern fn system(cmd: cstr): i32;
+extern fn remove(path: cstr): i32;
+
+fn toCstr(arena: *std.mem.Arena, s: str): cstr {
+  let buf = arena.alloc(s.len + 1);
+  let i: i64 = 0;
+  while i < s.len {
+    buf[i] = s[i];
+    i += 1;
+  }
+  buf[s.len] = 0;
+  return buf.ptr;
 }

@@ -50,6 +50,7 @@ pub struct Parser {
       if d == 0 { break; }
       members.push(d);
     }
+
     return self.ast.containerDecl("", self.ast.extra.append(members));
   }
 
@@ -60,13 +61,12 @@ pub struct Parser {
   }
 
   fn check(self, kind: token.TokenKind, advance: bool = false): bool {
-    if self.current.kind != kind {
-      return false;
-    }
+    if self.current.kind != kind { return false; }
 
     if advance {
       self.advance();
     }
+
     return true;
   }
 
@@ -120,13 +120,16 @@ pub struct Parser {
   fn parseExtern(self, vis: ast.Visibility): u32 {
     const kw = self.advance();
     self.expect(.Fn, "expected 'fn' after 'extern'");
+
     const name = self.expect(.Id, "expected function name");
     const pl = self.parseParamList(true);
     const ret = self.parseReturnType();
     self.expect(.Semicolon, "expected ';' after extern declaration");
+
     if self.check(.Lbrace) {
       self.parseBlock();
     }
+
     return self.ast.fnDecl(kw.span(), vis, self.text(name), pl.params, ret, ast.Range.empty(), true, pl.variadic);
   }
 
@@ -145,25 +148,34 @@ pub struct Parser {
       selfp.ty.span = s.span();
       selfp.is_self = true;
       list.push(self.ast.params.push(selfp));
+
       if !self.check(.Rparen) {
         self.expect(.Comma, "expected ',' after self");
       }
     }
 
+    let variadic = false;
     while !self.check(.Rparen) {
       const p = self.parseParam();
       if !p.ok { break; }
-      if p.variadic {
-        diag.error(self.span(), .Message("methods cannot take variadic parameters"));
-      }
+
       list.push(self.ast.params.push(p.param));
+
+      if p.variadic {
+        variadic = true;
+        if !self.check(.Rparen) {
+          diag.error(self.span(), .Message("the variadic parameter must be last"));
+        }
+        break;
+      }
+
       if !self.check(.Comma, true) { break; }
     }
     self.expect(.Rparen, "expected ')' after parameters");
 
     const ret = self.parseReturnType();
     const body = self.parseBlock();
-    return self.ast.fnDecl(kw.span(), vis, self.text(name), self.ast.extra.append(list), ret, body, false, false);
+    return self.ast.fnDecl(kw.span(), vis, self.text(name), self.ast.extra.append(list), ret, body, false, variadic);
   }
 
   fn parseStruct(self, vis: ast.Visibility): u32 {
@@ -191,9 +203,11 @@ pub struct Parser {
       f.name = self.text(fname);
       f.ty = self.parseType();
       f.visibility = member_vis;
+
       if self.check(.Equal, true) {
         f.default_value = self.parseExpr();
       }
+
       fields.push(self.ast.fields.push(f));
       self.check(.Comma, true);
     }
@@ -233,11 +247,15 @@ pub struct Parser {
       if self.check(.Equal, true) {
         const negative = self.check(.Minus, true);
         const num = self.expect(.Number, "expected integer value for enum member");
+
         if num.kind != .Number { break; }
+
         const numtext = num.numberText(self.ast.arena);
+
         if containsDot(numtext) {
           diag.error(num.span(), .Message("enum member value must be an integer"));
         }
+
         const value = parseArraySize(numtext);
         next_value = negative ? -value : value;
       }
@@ -317,9 +335,8 @@ pub struct Parser {
       }
 
       const p = self.parseParam();
-      if !p.ok {
-        break;
-      }
+      if !p.ok { break; }
+
       list.push(self.ast.params.push(p.param));
 
       if p.variadic {
@@ -340,6 +357,7 @@ pub struct Parser {
     if self.check(.Colon, true) {
       return self.parseType();
     }
+
     let t: ast.Type;
     t.kind = .Void;
     return t;
@@ -404,6 +422,7 @@ pub struct Parser {
         const id = self.advance();
         t.kind = .Struct;
         t.name = self.text(id);
+
         while self.check(.Dot, true) {
           const member = self.expect(.Id, "expected struct name after '.'");
           t.module = t.module.len == 0 ? t.name : utils.joinPath(self.ast.arena, t.module, t.name);
@@ -425,6 +444,7 @@ pub struct Parser {
       if s == 0 { break; }
       stmts.push(s);
     }
+
     self.expect(.Rbrace, "expected '}'");
     return self.ast.extra.append(stmts);
   }
@@ -476,18 +496,21 @@ pub struct Parser {
         const e = self.parseExpr();
         if e == 0 { return 0; }
 
-        if self.check(.PlusPlus) || self.check(.MinusMinus) {
-          const increment = self.check(.PlusPlus);
-          const op = self.advance();
-          if !self.isAssignTarget(e) {
+        let pi_operand: u32 = 0;
+        let pi_increment = false;
+        match self.ast.exprs.at(e).kind {
+          .PostIncr(p) => { pi_operand = p.operand; pi_increment = p.increment; },
+          _ => {},
+        };
+        if pi_operand != 0 {
+          if !self.isAssignTarget(pi_operand) {
             self.parseError("invalid assignment target");
             return 0;
           }
-
-          self.expect(.Semicolon, increment ? "expected ';' after '++'" : "expected ';' after '--'");
-          const inc_op: ast.BinaryOp = increment ? .Add : .Sub;
-          const one = self.ast.number(op.span(), "1");
-          return self.ast.assignStmt(sp, e, one, true, false, inc_op);
+          self.expect(.Semicolon, pi_increment ? "expected ';' after '++'" : "expected ';' after '--'");
+          const inc_op: ast.BinaryOp = pi_increment ? .Add : .Sub;
+          const one = self.ast.number(self.ast.exprs.at(e).span, "1");
+          return self.ast.assignStmt(sp, pi_operand, one, true, false, inc_op);
         }
 
         let compound = true;
@@ -793,9 +816,15 @@ pub struct Parser {
         self.check(.Bang, true) => {
           e = self.ast.unwrap(e);
         },
+        self.check(.PlusPlus) || self.check(.MinusMinus) => {
+          const increment = self.check(.PlusPlus);
+          self.advance();
+          return self.ast.postIncr(e, increment);
+        },
         _ => { return e; }
       }
     }
+
     return 0;
   }
 
@@ -818,6 +847,7 @@ pub struct Parser {
       },
       _ => { return ""; },
     };
+
     return "";
   }
 
@@ -846,6 +876,7 @@ pub struct Parser {
         if !self.check(.Comma, true) { break; }
       }
     }
+
     self.expect(.Rbrace, "expected '}' after struct fields");
     return self.ast.structLiteral(sp, type_name, module, self.ast.extra.append(inits));
   }
@@ -887,6 +918,7 @@ pub struct Parser {
             _ => {},
           };
         }
+
         if !bound && self.check(.DotDotDot, true) {
           arm.pattern_end = self.parseExpr();
         }
@@ -897,6 +929,7 @@ pub struct Parser {
           self.parseError("'_' cannot be combined with other patterns");
           return 0;
         }
+
         self.advance();
         arm.or_next = true;
         arms.push(self.ast.match_arms.push(arm));
@@ -910,6 +943,7 @@ pub struct Parser {
       } else {
         arm.value = self.parseExpr();
       }
+
       arms.push(self.ast.match_arms.push(arm));
 
       if !self.check(.Comma, true) && !arm.is_block {
@@ -930,6 +964,7 @@ pub struct Parser {
         if arg == 0 {
           break;
         }
+
         args.push(arg);
         if !self.check(.Comma, true) {
           break;
@@ -1032,7 +1067,8 @@ pub struct Parser {
         self.parseError("expected an expression");
         return 0;
       },
-    };
+    }
+
     return 0;
   }
 
@@ -1073,6 +1109,7 @@ pub struct Parser {
         _ => {},
       }
     }
+
     return self.ast.globalDecl(b.span, vis, b.name, b.ty, b.mutable, b.init);
   }
 }
@@ -1107,5 +1144,4 @@ fn containsDot(text: str): bool {
   }
   return false;
 }
-
 

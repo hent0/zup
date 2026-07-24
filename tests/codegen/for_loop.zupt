@@ -31,6 +31,8 @@ body.1:
   %4 = load i32, ptr %i
   %5 = add i32 %3, %4
   store i32 %5, ptr %total
+  br label %step.1
+step.1:
   %6 = load i32, ptr %i
   %7 = add i32 %6, 1
   store i32 %7, ptr %i

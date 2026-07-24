@@ -1,0 +1,29 @@
+--TEST--
+calling a method on an enum-typed parameter passes the receiver by pointer
+--FILE--
+const std = import("std");
+
+enum Color {
+  Red,
+  Green,
+
+  fn name(self): str {
+    return match self {
+      .Red => "red",
+      _ => "green",
+    };
+  }
+}
+
+fn describe(c: Color): str {
+  return c.name();
+}
+
+pub fn main(): i32 {
+  std.io.println("{}", describe(.Red));
+  return 0;
+}
+--EXPECT--
+red
+--EXIT--
+0

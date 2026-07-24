@@ -1,0 +1,24 @@
+--TEST--
+variadic functions need no local Arg mirror when io is reachable — the param resolves to the pub io.Arg
+--FILE--
+const std = import("std");
+
+fn tally(base: i64, args: ...): i64 {
+  let sum = base;
+  let i: i64 = 0;
+  while i < args.len {
+    match args[i] {
+      .Int(v) => { sum += v; },
+      .Str(s) => { sum += s.len; },
+      _ => {},
+    };
+    i += 1;
+  }
+  return sum;
+}
+
+pub fn main(): i32 {
+  return tally(100, 1, 2, "abc") as i32;
+}
+--EXIT--
+106

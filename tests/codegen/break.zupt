@@ -37,6 +37,8 @@ endif.2:
   %5 = load i32, ptr %i
   %6 = add i32 %5, 1
   store i32 %6, ptr %i
+  br label %step.1
+step.1:
   br label %cond.1
 endwhile.1:
   %7 = load i32, ptr %i
